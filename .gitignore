@@ -1,0 +1,8 @@
+/target/
+/dist/
+**/*.rs.bk
+.DS_Store
+
+scriptcraft-app/tests/snapshots/*.new.png
+scriptcraft-app/tests/snapshots/*.diff.png
+scriptcraft-app/tests/snapshots/*.old.png

@@ -1,0 +1,3 @@
+[workspace]
+members = ["scriptcraft-core", "scriptcraft-app"]
+resolver = "2"
