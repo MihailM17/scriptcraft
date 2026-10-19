@@ -16,6 +16,7 @@ fn harness(tab: SideTab, scroll_block: Option<usize>) -> Harness<'static, Script
             let mut a = ScriptCraftApp::default();
             assert!(a.open_fixture(), "A95 fixture not found");
             a.pin_stats_generated("18.10.2026 16:03:47");
+            a.pin_backups_dir("/Users/test/Documents/ScriptCraft/backups");
             a.goto_tab(tab);
             if let Some(bi) = scroll_block {
                 a.scroll_to_block(bi);

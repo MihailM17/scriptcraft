@@ -19,6 +19,8 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Install Linux deps
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
       - name: Format
         run: cargo fmt --check
       - name: Clippy
@@ -41,6 +43,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Install Linux deps
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
       - name: Core tests
         run: cargo test -p scriptcraft-core
       - name: Compile app and all test targets

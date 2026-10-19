@@ -678,6 +678,25 @@ Newest entries at the bottom. Each entry: date — what changed / what was found
   FDX import/export, fit page/width, continuous anchored zoom, custom
   macOS titlebar, and the glyph-grid fix.
 
+- **2026-10-19** — The first CI run on GitHub exposed three cross-platform
+  issues; all fixed:
+  - **Windows save** failed every save/recovery test: `save_file` used
+    `std::fs::rename` to swap the temp file over the project, which POSIX
+    replaces but Windows refuses ("Access is denied"). New `replace_file`
+    helper uses `MoveFileExW(MOVEFILE_REPLACE_EXISTING |
+    MOVEFILE_WRITE_THROUGH)` on Windows (POSIX keeps `fs::rename`); the
+    temp file is now fsynced through a write handle (`FlushFileBuffers`
+    rejects read-only handles).
+  - **Snapshot 07** embedded the machine's `$HOME` backups path. The
+    harness now pins `/Users/test/Documents/ScriptCraft/backups` through
+    the new `pin_backups_dir` hook; only 07 was regenerated.
+  - **Linux** CI lacked the GTK3 headers `muda` needs. The `fmt + clippy`
+    and Linux jobs now install `libgtk-3-dev libxkbcommon-dev
+    libxcb-{render,shape,xfixes}0-dev`; the workflow triggers on `main`.
+  - Verification: `cargo test --workspace` green locally; the Windows
+    helper type-checks for `x86_64-pc-windows-msvc` (a full cross-build
+    would need a Windows C toolchain for bundled SQLite).
+
 ---
 
 ## 7. Update protocol (for assistants)

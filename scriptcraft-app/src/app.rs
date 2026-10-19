@@ -673,6 +673,11 @@ impl ScriptCraftApp {
         self.recent = list;
     }
 
+    /// Test hook: fixed backups folder, so UI snapshots don't depend on `$HOME`.
+    pub fn pin_backups_dir(&mut self, dir: &str) {
+        self.settings.backups_dir = dir.to_string();
+    }
+
     /// Test hook: pretend a previous session left these recovery copies.
     #[doc(hidden)]
     pub fn pin_recovery_for_test(&mut self, files: Vec<(std::path::PathBuf, String)>) {

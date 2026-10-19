@@ -101,6 +101,44 @@ pub fn project_to_scenario_xml(p: &Project) -> String {
     s
 }
 
+/// Rename `from` over `to`, replacing `to` if it exists.
+///
+/// `std::fs::rename` replaces the destination on POSIX, but fails with
+/// "access denied" on Windows when the destination already exists. Windows
+/// needs `MoveFileExW` with `MOVEFILE_REPLACE_EXISTING` for the same atomic
+/// swap (the project promises a save can never leave a half-written file).
+#[cfg(windows)]
+fn replace_file(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+    let wide = |p: &std::path::Path| -> Vec<u16> {
+        p.as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect()
+    };
+    let (from, to) = (wide(from), wide(to));
+    let ok = unsafe {
+        MoveFileExW(
+            from.as_ptr(),
+            to.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if ok == 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(not(windows))]
+fn replace_file(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
+    std::fs::rename(from, to)
+}
+
 /// Save a project into an EXISTING .kitsp file: updates scenario text and
 /// syncs corkboard card titles (plus cards for new scenes). Makes a `.bak`
 /// copy first, then writes a temp file next to the target and renames it
@@ -133,8 +171,11 @@ pub fn save_file(path: impl AsRef<Path>, p: &Project) -> Result<(), KitspError> 
             }
         }
         drop(conn);
-        std::fs::File::open(&tmp)?.sync_all()?;
-        std::fs::rename(&tmp, path)?;
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&tmp)?
+            .sync_all()?;
+        replace_file(&tmp, path)?;
         // Best-effort: make the rename itself durable.
         if let Some(dir) = path.parent() {
             if let Ok(d) = std::fs::File::open(dir) {
