@@ -2,6 +2,8 @@
 name = "scriptcraft-app"
 version = "0.1.0"
 edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/MihailM17/scriptcraft"
 
 [lib]
 name = "scriptcraft_app"
@@ -18,7 +20,8 @@ egui = "0.32"
 rfd = "0.15"
 serde = { version = "1", features = ["derive"] }
 uuid = { version = "1", features = ["v4"] }
-scriptcraft-core = { path = "../scriptcraft-core" }
+scriptcraft-core = { path = "../scriptcraft-core", version = "0.1.0" }
+scriptcraft-layout = { path = "../scriptcraft-layout", version = "0.1.0" }
 muda = "0.21.2"
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
 

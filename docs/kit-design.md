@@ -27,20 +27,23 @@ Mapped onto `egui::Visuals` in `kit_visuals()`.
 ## Fonts (bundled, `scriptcraft-app/assets/fonts/`)
 
 KIT loads Roboto + Courier New + Courier Prime at startup
-(`Application.cpp`). We mirror it with OFL faces that cover our scripts:
+(`Application.cpp`). We mirror the look with OFL faces only — Courier New is
+proprietary and is not redistributable:
 
 | Use | Face | Notes |
 |---|---|---|
 | UI (Roboto-spirit) | PT Sans Regular/Bold | humanist, Latin + Cyrillic (Roboto itself ships variable-only now) |
-| Script body | Courier New Regular (`cour.ttf`, KIT's own bundle) | Latin + Cyrillic verified |
-| Script bold | Courier New Bold (`courb.ttf`) | headings, cues, transitions |
-| Script italic | Courier New Italic (`couri.ttf`) | lyrics labels |
+| Script body | Courier Prime Regular | OFL; 0.6em advance, Latin + Cyrillic |
+| Script bold | Courier Prime Bold | headings, cues, transitions |
+| Script italic | Courier Prime Italic | lyrics labels |
 | Script safety net | IBM Plex Mono Regular/Bold | same 0.6em advance, alignment preserved |
+
+License texts: `scriptcraft-app/assets/fonts/licenses/`.
 
 ## Screenplay metrics (KIT `russian.kitss` template)
 
 Page A4, margins left 37.5 / top 25 / right 25 / bottom 12.5 mm
-→ text width 147.5mm. Courier New 12, uppercase headings/characters/transitions.
+→ text width 147.5mm. Courier Prime 12, uppercase headings/characters/transitions.
 
 | Block | Left margin | Right | Top space |
 |---|---|---|---|
@@ -56,14 +59,14 @@ Implemented as width fractions (`INDENT_*` in `main.rs`) so zoom stays exact.
 ## Measured row height (no guessing)
 
 epaint computes row height as `ascent − descent + line_gap` (ab_glyph
-hhea metrics). For KIT's `cour.ttf`: upm 2048, asc 1705, desc −615,
-gap 0 → factor 2320/2048 = 1.1328em (`ROW_FACTOR`). At 14pt a row is
-15.86px. Page geometry derives from it, so rendered pages hold exactly
+hhea metrics). For bundled Courier Prime: upm 2048, asc 1600, desc −700,
+gap 0 → factor 2300/2048 = 1.1230em (`ROW_FACTOR`). At 14pt a row is
+15.72px. Page geometry derives from it, so rendered pages hold exactly
 what the paginator promises.
 
 ## Fixed A4 pages (`editing::paginate`, 54 lines/page)
 
-Derived, not guessed: floor(259.5/147.5 × 58×0.6×2048/2320) = 54 lines.
+Derived, not guessed: floor(259.5/147.5 × 58×0.6×2048/2300) = 54 lines.
 Pixel geometry is built backwards from 58 chars/line, so render wrap
 points equal pagination wrap points at every zoom: zoom scales pages,
 never reflows them (Word-style). Headings and character cues are never

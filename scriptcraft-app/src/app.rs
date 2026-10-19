@@ -1,11 +1,7 @@
 use eframe::egui;
 use scriptcraft_core::{
-    editing::{
-        candidates, chunk_text, col_chars, complete_at, complete_line_at, cue_name_for, enter_next,
-        format_duration, paginate, replace_chunk, tab_next, tab_prev, wrap_rows_chars, Page,
-        A4_LINES_PER_PAGE, FRAC_CHARACTER_OFF, FRAC_DIALOG_OFF, FRAC_DIALOG_W, FRAC_LYRICS_OFF,
-        FRAC_LYRICS_W, FRAC_PAREN_OFF, FRAC_PAREN_W,
-    },
+    edit,
+    editing::{auto_upper, format_duration, RUSSIAN},
     format::{validate, Issue},
     kitsp::{self, Card, Metadata},
     model::{ElementType, Project, Scene, ScriptBlock},
@@ -23,13 +19,16 @@ const REP_RED: egui::Color32 = egui::Color32::from_rgb(0xD8, 0x4D, 0x4B);
 const REP_SAND: egui::Color32 = egui::Color32::from_rgb(0xFD, 0xC0, 0x69);
 const REP_ORANGE: egui::Color32 = egui::Color32::from_rgb(0xFE, 0x82, 0x00);
 const REP_BLUE: egui::Color32 = egui::Color32::from_rgb(0x69, 0xC6, 0xFF);
-const MONO: egui::FontFamily = egui::FontFamily::Monospace;
+pub(crate) const MONO: egui::FontFamily = egui::FontFamily::Monospace;
 
-fn bold_mono() -> egui::FontFamily {
+/// `(block, paragraph, char)` triple used by the Editor 2.0 test hooks.
+type PosTuple = (usize, usize, usize);
+
+pub(crate) fn bold_mono() -> egui::FontFamily {
     egui::FontFamily::Name("BoldMono".into())
 }
 
-fn italic_mono() -> egui::FontFamily {
+pub(crate) fn italic_mono() -> egui::FontFamily {
     egui::FontFamily::Name("ItalicMono".into())
 }
 
@@ -47,20 +46,24 @@ fn image_hash(bytes: &[u8]) -> u64 {
     h.finish()
 }
 
-/// Script body: Courier New 12pt = KIT's template size. At zoom 1.0 the
-/// page is exactly A4 at 72dpi (147.5mm text = 58 × 0.6 × 12pt).
-const BODY_PT: f32 = 12.0;
-/// Measured Courier New row factor: (1705 + 615) / 2048 em.
-const ROW_FACTOR: f32 = 2320.0 / 2048.0;
-
 pub fn run() -> eframe::Result<()> {
     let app_icon =
         eframe::icon_data::from_png_bytes(include_bytes!("../assets/ScriptCraft-1024.png"))
             .unwrap_or_default();
+    let viewport_builder = egui::ViewportBuilder::default()
+        .with_inner_size([1360.0, 880.0])
+        .with_icon(app_icon);
+    // macOS: draw the toolbar behind a transparent native titlebar so the
+    // app's dark surface continues to the window edge while the traffic
+    // lights stay native (macOS owns their size and color).
+    #[cfg(target_os = "macos")]
+    let viewport_builder = viewport_builder
+        .with_fullsize_content_view(true)
+        .with_titlebar_shown(false)
+        .with_title_shown(false)
+        .with_titlebar_buttons_shown(true);
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1360.0, 880.0])
-            .with_icon(app_icon),
+        viewport: viewport_builder,
         ..Default::default()
     };
     eframe::run_native(
@@ -73,6 +76,7 @@ pub fn run() -> eframe::Result<()> {
             app.load_persistent();
             #[cfg(target_os = "macos")]
             {
+                app.custom_titlebar = true;
                 if let Ok(menu) = crate::menu::NativeMenu::install(
                     app.settings.two_panel,
                     app.show_left_panel,
@@ -99,19 +103,21 @@ pub fn install_fonts(ctx: &egui::Context) {
         "ui_bold".to_owned(),
         egui::FontData::from_static(include_bytes!("../assets/fonts/PT_Sans-Web-Bold.ttf")).into(),
     );
-    // Script face: KIT's own Courier New (Latin + Cyrillic), IBM Plex Mono
+    // Script face: Courier Prime (OFL, screenplay metrics), IBM Plex Mono
     // behind it as a safety net (same 0.6em advance, alignment preserved).
     fonts.font_data.insert(
-        "courier_new".to_owned(),
-        egui::FontData::from_static(include_bytes!("../assets/fonts/cour.ttf")).into(),
+        "courier_prime".to_owned(),
+        egui::FontData::from_static(include_bytes!("../assets/fonts/CourierPrime-Regular.ttf"))
+            .into(),
     );
     fonts.font_data.insert(
-        "courier_bold".to_owned(),
-        egui::FontData::from_static(include_bytes!("../assets/fonts/courb.ttf")).into(),
+        "courier_prime_bold".to_owned(),
+        egui::FontData::from_static(include_bytes!("../assets/fonts/CourierPrime-Bold.ttf")).into(),
     );
     fonts.font_data.insert(
-        "courier_italic".to_owned(),
-        egui::FontData::from_static(include_bytes!("../assets/fonts/couri.ttf")).into(),
+        "courier_prime_italic".to_owned(),
+        egui::FontData::from_static(include_bytes!("../assets/fonts/CourierPrime-Italic.ttf"))
+            .into(),
     );
     fonts.font_data.insert(
         "plex_mono".to_owned(),
@@ -126,7 +132,7 @@ pub fn install_fonts(ctx: &egui::Context) {
         prop.insert(0, "ui_regular".to_owned());
     }
     if let Some(mono) = fonts.families.get_mut(&egui::FontFamily::Monospace) {
-        *mono = vec!["courier_new".to_owned(), "plex_mono".to_owned()]
+        *mono = vec!["courier_prime".to_owned(), "plex_mono".to_owned()]
             .into_iter()
             .chain(mono.iter().cloned())
             .collect();
@@ -134,14 +140,18 @@ pub fn install_fonts(ctx: &egui::Context) {
     fonts.families.insert(
         bold_mono(),
         vec![
-            "courier_bold".to_owned(),
+            "courier_prime_bold".to_owned(),
             "plex_mono_bold".to_owned(),
             "plex_mono".to_owned(),
         ],
     );
     fonts.families.insert(
         italic_mono(),
-        vec!["courier_italic".to_owned(), "courier_new".to_owned()],
+        vec![
+            "courier_prime_italic".to_owned(),
+            "courier_prime".to_owned(),
+            "plex_mono".to_owned(),
+        ],
     );
     ctx.set_fonts(fonts);
 }
@@ -340,7 +350,6 @@ enum ExportTab {
 /// Export dialog file formats, mirroring KIT's format radio group.
 #[derive(Default, PartialEq, Eq, Clone, Copy)]
 enum ExportFormat {
-    Docx,
     #[default]
     Pdf,
     Fdx,
@@ -350,7 +359,6 @@ enum ExportFormat {
 impl ExportFormat {
     fn label(self) -> &'static str {
         match self {
-            Self::Docx => "DOCX",
             Self::Pdf => "PDF",
             Self::Fdx => "FDX",
             Self::Fountain => "Fountain",
@@ -414,52 +422,6 @@ pub enum StatsPane {
     Activity,
 }
 
-/// Open autocomplete dropdown, kept outside the editor so it survives the
-/// frame where clicking a suggestion moves focus from the TextEdit to the
-/// popup (otherwise the click would land on a popup that no longer exists).
-struct AutoState {
-    bi: usize,
-    start: usize,
-    caret: usize,
-    sugg: Vec<String>,
-}
-
-/// Global undo/redo over full block snapshots (Ctrl+Z / Ctrl+Shift+Z).
-#[derive(Default)]
-struct History {
-    past: Vec<Vec<ScriptBlock>>,
-    future: Vec<Vec<ScriptBlock>>,
-}
-impl History {
-    const CAP: usize = 100;
-
-    fn commit(&mut self, blocks: &[ScriptBlock]) {
-        self.past.push(blocks.to_vec());
-        if self.past.len() > Self::CAP {
-            self.past.remove(0);
-        }
-        self.future.clear();
-    }
-
-    fn undo(&mut self, blocks: &mut Vec<ScriptBlock>) -> bool {
-        let Some(prev) = self.past.pop() else {
-            return false;
-        };
-        self.future.push(std::mem::take(blocks));
-        *blocks = prev;
-        true
-    }
-
-    fn redo(&mut self, blocks: &mut Vec<ScriptBlock>) -> bool {
-        let Some(next) = self.future.pop() else {
-            return false;
-        };
-        self.past.push(std::mem::take(blocks));
-        *blocks = next;
-        true
-    }
-}
-
 /// Editable buffer for one research entry (synced on selection).
 #[derive(Debug, Clone)]
 struct ResearchEdit {
@@ -470,6 +432,16 @@ struct ResearchEdit {
     description: String,
 }
 
+/// How the script zoom is chosen: free pinch/steps, or locked to the
+/// viewport (Fit Page / Fit Width) and recomputed as the window resizes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum FitMode {
+    #[default]
+    Off,
+    Page,
+    Width,
+}
+
 pub struct ScriptCraftApp {
     project: Option<Project>,
     title: String,
@@ -478,8 +450,13 @@ pub struct ScriptCraftApp {
     dirty: bool,
     issues: Vec<Issue>,
     stats: Stats,
-    /// Cached pagination (recomputed on every edit, not per frame).
-    pages: Vec<Page>,
+    /// Cached document layout (paginate + place) for the open project,
+    /// recomputed on every edit, never per frame.
+    doc: Option<scriptcraft_layout::place::DocLayout>,
+    /// Incremental-relayout hint set by the edit that dirtied the project:
+    /// `(lowest touched block, last touched block if the edit was in-place
+    /// text only)`. Consumed by `refresh_derived`.
+    doc_hint: Option<(usize, Option<usize>)>,
     cards: Vec<Card>,
     meta: Metadata,
     research: Vec<kitsp::ResearchEntry>,
@@ -500,19 +477,8 @@ pub struct ScriptCraftApp {
     /// Title-page fields edited in the Research view, pending save.
     meta_dirty: bool,
     selected_scene: usize,
+    /// The block the Editor 2.0 caret is in (mirrors `editor2.selection`).
     selected_block: Option<usize>,
-    pending_scroll: Option<(usize, usize)>,
-    pending_focus: Option<(usize, usize)>,
-    /// Caret char offset applied when `pending_focus` lands on a chunk.
-    pending_caret: Option<(usize, usize, usize)>,
-    /// Last rendered chunk rect per page ((page, chunk_rect, page_rect)),
-    /// for the on-page anchoring regression test.
-    #[doc(hidden)]
-    pub debug_row_bounds: Vec<(usize, egui::Rect, egui::Rect)>,
-    /// Chunk the cursor is in ((bi, start_para)); Tab/type changes refocus it.
-    focused_chunk: Option<(usize, usize)>,
-    /// Open autocomplete dropdown (see `AutoState`).
-    autocomplete: Option<AutoState>,
     side_tab: SideTab,
     /// Start module: which project source tab is active.
     start_tab: StartTab,
@@ -525,12 +491,25 @@ pub struct ScriptCraftApp {
     /// Disk persistence armed (real app only; tests never touch the disk).
     persist: bool,
     last_autosave: std::time::Instant,
+    /// Crash-recovery copies found in the recovery dir at launch
+    /// (file path, display label = original file name or "untitled").
+    recovery: Vec<(std::path::PathBuf, String)>,
+    /// Last recovery write; `None` means the next dirty frame writes one.
+    last_recovery: Option<std::time::Instant>,
     show_format_panel: bool,
     show_left_panel: bool,
     show_about: bool,
     show_help: bool,
     zoom: f32,
+    /// Viewport-locked zoom mode (View ▸ Fit Page / Fit Width).
+    fit: FitMode,
+    /// Zoom actually painted last frame (toolbar % while a fit mode is on).
+    last_render_zoom: f32,
+    /// Script viewport the fit modes computed from, in points (tests).
+    last_viewport: egui::Vec2,
     typewriter: bool,
+    /// Caret/selection and command-based undo history of the script editor.
+    editor2: crate::script_view::EditState,
     show_find: bool,
     find_query: String,
     find_replace: String,
@@ -543,19 +522,18 @@ pub struct ScriptCraftApp {
     export_path: String,
     /// "Additional (Numbering, Title Page etc.)" reveals the options panel.
     export_additional: bool,
-    export_options: scriptcraft_core::pdf::ExportOptions,
+    export_options: scriptcraft_layout::pdf::ExportOptions,
     export_check_breaks: bool,
     export_watermark_on: bool,
     export_watermark: String,
     drag_scene: Option<usize>,
     drop_before: Option<(usize, bool)>,
-    history: History,
-    /// Block whose pre-edit snapshot is already on the history stack
-    /// (one snapshot per focus session, so Ctrl+Z undoes a typing burst).
-    text_snapshot_for: Option<usize>,
     last_window_title: String,
     /// Native macOS menu bar (production only; tests keep it None).
     menu: Option<crate::menu::NativeMenu>,
+    /// The toolbar is painted behind a transparent native titlebar (macOS
+    /// production window only; tests keep the native titlebar layout).
+    custom_titlebar: bool,
 }
 
 impl Default for ScriptCraftApp {
@@ -568,7 +546,8 @@ impl Default for ScriptCraftApp {
             dirty: false,
             issues: Vec::new(),
             stats: Stats::default(),
-            pages: Vec::new(),
+            doc: None,
+            doc_hint: None,
             cards: Vec::new(),
             meta: Metadata::default(),
             research: Vec::new(),
@@ -585,12 +564,6 @@ impl Default for ScriptCraftApp {
             meta_dirty: false,
             selected_scene: 0,
             selected_block: None,
-            pending_scroll: None,
-            pending_focus: None,
-            pending_caret: None,
-            debug_row_bounds: Vec::new(),
-            focused_chunk: None,
-            autocomplete: None,
             side_tab: SideTab::default(),
             start_tab: StartTab::default(),
             recent: Vec::new(),
@@ -599,12 +572,18 @@ impl Default for ScriptCraftApp {
             settings: AppSettings::default(),
             persist: false,
             last_autosave: std::time::Instant::now(),
+            recovery: Vec::new(),
+            last_recovery: None,
             show_format_panel: true,
             show_left_panel: true,
             show_about: false,
             show_help: false,
             zoom: 1.0,
+            fit: FitMode::Off,
+            last_render_zoom: 1.0,
+            last_viewport: egui::Vec2::ZERO,
             typewriter: false,
+            editor2: Default::default(),
             show_find: false,
             find_query: String::new(),
             find_replace: String::new(),
@@ -614,29 +593,17 @@ impl Default for ScriptCraftApp {
             export_format: ExportFormat::default(),
             export_path: String::new(),
             export_additional: false,
-            export_options: scriptcraft_core::pdf::ExportOptions::default(),
+            export_options: scriptcraft_layout::pdf::ExportOptions::default(),
             export_check_breaks: true,
             export_watermark_on: false,
             export_watermark: String::new(),
             drag_scene: None,
             drop_before: None,
-            history: History::default(),
-            text_snapshot_for: None,
             last_window_title: String::new(),
             menu: None,
+            custom_titlebar: false,
         }
     }
-}
-
-/// Uppercase-on-type element kinds (Russian template `uppercase="true"`).
-fn auto_upper(t: ElementType) -> bool {
-    matches!(
-        t,
-        ElementType::SceneHeading
-            | ElementType::SceneCharacters
-            | ElementType::Character
-            | ElementType::Transition
-    )
 }
 
 impl ScriptCraftApp {
@@ -665,6 +632,7 @@ impl ScriptCraftApp {
         self.settings = load_settings();
         self.recent = load_recent();
         self.persist = true;
+        self.recovery = Self::scan_recovery_files();
     }
 
     /// Remember an opened project (most recent first, deduplicated).
@@ -705,6 +673,24 @@ impl ScriptCraftApp {
         self.recent = list;
     }
 
+    /// Test hook: pretend a previous session left these recovery copies.
+    #[doc(hidden)]
+    pub fn pin_recovery_for_test(&mut self, files: Vec<(std::path::PathBuf, String)>) {
+        self.recovery = files;
+    }
+
+    /// Test hook: pending unsaved changes?
+    #[doc(hidden)]
+    pub fn is_dirty(&self) -> bool {
+        self.dirty
+    }
+
+    /// Test hook: current project path ("" = never saved).
+    #[doc(hidden)]
+    pub fn project_path(&self) -> &str {
+        &self.path
+    }
+
     /// Test hook: select a research pane.
     pub fn set_research_pane(&mut self, pane: ResearchPane) {
         self.research_pane = pane;
@@ -716,15 +702,24 @@ impl ScriptCraftApp {
     }
 
     pub fn set_zoom(&mut self, zoom: f32) {
+        self.fit = FitMode::Off;
         self.zoom = zoom.clamp(0.25, 4.0);
     }
 
-    /// Zoom snapped to the font's integer pixel grid, so the page geometry
-    /// and the glyphs always step together while pinching (never smooth
-    /// page vs. jumping letters).
-    fn render_zoom(&self, ppp: f32) -> f32 {
-        let k = (ppp * BODY_PT * self.zoom).round().max(1.0);
-        (k / (ppp * BODY_PT)).clamp(0.25, 4.0)
+    /// Lock the zoom so a whole page fits the script viewport (Fit Page).
+    pub fn fit_page(&mut self) {
+        self.fit = FitMode::Page;
+    }
+
+    /// Lock the zoom so the page width spans the script viewport.
+    pub fn fit_width(&mut self) {
+        self.fit = FitMode::Width;
+    }
+
+    /// Last painted zoom and the viewport it was computed from (tests).
+    #[doc(hidden)]
+    pub fn last_viewport_zoom(&self) -> (f32, egui::Vec2) {
+        (self.last_render_zoom, self.last_viewport)
     }
 
     /// Scroll the editor to a block (snapshot tests).
@@ -738,8 +733,15 @@ impl ScriptCraftApp {
     /// Focus a block with the caret at `offset` (interaction tests).
     #[doc(hidden)]
     pub fn focus_block_at(&mut self, bi: usize, offset: usize) {
+        let n = self.project.as_ref().map(|p| p.blocks.len()).unwrap_or(0);
+        if n == 0 {
+            return;
+        }
+        let bi = bi.min(n - 1);
+        let ch = offset.min(self.block_text(bi).map(|t| t.chars().count()).unwrap_or(0));
         self.scroll_to_block(bi);
-        self.pending_caret = Some((bi, 0, offset));
+        self.editor2_set_caret((bi, 0, ch));
+        self.editor2.scroll_caret = true;
     }
 
     /// First Character block whose text is a known cue (interaction tests).
@@ -772,11 +774,101 @@ impl ScriptCraftApp {
             .map(|b| b.text.clone())
     }
 
+    /// Page count of the cached document layout (interaction tests).
+    #[doc(hidden)]
+    pub fn page_count(&self) -> usize {
+        self.doc.as_ref().map(|d| d.pages.len()).unwrap_or(0)
+    }
+
+    /// Editor 2.0 selection as `(anchor, focus)` `(bi, para, ch)` triples
+    /// (interaction tests).
+    #[doc(hidden)]
+    pub fn editor2_selection(&self) -> Option<(PosTuple, PosTuple)> {
+        let s = self.editor2.selection?;
+        Some((
+            (s.anchor.bi, s.anchor.para, s.anchor.ch),
+            (s.focus.bi, s.focus.para, s.focus.ch),
+        ))
+    }
+
+    /// Place the Editor 2.0 caret (interaction tests).
+    #[doc(hidden)]
+    pub fn editor2_set_caret(&mut self, at: (usize, usize, usize)) {
+        let at = edit::Pos {
+            bi: at.0,
+            para: at.1,
+            ch: at.2,
+        };
+        self.editor2.selection = Some(crate::script_view::Selection {
+            anchor: at,
+            focus: at,
+        });
+        self.editor2.autocomplete = None;
+    }
+
+    /// Place a whole Editor 2.0 selection (interaction tests).
+    #[doc(hidden)]
+    pub fn editor2_set_selection(
+        &mut self,
+        anchor: (usize, usize, usize),
+        focus: (usize, usize, usize),
+    ) {
+        self.editor2.selection = Some(crate::script_view::Selection {
+            anchor: edit::Pos {
+                bi: anchor.0,
+                para: anchor.1,
+                ch: anchor.2,
+            },
+            focus: edit::Pos {
+                bi: focus.0,
+                para: focus.1,
+                ch: focus.2,
+            },
+        });
+    }
+
+    /// Page rectangles from the last Editor 2.0 frame (interaction tests).
+    #[doc(hidden)]
+    pub fn editor2_page_rects(&self) -> Vec<egui::Rect> {
+        self.editor2.debug_pages.clone()
+    }
+
+    /// Element type of a block (interaction tests).
+    #[doc(hidden)]
+    pub fn block_element_type(&self, bi: usize) -> Option<ElementType> {
+        Some(self.project.as_ref()?.blocks.get(bi)?.element_type)
+    }
+
+    /// Number of blocks in the open project (interaction tests).
+    #[doc(hidden)]
+    pub fn block_count(&self) -> usize {
+        self.project.as_ref().map(|p| p.blocks.len()).unwrap_or(0)
+    }
+
+    /// Page count the document layout produces for the open project
+    /// (interaction tests).
+    #[doc(hidden)]
+    pub fn editor2_page_count(&self) -> usize {
+        self.page_count()
+    }
+
+    /// Caret screen rect from the last Editor 2.0 frame (interaction tests).
+    #[doc(hidden)]
+    pub fn editor2_caret_rect(&self) -> Option<egui::Rect> {
+        self.editor2.caret_rect
+    }
+
+    /// Autocomplete suggestion rows from the last painted dropdown;
+    /// `(text, screen rect)` (interaction tests).
+    #[doc(hidden)]
+    pub fn editor2_autocomplete_rows(&self) -> Vec<(String, egui::Rect)> {
+        self.editor2.debug_autocomplete.clone()
+    }
+
     fn refresh_derived(&mut self) {
         if let Some(p) = &self.project {
             self.issues = validate(p);
             self.stats = p.stats();
-            self.pages = paginate(&p.blocks, A4_LINES_PER_PAGE);
             self.title = p.title.clone();
         }
         // "Lock new scenes numbers": scenes added while numbering is locked
@@ -795,6 +887,78 @@ impl ScriptCraftApp {
                 self.meta.locked_scene_numbers = format!("*{}", labels.join(","));
             }
         }
+        // Rebuild the cached document layout (single source of truth for
+        // editor pagination, PDF and the navigator). When the edit that
+        // dirtied the project left an incremental hint, resume from the
+        // affected page; otherwise (structural ops, undo/redo, open) fall
+        // back to a full relayout.
+        let hint = self.doc_hint.take();
+        let old = self.doc.take();
+        self.doc = match &self.project {
+            Some(p) => {
+                let labels: Vec<String> =
+                    (0..p.scenes().len()).map(|i| self.scene_label(i)).collect();
+                let incremental = match (hint, old.as_ref()) {
+                    (Some((first, upto)), Some(prev)) => scriptcraft_layout::place::relayout_from(
+                        &p.blocks,
+                        &RUSSIAN,
+                        &scriptcraft_layout::place::RUSSIAN_GEOMETRY,
+                        &labels,
+                        prev,
+                        first,
+                        upto,
+                    ),
+                    _ => None,
+                };
+                incremental.or_else(|| {
+                    Some(crate::script_view::document_layout(
+                        &p.blocks, &RUSSIAN, &labels,
+                    ))
+                })
+            }
+            None => None,
+        };
+    }
+
+    /// Incremental-relayout hint for a command batch: the lowest touched
+    /// block, plus the touched block when every command is an in-place text
+    /// edit of that same block (the only case where pagination can be shown
+    /// to re-converge and the tail can be reused).
+    fn relayout_hint(cmds: &[edit::EditCommand]) -> Option<(usize, Option<usize>)> {
+        fn lowest(c: &edit::EditCommand) -> usize {
+            match c {
+                edit::EditCommand::InsertText { at, .. } => at.bi,
+                edit::EditCommand::DeleteRange { start, .. } => start.bi,
+                edit::EditCommand::SetText { bi, .. } | edit::EditCommand::SetType { bi, .. } => {
+                    *bi
+                }
+                edit::EditCommand::SplitBlock { at, .. } => at.bi,
+                edit::EditCommand::MergeBlocks { bi, .. } => *bi,
+                // The block inserted at `at` lands after block `at - 1`, and
+                // the orphan guard of `at - 1` starts reading it.
+                edit::EditCommand::InsertBlock { at, .. } => at.saturating_sub(1),
+                edit::EditCommand::DeleteBlock { bi } => *bi,
+                edit::EditCommand::ReplaceAll { .. } => 0,
+            }
+        }
+        fn text_bi(c: &edit::EditCommand) -> Option<usize> {
+            match c {
+                edit::EditCommand::InsertText { at, .. } => Some(at.bi),
+                edit::EditCommand::DeleteRange { start, .. } => Some(start.bi),
+                edit::EditCommand::SetText { bi, .. } => Some(*bi),
+                _ => None,
+            }
+        }
+        let first = cmds.iter().map(lowest).min()?;
+        let same = cmds
+            .iter()
+            .map(text_bi)
+            .collect::<Option<Vec<usize>>>()
+            .and_then(|bs| {
+                let f = bs[0];
+                bs.iter().all(|b| *b == f).then_some(f)
+            });
+        Some((first, same))
     }
 
     /// "18.10.2026 16:03:47" — the statistics report stamp.
@@ -844,49 +1008,126 @@ impl ScriptCraftApp {
         if !self.meta_dirty {
             return;
         }
-        self.meta_dirty = false;
-        if self.project.is_none() || Self::is_fixture_path(&self.path) || self.path.is_empty() {
+        if self.project.is_none() {
+            self.meta_dirty = false;
+            return;
+        }
+        if Self::is_fixture_path(&self.path) || self.path.is_empty() {
+            // Keep the flag: a later Save As must carry these edits.
             return;
         }
         self.do_save_meta();
     }
 
-    fn commit(&mut self) {
-        if let Some(p) = &self.project {
-            self.history.commit(&p.blocks);
-        }
-    }
-
     fn after_history_jump(&mut self, what: &str) {
-        self.selected_block = None;
-        self.pending_focus = None;
-        self.text_snapshot_for = None;
         self.sync_card_titles();
         self.dirty = true;
         self.refresh_derived();
-        self.status = format!("{what}");
+        self.status = what.to_string();
+    }
+
+    /// Apply Editor 2.0's frame output through its command history.
+    fn apply_editor2_output(&mut self, out: crate::script_view::ScriptViewOutput) {
+        if out.commands.is_empty() && !out.undo && !out.redo {
+            return;
+        }
+        let Some(p) = self.project.as_mut() else {
+            return;
+        };
+        // Blocks the commands touch (headings born this frame need ids).
+        let touched: Vec<usize> = out
+            .commands
+            .iter()
+            .filter_map(|c| match c {
+                edit::EditCommand::InsertText { at, .. } => Some(at.bi),
+                edit::EditCommand::DeleteRange { start, .. } => Some(start.bi),
+                edit::EditCommand::SetType { bi, .. } => Some(*bi),
+                edit::EditCommand::SetText { bi, .. } => Some(*bi),
+                edit::EditCommand::InsertBlock { at, .. } => Some(*at),
+                _ => None,
+            })
+            .collect();
+        let hint = if out.undo || out.redo {
+            None
+        } else {
+            Self::relayout_hint(&out.commands)
+        };
+        let mut changed = false;
+        if out.undo {
+            changed |= self.editor2.history.undo(&mut p.blocks).unwrap_or(false);
+        }
+        if out.redo {
+            changed |= self.editor2.history.redo(&mut p.blocks).unwrap_or(false);
+        }
+        if !out.commands.is_empty()
+            && self
+                .editor2
+                .history
+                .apply_seq(&mut p.blocks, out.commands)
+                .is_ok()
+        {
+            changed = true;
+        }
+        if !changed {
+            self.doc_hint = None;
+            return;
+        }
+        if let Some(sel) = self.editor2.selection.as_mut() {
+            match (
+                edit::clamp_pos(&p.blocks, sel.anchor),
+                edit::clamp_pos(&p.blocks, sel.focus),
+            ) {
+                (Some(anchor), Some(focus)) => {
+                    sel.anchor = anchor;
+                    sel.focus = focus;
+                }
+                _ => self.editor2.selection = None,
+            }
+        }
+        // A block that BECAME a scene heading (typing, tab-cycling) needs an
+        // identity so the corkboard can track it.
+        for bi in touched {
+            let fresh = match p.blocks.get_mut(bi) {
+                Some(b) if b.element_type == ElementType::SceneHeading && b.kit_uuid.is_none() => {
+                    b.kit_uuid = Some(format!("{{{}}}", uuid::Uuid::new_v4()));
+                    Some((b.kit_uuid.clone().unwrap(), b.text.clone()))
+                }
+                _ => None,
+            };
+            if let Some((id, title)) = fresh {
+                if !self.cards.iter().any(|c| c.id == id) {
+                    self.cards.push(Card {
+                        id,
+                        title,
+                        description: String::new(),
+                    });
+                }
+            }
+        }
+        self.selected_block = self.editor2.selection.map(|s| s.focus.bi);
+        self.doc_hint = hint;
+        let what = if out.undo {
+            "Undo."
+        } else if out.redo {
+            "Redo."
+        } else {
+            "Edited."
+        };
+        self.after_history_jump(what);
     }
 
     fn do_undo(&mut self) {
-        let done = if let Some(p) = self.project.as_mut() {
-            self.history.undo(&mut p.blocks)
-        } else {
-            false
-        };
-        if done {
-            self.after_history_jump("Undo.");
-        }
+        self.apply_editor2_output(crate::script_view::ScriptViewOutput {
+            undo: true,
+            ..Default::default()
+        });
     }
 
     fn do_redo(&mut self) {
-        let done = if let Some(p) = self.project.as_mut() {
-            self.history.redo(&mut p.blocks)
-        } else {
-            false
-        };
-        if done {
-            self.after_history_jump("Redo.");
-        }
+        self.apply_editor2_output(crate::script_view::ScriptViewOutput {
+            redo: true,
+            ..Default::default()
+        });
     }
 
     /// Re-sync all in-memory card titles from headings.
@@ -912,11 +1153,7 @@ impl ScriptCraftApp {
                 self.project = Some(p);
                 self.selected_scene = 0;
                 self.selected_block = None;
-                self.pending_scroll = None;
-                self.pending_focus = None;
-                self.pending_caret = None;
-                self.text_snapshot_for = None;
-                self.history = History::default();
+                self.editor2 = Default::default();
                 self.dirty = false;
                 self.cards = kitsp::load_cards(path).unwrap_or_default();
                 self.meta = kitsp::load_metadata(path).unwrap_or_default();
@@ -932,7 +1169,7 @@ impl ScriptCraftApp {
                 self.title_synopsis = kitsp::html_to_text(&self.meta.synopsis_html.clone());
                 self.refresh_derived();
                 let s = &self.stats;
-                let pages = self.pages.len();
+                let pages = self.page_count();
                 self.status = if self.issues.is_empty() {
                     format!(
                         "{} scenes · {} pages · {} blocks · {} characters · {} words (~{:.1} pages) — format clean",
@@ -976,16 +1213,29 @@ impl ScriptCraftApp {
             self.do_save_as();
             return;
         }
-        if let Some(p) = &self.project {
-            match kitsp::save_file(&self.path, p) {
-                Ok(()) => {
-                    self.dirty = false;
-                    self.last_autosave = std::time::Instant::now();
-                    self.write_backup();
-                    self.status = format!("Saved to {} (.bak backup kept)", self.path);
-                }
-                Err(e) => self.status = format!("Save failed: {e}"),
+        let script = match &self.project {
+            Some(p) => kitsp::save_file(&self.path, p),
+            None => return,
+        };
+        match script {
+            Ok(()) => {
+                // Edited title-page fields ride along with the save; untouched
+                // metadata is left exactly as KIT wrote it.
+                let meta = if self.meta_dirty {
+                    self.write_metadata()
+                } else {
+                    Ok(())
+                };
+                self.dirty = false;
+                self.last_autosave = std::time::Instant::now();
+                self.write_backup();
+                self.clear_recovery_files();
+                self.status = match meta {
+                    Ok(()) => format!("Saved to {} (.bak backup kept)", self.path),
+                    Err(e) => format!("Script saved, but title page failed: {e}"),
+                };
             }
+            Err(e) => self.status = format!("Save failed: {e}"),
         }
     }
 
@@ -1008,6 +1258,132 @@ impl ScriptCraftApp {
             .unwrap_or_else(|| "script".to_string());
         let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
         let _ = std::fs::copy(&self.path, dir.join(format!("{stem}_{stamp}.kitsp")));
+    }
+
+    // ---- Crash recovery -------------------------------------------------
+
+    fn recovery_dir() -> std::path::PathBuf {
+        config_dir().join("recovery")
+    }
+
+    /// Stable, filesystem-safe recovery file name for a project path.
+    fn recovery_key(project_path: &str) -> String {
+        if project_path.is_empty() || Self::is_fixture_path(project_path) {
+            return "untitled.kitsp".to_string();
+        }
+        let stem: String = std::path::Path::new(project_path)
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default()
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+            .take(40)
+            .collect();
+        let stem = if stem.is_empty() {
+            "script".to_string()
+        } else {
+            stem
+        };
+        format!("{stem}-{:016x}.kitsp", fnv1a(project_path))
+    }
+
+    /// Recovery copies left behind by a previous (possibly crashed) session.
+    fn scan_recovery_files() -> Vec<(std::path::PathBuf, String)> {
+        let Ok(entries) = std::fs::read_dir(Self::recovery_dir()) else {
+            return Vec::new();
+        };
+        let mut files: Vec<std::path::PathBuf> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|e| e == "kitsp"))
+            .collect();
+        files.sort();
+        files
+            .into_iter()
+            .map(|p| {
+                let label = match kitsp::recovery_origin(&p) {
+                    Some(origin) if !origin.is_empty() => std::path::Path::new(&origin)
+                        .file_name()
+                        .map(|s| s.to_string_lossy().into_owned())
+                        .unwrap_or(origin),
+                    _ => "untitled script".to_string(),
+                };
+                (p, label)
+            })
+            .collect()
+    }
+
+    /// Snapshot the dirty project into the recovery dir. Silent on failure:
+    /// recovery is a safety net, never a blocker.
+    fn write_recovery(&self) {
+        let Some(p) = &self.project else {
+            return;
+        };
+        let dir = Self::recovery_dir();
+        if std::fs::create_dir_all(&dir).is_err() {
+            return;
+        }
+        let origin = if !self.path.is_empty() && !Self::is_fixture_path(&self.path) {
+            Some(self.path.as_str())
+        } else {
+            None
+        };
+        let dst = dir.join(Self::recovery_key(&self.path));
+        if kitsp::write_recovery_file(&dst, origin, p).is_ok() {
+            // Carry the title page too, including unsaved field edits.
+            let mut m = self.meta.clone();
+            m.logline_html = kitsp::text_to_html(&self.title_logline);
+            m.synopsis_html = kitsp::text_to_html(&self.title_synopsis);
+            let _ = kitsp::save_metadata(&dst, &m);
+        }
+    }
+
+    /// The current project is safely on disk: drop its recovery copy.
+    fn clear_recovery_files(&mut self) {
+        self.last_recovery = None;
+        let _ = std::fs::remove_file(Self::recovery_dir().join(Self::recovery_key(&self.path)));
+        let _ = std::fs::remove_file(Self::recovery_dir().join("untitled.kitsp"));
+        self.recovery.retain(|(p, _)| p.exists());
+    }
+
+    /// Restore a crashed session: open the recovery copy, point it back at
+    /// the original project (if it still exists), and keep it dirty so the
+    /// user is prompted to save.
+    fn restore_recovery(&mut self, idx: usize) {
+        let Some((path, _)) = self.recovery.get(idx).cloned() else {
+            return;
+        };
+        let origin = kitsp::recovery_origin(&path);
+        let rec_str = path.to_string_lossy().into_owned();
+        self.open_path(&rec_str);
+        if self.project.is_none() {
+            return;
+        }
+        self.path = match origin {
+            Some(o) if !o.is_empty() && std::path::Path::new(&o).exists() => o,
+            _ => String::new(),
+        };
+        self.dirty = true;
+        self.last_recovery = None;
+        let _ = std::fs::remove_file(&path);
+        self.recovery.retain(|(p, _)| p != &path);
+        // Don't leave the (now deleted) recovery copy in the recent list.
+        self.recent.retain(|(p, _)| p != &rec_str);
+        if !self.path.is_empty() {
+            let keep = self.path.clone();
+            self.push_recent(&keep);
+        } else if self.persist {
+            save_recent(&self.recent);
+        }
+        self.status = "Recovered unsaved changes — Save to keep them.".to_string();
+    }
+
+    fn discard_recovery(&mut self, idx: usize) {
+        let Some((path, _)) = self.recovery.get(idx).cloned() else {
+            return;
+        };
+        let _ = std::fs::remove_file(&path);
+        self.recovery.retain(|(p, _)| p != &path);
     }
 
     /// Pick an existing .kitsp and open it (menu + Start page).
@@ -1049,14 +1425,24 @@ impl ScriptCraftApp {
         }
     }
 
-    fn after_save_as(&mut self, dst: &std::path::PathBuf) {
-        self.path = dst.to_string_lossy().into_owned();
+    fn after_save_as(&mut self, dst: &std::path::Path) {
+        let old = std::mem::replace(&mut self.path, dst.to_string_lossy().into_owned());
+        // The old location's recovery copy (if any) is obsolete now.
+        if !old.is_empty() && !Self::is_fixture_path(&old) {
+            let _ = std::fs::remove_file(Self::recovery_dir().join(Self::recovery_key(&old)));
+        }
+        // Persist whatever was edited in the title page before the copy is
+        // re-read, so Save As cannot drop in-memory metadata edits.
+        if self.meta_dirty {
+            let _ = self.write_metadata();
+        }
         self.cards = kitsp::load_cards(&self.path).unwrap_or_default();
         self.meta = kitsp::load_metadata(&self.path).unwrap_or_default();
         self.research = kitsp::load_research(&self.path).unwrap_or_default();
         self.dirty = false;
         self.last_autosave = std::time::Instant::now();
         self.write_backup();
+        self.clear_recovery_files();
         let p = self.path.clone();
         self.push_recent(&p);
         self.status = format!("Saved to {}", self.path);
@@ -1077,7 +1463,50 @@ impl ScriptCraftApp {
                 return;
             }
         };
-        let (mut p, meta) = scriptcraft_core::fountain::parse_fountain(&text);
+        let (p, fmeta) = scriptcraft_core::fountain::parse_fountain(&text);
+        let meta = kitsp::Metadata {
+            title: fmeta.title.clone(),
+            genre: fmeta.credit.clone(),
+            author: fmeta.author.clone(),
+            contacts: fmeta.contact.clone(),
+            year: fmeta.draft_date.clone(),
+            ..Default::default()
+        };
+        self.adopt_imported(p, meta, &src.to_string_lossy());
+    }
+
+    /// Import a Final Draft `.fdx` file into a new in-memory project.
+    fn do_import_fdx(&mut self) {
+        let Some(src) = rfd::FileDialog::new()
+            .add_filter("Final Draft", &["fdx"])
+            .pick_file()
+        else {
+            return;
+        };
+        let text = match std::fs::read_to_string(&src) {
+            Ok(t) => t,
+            Err(e) => {
+                self.status = format!("Import failed: {e}");
+                return;
+            }
+        };
+        match scriptcraft_core::fdx::from_fdx(&text) {
+            Ok((p, meta)) => self.adopt_imported(p, meta, &src.to_string_lossy()),
+            Err(e) => self.status = format!("Import failed: {e}"),
+        }
+    }
+
+    /// Parse FDX text directly (tests; also the future FDX clipboard path).
+    #[doc(hidden)]
+    pub fn import_fdx_str(&mut self, text: &str) -> Result<(), String> {
+        let (p, meta) = scriptcraft_core::fdx::from_fdx(text).map_err(|e| e.to_string())?;
+        self.adopt_imported(p, meta, "Final Draft document");
+        Ok(())
+    }
+
+    /// Replace the session with an imported project, assigning KIT scene
+    /// uuids so a later Save As writes a complete `.kitsp`.
+    fn adopt_imported(&mut self, mut p: Project, meta: kitsp::Metadata, from: &str) {
         for b in p
             .blocks
             .iter_mut()
@@ -1086,32 +1515,22 @@ impl ScriptCraftApp {
             b.kit_uuid = Some(format!("{{{}}}", uuid::Uuid::new_v4()));
         }
         self.project = Some(p);
-        self.meta = kitsp::Metadata {
-            title: meta.title.clone(),
-            genre: meta.credit.clone(),
-            author: meta.author.clone(),
-            contacts: meta.contact.clone(),
-            year: meta.draft_date.clone(),
-            ..Default::default()
-        };
+        self.meta = meta;
+        self.title_logline = kitsp::html_to_text(&self.meta.logline_html);
+        self.title_synopsis = kitsp::html_to_text(&self.meta.synopsis_html);
+        self.meta_dirty = true;
         self.path = String::new();
         self.selected_scene = 0;
         self.selected_block = None;
-        self.pending_scroll = None;
-        self.pending_focus = None;
-        self.text_snapshot_for = None;
-        self.history = History::default();
+        self.editor2 = Default::default();
         self.cards = Vec::new();
         self.research = Vec::new();
         self.dirty = true;
         self.refresh_derived();
-        self.status = format!(
-            "Imported {} — Save As to keep it as .kitsp.",
-            src.to_string_lossy()
-        );
+        self.status = format!("Imported {} — Save As to keep it as .kitsp.", from);
     }
 
-    /// Render the script to PDF (Courier New embedded) with the current
+    /// Render the script to PDF (Courier Prime embedded) with the current
     /// Export-dialog options. `None` (with a status message) on failure.
     fn pdf_bytes(&mut self) -> Option<Vec<u8>> {
         let Some(p) = &self.project else { return None };
@@ -1126,13 +1545,13 @@ impl ScriptCraftApp {
         } else {
             None
         };
-        match scriptcraft_core::pdf::to_pdf_bytes(
-            p,
-            &self.meta,
-            &opts,
-            include_bytes!("../assets/fonts/cour.ttf"),
-            include_bytes!("../assets/fonts/courb.ttf"),
-        ) {
+        let fonts = scriptcraft_layout::pdf::ExportFonts {
+            regular: include_bytes!("../assets/fonts/CourierPrime-Regular.ttf"),
+            bold: include_bytes!("../assets/fonts/CourierPrime-Bold.ttf"),
+            fallback_regular: include_bytes!("../assets/fonts/IBMPlexMono-Regular.ttf"),
+            fallback_bold: include_bytes!("../assets/fonts/IBMPlexMono-Bold.ttf"),
+        };
+        match scriptcraft_layout::pdf::to_pdf_bytes(p, &self.meta, &opts, &fonts) {
             Ok(b) => Some(b),
             Err(e) => {
                 self.status = format!("PDF failed: {e}");
@@ -1157,6 +1576,16 @@ impl ScriptCraftApp {
         let Some(p) = &self.project else { return };
         let text = scriptcraft_core::fountain::to_fountain(p, &self.meta);
         match std::fs::write(dst, text) {
+            Ok(()) => self.status = format!("Exported to {}", dst.to_string_lossy()),
+            Err(e) => self.status = format!("Export failed: {e}"),
+        }
+    }
+
+    /// Write Final Draft XML to `dst` (the path chosen in the Export dialog).
+    fn save_fdx(&mut self, dst: &std::path::Path) {
+        let Some(p) = &self.project else { return };
+        let xml = scriptcraft_core::fdx::to_fdx(p, &self.meta);
+        match std::fs::write(dst, xml) {
             Ok(()) => self.status = format!("Exported to {}", dst.to_string_lossy()),
             Err(e) => self.status = format!("Export failed: {e}"),
         }
@@ -1194,14 +1623,30 @@ impl ScriptCraftApp {
         }
     }
 
+    /// Push the plain-text logline/synopsis buffers into the rich-HTML
+    /// fields. Must run before any metadata write.
+    fn sync_meta_buffers(&mut self) {
+        let logline = kitsp::text_to_html(&self.title_logline);
+        let synopsis = kitsp::text_to_html(&self.title_synopsis);
+        self.meta.logline_html = logline;
+        self.meta.synopsis_html = synopsis;
+    }
+
+    /// Write title-page metadata to the current project path (no status
+    /// side effects). Used by Save/autosave so metadata is never left behind.
+    fn write_metadata(&mut self) -> Result<(), kitsp::KitspError> {
+        self.sync_meta_buffers();
+        kitsp::save_metadata(&self.path, &self.meta)?;
+        self.meta_dirty = false;
+        Ok(())
+    }
+
     fn do_save_meta(&mut self) {
         if Self::is_fixture_path(&self.path) || self.path.is_empty() {
             self.status = "Save the script first (Save As) — fixture is read-only.".to_string();
             return;
         }
-        self.meta.logline_html = kitsp::text_to_html(&self.title_logline.clone());
-        self.meta.synopsis_html = kitsp::text_to_html(&self.title_synopsis.clone());
-        match kitsp::save_metadata(&self.path, &self.meta) {
+        match self.write_metadata() {
             Ok(()) => {
                 if let Some(p) = self.project.as_mut() {
                     p.title = self.meta.title.clone();
@@ -1380,9 +1825,13 @@ impl ScriptCraftApp {
                 }
             }
         }
-        self.pending_scroll = Some((bi, 0));
-        self.pending_focus = Some((bi, 0));
-        self.text_snapshot_for = None;
+        let at = edit::Pos { bi, para: 0, ch: 0 };
+        self.editor2.selection = Some(crate::script_view::Selection {
+            anchor: at,
+            focus: at,
+        });
+        self.editor2.autocomplete = None;
+        self.editor2.scroll_caret = true;
     }
 
     /// Set the selected block's element type (Format bar / toolbar combo).
@@ -1390,81 +1839,74 @@ impl ScriptCraftApp {
         let Some(bi) = self.selected_block else {
             return;
         };
-        self.commit();
-        if let Some(p) = self.project.as_mut() {
-            if let Some(b) = p.blocks.get_mut(bi) {
-                if b.element_type != t {
-                    if t == ElementType::SceneHeading && b.kit_uuid.is_none() {
-                        b.kit_uuid = Some(format!("{{{}}}", uuid::Uuid::new_v4()));
-                    }
-                    if auto_upper(t) {
-                        b.text = b.text.to_uppercase();
-                    }
-                    b.element_type = t;
-                }
-            }
+        let Some(b) = self.project.as_ref().and_then(|p| p.blocks.get(bi)) else {
+            return;
+        };
+        if b.element_type == t {
+            return;
         }
-        self.text_snapshot_for = None;
-        self.sync_card_titles();
-        self.dirty = true;
-        self.pending_focus = self.focused_chunk.or(self.selected_block.map(|bi| (bi, 0)));
-        self.refresh_derived();
+        let mut cmds = vec![edit::EditCommand::SetType { bi, t }];
+        if auto_upper(t) && b.text != b.text.to_uppercase() {
+            cmds.push(edit::EditCommand::SetText {
+                bi,
+                text: b.text.to_uppercase(),
+            });
+        }
+        self.apply_editor2_output(crate::script_view::ScriptViewOutput {
+            commands: cmds,
+            ..Default::default()
+        });
     }
 
     /// Insert an empty block of `t` below the selection and select it.
     fn insert_below(&mut self, t: ElementType) {
-        self.commit();
-        if let Some(p) = self.project.as_mut() {
-            let at = self
-                .selected_block
-                .map(|bi| bi + 1)
-                .unwrap_or(p.blocks.len());
-            let at = at.min(p.blocks.len());
-            let mut b = ScriptBlock::new(t, String::new());
-            if t == ElementType::SceneHeading {
-                b.kit_uuid = Some(format!("{{{}}}", uuid::Uuid::new_v4()));
-                self.cards.push(Card {
-                    id: b.kit_uuid.clone().unwrap_or_default(),
-                    title: String::new(),
-                    description: String::new(),
-                });
-            }
-            p.blocks.insert(at, b);
-            self.selected_block = Some(at);
-            self.pending_focus = Some((at, 0));
-        }
-        self.text_snapshot_for = None;
-        self.dirty = true;
-        self.refresh_derived();
+        let n = self.project.as_ref().map(|p| p.blocks.len()).unwrap_or(0);
+        let at = self.selected_block.map(|bi| bi + 1).unwrap_or(n).min(n);
+        let b = ScriptBlock::new(t, String::new());
+        self.apply_editor2_output(crate::script_view::ScriptViewOutput {
+            commands: vec![edit::EditCommand::InsertBlock { at, block: b }],
+            ..Default::default()
+        });
+        let pos = edit::Pos {
+            bi: at,
+            para: 0,
+            ch: 0,
+        };
+        self.editor2.selection = Some(crate::script_view::Selection {
+            anchor: pos,
+            focus: pos,
+        });
+        self.editor2.scroll_caret = true;
+        self.selected_block = Some(at);
     }
 
     /// Insert a new scene heading after the current scene.
     fn insert_scene_below(&mut self) {
-        self.commit();
-        if let Some(p) = self.project.as_mut() {
-            let scenes = p.scenes();
-            let at = scenes
-                .get(self.selected_scene)
-                .and_then(|s| s.blocks.last().copied().map(|b| b + 1))
-                .unwrap_or(p.blocks.len());
-            let mut b = ScriptBlock::new(
-                ElementType::SceneHeading,
-                "INT. NEW SCENE - DAY".to_string(),
-            );
-            b.kit_uuid = Some(format!("{{{}}}", uuid::Uuid::new_v4()));
-            self.cards.push(Card {
-                id: b.kit_uuid.clone().unwrap_or_default(),
-                title: b.text.clone(),
-                description: String::new(),
-            });
-            p.blocks.insert(at, b);
-            self.selected_block = Some(at);
-            self.pending_focus = Some((at, 0));
-            self.pending_scroll = Some((at, 0));
-        }
-        self.text_snapshot_for = None;
-        self.dirty = true;
-        self.refresh_derived();
+        let Some(p) = self.project.as_ref() else {
+            return;
+        };
+        let scenes = p.scenes();
+        let at = scenes
+            .get(self.selected_scene)
+            .and_then(|s| s.blocks.last().copied().map(|b| b + 1))
+            .unwrap_or(p.blocks.len());
+        let before = p.blocks.clone();
+        let mut b = ScriptBlock::new(
+            ElementType::SceneHeading,
+            "INT. NEW SCENE - DAY".to_string(),
+        );
+        b.kit_uuid = Some(format!("{{{}}}", uuid::Uuid::new_v4()));
+        self.cards.push(Card {
+            id: b.kit_uuid.clone().unwrap_or_default(),
+            title: b.text.clone(),
+            description: String::new(),
+        });
+        let Some(p) = self.project.as_mut() else {
+            return;
+        };
+        p.blocks.insert(at, b);
+        self.record_structural(before);
+        self.goto_block(at);
     }
 
     /// Delete the whole current scene (undoable).
@@ -1488,7 +1930,7 @@ impl ScriptCraftApp {
             .filter(|b| b.element_type == ElementType::SceneHeading)
             .filter_map(|b| b.kit_uuid.clone())
             .collect();
-        self.commit();
+        let before = p.blocks.clone();
         if let Some(p) = self.project.as_mut() {
             let mut kept = Vec::with_capacity(p.blocks.len());
             for (i, b) in p.blocks.drain(..).enumerate() {
@@ -1499,62 +1941,21 @@ impl ScriptCraftApp {
             p.blocks = kept;
         }
         self.cards.retain(|c| !dead_uuids.contains(&c.id));
-        self.selected_block = None;
-        self.pending_focus = None;
-        self.text_snapshot_for = None;
+        self.record_structural(before);
         self.selected_scene = self.selected_scene.saturating_sub(1);
-        self.dirty = true;
-        self.refresh_derived();
+        self.editor2.selection = None;
+        self.editor2.autocomplete = None;
+        self.selected_block = None;
+        self.after_history_jump("Scene deleted.");
     }
 
-    fn delete_selected(&mut self) {
-        let Some(bi) = self.selected_block else {
-            return;
-        };
-        let n_scenes = self.project.as_ref().map(|p| p.scenes().len()).unwrap_or(0);
-        let is_heading = self
-            .project
-            .as_ref()
-            .and_then(|p| p.blocks.get(bi))
-            .map(|b| b.element_type == ElementType::SceneHeading)
-            .unwrap_or(false);
-        if is_heading && n_scenes <= 1 {
-            self.status = "Cannot delete the only scene heading.".to_string();
-            return;
-        }
-        self.commit();
-        if let Some(p) = self.project.as_mut() {
-            if bi < p.blocks.len() {
-                let removed = p.blocks.remove(bi);
-                if removed.element_type == ElementType::SceneHeading {
-                    if let Some(kit) = removed.kit_uuid {
-                        self.cards.retain(|c| c.id != kit);
-                    }
-                }
-                self.selected_block = None;
-                self.pending_focus = None;
-            }
-        }
-        self.text_snapshot_for = None;
+    /// Record a whole-document change (structural ops) as one undo step.
+    fn record_structural(&mut self, before: Vec<ScriptBlock>) {
+        self.editor2
+            .history
+            .record(vec![edit::EditCommand::ReplaceAll { blocks: before }]);
         self.dirty = true;
         self.refresh_derived();
-    }
-
-    /// Sync an in-memory card title after its heading was edited.
-    fn sync_card_title(&mut self, bi: usize) {
-        let (kit, text) = match self.project.as_ref().and_then(|p| p.blocks.get(bi)) {
-            Some(b) if b.element_type == ElementType::SceneHeading => {
-                (b.kit_uuid.clone(), b.text.clone())
-            }
-            _ => return,
-        };
-        if let Some(kit) = kit {
-            for card in self.cards.iter_mut() {
-                if card.id == kit {
-                    card.title = text.clone();
-                }
-            }
-        }
     }
 
     /// Move selection to the previous/next block (Format Prev/Next, arrows).
@@ -1564,7 +1965,10 @@ impl ScriptCraftApp {
             return;
         }
         let cur = self
-            .selected_block
+            .editor2
+            .selection
+            .map(|s| s.focus.bi)
+            .or(self.selected_block)
             .unwrap_or(if dir >= 0 { 0 } else { n - 1 });
         let next = (cur as i32 + dir).clamp(0, n as i32 - 1) as usize;
         self.goto_block(next);
@@ -2401,6 +2805,16 @@ fn settings_tab(ui: &mut egui::Ui, text: &str, selected: bool) -> egui::Response
 
 // ---- Persisted settings & recent projects ---------------------------------
 
+/// Tiny stable hash for recovery file names (FNV-1a, no deps).
+fn fnv1a(s: &str) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in s.bytes() {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    h
+}
+
 fn config_dir() -> std::path::PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
     std::path::PathBuf::from(home).join("Library/Application Support/ScriptCraft")
@@ -2696,6 +3110,18 @@ impl eframe::App for ScriptCraftApp {
                 self.status = format!("Autosaved {}.", self.path);
             }
         }
+        // Crash recovery: snapshot dirty work immediately, then at most
+        // every 10 seconds, so a crash or kill loses seconds at most.
+        if self.persist
+            && self.dirty
+            && self.project.is_some()
+            && self
+                .last_recovery
+                .is_none_or(|t| t.elapsed().as_secs() >= 10)
+        {
+            self.last_recovery = Some(std::time::Instant::now());
+            self.write_recovery();
+        }
         // Global shortcuts, consumed so focused editors don't double-handle.
         if self.project.is_some() {
             if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::S)) {
@@ -2734,6 +3160,9 @@ impl eframe::App for ScriptCraftApp {
         }
         self.toolbar(ctx);
         self.status_bar(ctx);
+        if !self.recovery.is_empty() {
+            self.recovery_bar(ctx);
+        }
         if self.show_find {
             self.find_bar(ctx);
         }
@@ -2772,14 +3201,43 @@ impl ScriptCraftApp {
     /// undo/redo (painted icons — no glyph fallbacks), element menu.
     /// Status + duration live in the bottom status bar.
     fn toolbar(&mut self, ctx: &egui::Context) {
+        // macOS production window: the toolbar is painted behind the
+        // transparent native titlebar, so it doubles as window chrome (the
+        // traffic lights float top-left and the strip above the row drags
+        // the window). Fullscreen hides the titlebar, so drop the inset.
+        let custom =
+            self.custom_titlebar && !ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
         egui::TopBottomPanel::top("toolbar")
             .frame(
                 egui::Frame::new()
                     .fill(kit().window)
-                    .inner_margin(egui::Margin::symmetric(12, 7)),
+                    .inner_margin(egui::Margin {
+                        left: 12,
+                        right: 12,
+                        top: if custom { 2 } else { 7 },
+                        bottom: if custom { 4 } else { 7 },
+                    }),
             )
             .show(ctx, |ui| {
+                if custom {
+                    let (_, strip) = ui.allocate_exact_size(
+                        egui::vec2(ui.available_width(), 6.0),
+                        egui::Sense::click_and_drag(),
+                    );
+                    if strip.drag_started() {
+                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
+                    }
+                    if strip.double_clicked() {
+                        let max = ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
+                        ui.ctx()
+                            .send_viewport_cmd(egui::ViewportCommand::Maximized(!max));
+                    }
+                }
                 ui.horizontal(|ui| {
+                    if custom {
+                        // Clear the native traffic lights (macOS owns them).
+                        ui.add_space(62.0);
+                    }
                     let menu_resp = menu_trigger(ui);
                     egui::Popup::menu(&menu_resp).show(|ui| {
                         ui.set_min_width(230.0);
@@ -2802,8 +3260,8 @@ impl ScriptCraftApp {
                         self.delete_scene();
                     }
                     toolbar_sep(ui);
-                    let can_undo = has && !self.history.past.is_empty();
-                    let can_redo = has && !self.history.future.is_empty();
+                    let can_undo = has && self.editor2.history.can_undo();
+                    let can_redo = has && self.editor2.history.can_redo();
                     if toolbar_icon_button(ui, can_undo, "Undo (⌘Z)", draw_undo_arrow).clicked() {
                         self.do_undo();
                     }
@@ -2840,18 +3298,23 @@ impl ScriptCraftApp {
                     // Page zoom cluster, always visible (pinch works too).
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let mut z = self.zoom;
+                        let mut free = false;
                         if toolbar_icon_button(ui, z < 4.0 - 1e-3, "Zoom in (pinch out)", draw_plus)
                             .clicked()
                         {
                             z = (z * 1.1).min(4.0);
+                            free = true;
                         }
+                        let pct_zoom = match self.fit {
+                            FitMode::Off => self.zoom,
+                            _ => self.last_render_zoom,
+                        };
                         if ui
                             .add(
                                 egui::Button::new(
                                     egui::RichText::new(format!(
                                         "{}%",
-                                        (self.render_zoom(ctx.pixels_per_point()) * 100.0).round()
-                                            as i32
+                                        (pct_zoom * 100.0).round() as i32
                                     ))
                                     .size(12.0),
                                 )
@@ -2862,6 +3325,7 @@ impl ScriptCraftApp {
                             .clicked()
                         {
                             z = 1.0;
+                            free = true;
                         }
                         if toolbar_icon_button(
                             ui,
@@ -2872,6 +3336,10 @@ impl ScriptCraftApp {
                         .clicked()
                         {
                             z = (z / 1.1).max(0.25);
+                            free = true;
+                        }
+                        if free {
+                            self.fit = FitMode::Off;
                         }
                         self.zoom = z.clamp(0.25, 4.0);
                         ui.label(egui::RichText::new("Zoom").small().weak());
@@ -2936,6 +3404,7 @@ impl ScriptCraftApp {
             Save,
             SaveAs,
             Import,
+            ImportFdx,
             Export,
             Preview,
             TwoPanel,
@@ -2948,6 +3417,8 @@ impl ScriptCraftApp {
             ZoomIn,
             ZoomOut,
             ZoomReset,
+            ZoomFitPage,
+            ZoomFitWidth,
             About,
             Help,
         }
@@ -2956,8 +3427,8 @@ impl ScriptCraftApp {
         ui.spacing_mut().item_spacing.y = 2.0;
         {
             let has = self.project.is_some();
-            let can_undo = has && !self.history.past.is_empty();
-            let can_redo = has && !self.history.future.is_empty();
+            let can_undo = has && self.editor2.history.can_undo();
+            let can_redo = has && self.editor2.history.can_redo();
 
             if menu_item(ui, "New", None, true) {
                 action = Some(M::New);
@@ -2974,6 +3445,9 @@ impl ScriptCraftApp {
             ui.separator();
             if menu_item(ui, "Import Fountain…", None, true) {
                 action = Some(M::Import);
+            }
+            if menu_item(ui, "Import Final Draft (.fdx)…", None, true) {
+                action = Some(M::ImportFdx);
             }
             if menu_item(ui, "Export…", None, has) {
                 action = Some(M::Export);
@@ -3020,6 +3494,12 @@ impl ScriptCraftApp {
             if menu_item(ui, "Zoom 100%", None, true) {
                 action = Some(M::ZoomReset);
             }
+            if menu_item(ui, "Fit Page", None, true) {
+                action = Some(M::ZoomFitPage);
+            }
+            if menu_item(ui, "Fit Width", None, true) {
+                action = Some(M::ZoomFitWidth);
+            }
             ui.separator();
             if menu_item(ui, "About ScriptCraft", None, true) {
                 action = Some(M::About);
@@ -3042,6 +3522,7 @@ impl ScriptCraftApp {
             Some(M::Save) => self.do_save(),
             Some(M::SaveAs) => self.do_save_as(),
             Some(M::Import) => self.do_import_fountain(),
+            Some(M::ImportFdx) => self.do_import_fdx(),
             Some(M::Export) => self.show_export = true,
             Some(M::Preview) => self.preview_pdf(),
             Some(M::TwoPanel) => {
@@ -3060,9 +3541,20 @@ impl ScriptCraftApp {
             Some(M::Nav) => self.show_left_panel = !self.show_left_panel,
             Some(M::Fmt) => self.show_format_panel = !self.show_format_panel,
             Some(M::Typew) => self.typewriter = !self.typewriter,
-            Some(M::ZoomIn) => self.zoom = (self.zoom * 1.1).min(4.0),
-            Some(M::ZoomOut) => self.zoom = (self.zoom / 1.1).max(0.25),
-            Some(M::ZoomReset) => self.zoom = 1.0,
+            Some(M::ZoomIn) => {
+                self.fit = FitMode::Off;
+                self.zoom = (self.zoom * 1.1).min(4.0);
+            }
+            Some(M::ZoomOut) => {
+                self.fit = FitMode::Off;
+                self.zoom = (self.zoom / 1.1).max(0.25);
+            }
+            Some(M::ZoomReset) => {
+                self.fit = FitMode::Off;
+                self.zoom = 1.0;
+            }
+            Some(M::ZoomFitPage) => self.fit = FitMode::Page,
+            Some(M::ZoomFitWidth) => self.fit = FitMode::Width,
             Some(M::About) => self.show_about = true,
             Some(M::Help) => self.show_help = true,
         }
@@ -3088,6 +3580,7 @@ impl ScriptCraftApp {
                 menu::ID_SAVE => self.do_save(),
                 menu::ID_SAVE_AS => self.do_save_as(),
                 menu::ID_IMPORT => self.do_import_fountain(),
+                menu::ID_IMPORT_FDX => self.do_import_fdx(),
                 menu::ID_EXPORT => self.show_export = true,
                 menu::ID_PREVIEW => self.preview_pdf(),
                 menu::ID_TWO_PANEL => {
@@ -3106,9 +3599,20 @@ impl ScriptCraftApp {
                 menu::ID_NAVIGATOR => self.show_left_panel = !self.show_left_panel,
                 menu::ID_FORMAT_PANEL => self.show_format_panel = !self.show_format_panel,
                 menu::ID_TYPEWRITER => self.typewriter = !self.typewriter,
-                menu::ID_ZOOM_IN => self.zoom = (self.zoom * 1.1).min(4.0),
-                menu::ID_ZOOM_OUT => self.zoom = (self.zoom / 1.1).max(0.25),
-                menu::ID_ZOOM_RESET => self.zoom = 1.0,
+                menu::ID_ZOOM_IN => {
+                    self.fit = FitMode::Off;
+                    self.zoom = (self.zoom * 1.1).min(4.0);
+                }
+                menu::ID_ZOOM_OUT => {
+                    self.fit = FitMode::Off;
+                    self.zoom = (self.zoom / 1.1).max(0.25);
+                }
+                menu::ID_ZOOM_RESET => {
+                    self.fit = FitMode::Off;
+                    self.zoom = 1.0;
+                }
+                menu::ID_ZOOM_FIT_PAGE => self.fit = FitMode::Page,
+                menu::ID_ZOOM_FIT_WIDTH => self.fit = FitMode::Width,
                 menu::ID_ABOUT => self.show_about = true,
                 menu::ID_HELP => self.show_help = true,
                 _ => {}
@@ -3132,7 +3636,7 @@ impl ScriptCraftApp {
                 ui.separator();
                 ui.label("Design language after KIT Scenarist 0.7.2:");
                 ui.label("• Calm dark/light themes with the icon-blue accent #4294f8");
-                ui.label("• Courier New script face, PT Sans UI");
+                ui.label("• Courier Prime script face (OFL), PT Sans UI");
                 ui.label("• Russian-template metrics, calibrated chronometry");
                 ui.label("• Fixed A4 pages — zoom scales pages, never reflows");
                 ui.separator();
@@ -3234,12 +3738,9 @@ impl ScriptCraftApp {
                         ui.add_space(6.0);
                         ui.horizontal(|ui| {
                             ui.label("Format:");
-                            for fmt in [
-                                ExportFormat::Docx,
-                                ExportFormat::Pdf,
-                                ExportFormat::Fdx,
-                                ExportFormat::Fountain,
-                            ] {
+                            for fmt in
+                                [ExportFormat::Pdf, ExportFormat::Fdx, ExportFormat::Fountain]
+                            {
                                 ui.radio_value(&mut self.export_format, fmt, fmt.label());
                             }
                         });
@@ -3295,16 +3796,6 @@ impl ScriptCraftApp {
                                 });
                             });
                         }
-                        if matches!(self.export_format, ExportFormat::Docx | ExportFormat::Fdx) {
-                            ui.add_space(2.0);
-                            ui.label(
-                                egui::RichText::new(
-                                    "This format is not implemented yet — choose PDF or Fountain.",
-                                )
-                                .small()
-                                .weak(),
-                            );
-                        }
                     }
                     ExportTab::Research => {
                         ui.add_space(6.0);
@@ -3350,7 +3841,7 @@ impl ScriptCraftApp {
                         && !self.export_path.is_empty()
                         && matches!(
                             self.export_format,
-                            ExportFormat::Pdf | ExportFormat::Fountain
+                            ExportFormat::Pdf | ExportFormat::Fdx | ExportFormat::Fountain
                         );
                     let label = if file_exists { "Rewrite" } else { "Export" };
                     if ui
@@ -3383,7 +3874,6 @@ impl ScriptCraftApp {
                     "fountain",
                     "Fountain",
                 ),
-                ExportFormat::Docx => ("script.docx".to_string(), "docx", "DOCX"),
                 ExportFormat::Fdx => ("script.fdx".to_string(), "fdx", "FDX"),
             };
             dlg = dlg.add_filter(filter, &[ext]).set_file_name(&name);
@@ -3397,8 +3887,8 @@ impl ScriptCraftApp {
             let dst = std::path::PathBuf::from(&self.export_path);
             match self.export_format {
                 ExportFormat::Pdf => self.save_pdf(&dst),
+                ExportFormat::Fdx => self.save_fdx(&dst),
                 ExportFormat::Fountain => self.save_fountain(&dst),
-                _ => {}
             }
             self.show_export = false;
         }
@@ -3431,8 +3921,8 @@ impl ScriptCraftApp {
         out
     }
 
-    /// Jump to match `idx` (wrapping): select, scroll, focus, highlight.
-    fn find_goto(&mut self, ctx: &egui::Context, idx: usize) {
+    /// Jump to match `idx` (wrapping): select, scroll, highlight.
+    fn find_goto(&mut self, _ctx: &egui::Context, idx: usize) {
         let matches = self.find_matches();
         if matches.is_empty() {
             return;
@@ -3441,48 +3931,46 @@ impl ScriptCraftApp {
         self.find_idx = idx;
         let (bi, start, len) = matches[idx];
         self.goto_block(bi);
-        // Highlight the match inside its editor.
-        let chunk_start = self
-            .project
-            .as_ref()
-            .and_then(|p| p.blocks.get(bi))
-            .map(|b| {
-                let mut acc = 0usize;
-                for (i, para) in b.text.split('\n').enumerate() {
-                    let plen = para.chars().count() + 1; // +newline
-                    if start < acc + plen {
-                        return i;
-                    }
-                    acc += plen;
-                }
-                0
-            })
-            .unwrap_or(0);
-        let end = start + len;
-        set_caret(ctx, bi, chunk_start, start, end);
-        self.pending_focus = Some((bi, chunk_start));
-        self.pending_scroll = Some((bi, chunk_start));
+        // Select the match inside its block (char offsets → Pos).
+        if let Some(p) = &self.project {
+            if let Some(b) = p.blocks.get(bi) {
+                let anchor = edit::pos_at_char(&b.text, bi, start);
+                let focus = edit::pos_at_char(&b.text, bi, start + len);
+                self.editor2.selection = Some(crate::script_view::Selection { anchor, focus });
+                self.editor2.autocomplete = None;
+                self.editor2.scroll_caret = true;
+            }
+        }
     }
 
     fn find_replace_current(&mut self, ctx: &egui::Context) {
+        if self.find_replace.is_empty() {
+            return;
+        }
         let matches = self.find_matches();
-        if matches.is_empty() || self.find_replace.is_empty() {
+        if matches.is_empty() {
             return;
         }
         let idx = self.find_idx.min(matches.len().saturating_sub(1));
         let (bi, start, len) = matches[idx];
-        self.commit();
-        if let Some(p) = self.project.as_mut() {
-            if let Some(b) = p.blocks.get_mut(bi) {
+        let repl = self.find_replace.clone();
+        let Some(text) = self
+            .project
+            .as_ref()
+            .and_then(|p| p.blocks.get(bi))
+            .map(|b| {
                 let mut chars: Vec<char> = b.text.chars().collect();
                 let end = (start + len).min(chars.len());
-                chars.splice(start..end, self.find_replace.chars());
-                b.text = chars.into_iter().collect();
-                self.dirty = true;
-            }
-        }
-        self.text_snapshot_for = None;
-        self.refresh_derived();
+                chars.splice(start..end, repl.chars());
+                chars.into_iter().collect::<String>()
+            })
+        else {
+            return;
+        };
+        self.apply_editor2_output(crate::script_view::ScriptViewOutput {
+            commands: vec![edit::EditCommand::SetText { bi, text }],
+            ..Default::default()
+        });
         self.find_goto(ctx, idx); // land on the next match
     }
 
@@ -3495,7 +3983,9 @@ impl ScriptCraftApp {
             self.status = "Find: no matches.".to_string();
             return;
         }
-        self.commit();
+        let Some(before) = self.project.as_ref().map(|p| p.blocks.clone()) else {
+            return;
+        };
         // Apply back-to-front per block so indices don't shift.
         let mut by_block: std::collections::BTreeMap<usize, Vec<(usize, usize)>> =
             std::collections::BTreeMap::new();
@@ -3508,7 +3998,7 @@ impl ScriptCraftApp {
             for (bi, mut locs) in by_block {
                 if let Some(b) = p.blocks.get_mut(bi) {
                     let mut chars: Vec<char> = b.text.chars().collect();
-                    locs.sort_by(|a, b| b.0.cmp(&a.0));
+                    locs.sort_by_key(|a| std::cmp::Reverse(a.0));
                     for (s, l) in locs {
                         let e = (s + l).min(chars.len());
                         chars.splice(s..e, repl.chars());
@@ -3516,10 +4006,8 @@ impl ScriptCraftApp {
                     b.text = chars.into_iter().collect();
                 }
             }
-            self.dirty = true;
         }
-        self.text_snapshot_for = None;
-        self.refresh_derived();
+        self.record_structural(before);
         self.status = format!("Replaced {n} occurrence(s).");
         let _ = ctx;
     }
@@ -3572,6 +4060,34 @@ impl ScriptCraftApp {
                         self.show_find = false;
                     }
                 });
+            });
+        });
+    }
+
+    /// Launch banner offering to restore unsaved work from a previous
+    /// session (or a crash). One row per recovery copy.
+    fn recovery_bar(&mut self, ctx: &egui::Context) {
+        egui::TopBottomPanel::top("recoverybar").show(ctx, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(egui::RichText::new("Unsaved changes from a previous session:").strong());
+                let mut restore = None;
+                let mut discard = None;
+                for (i, (_, label)) in self.recovery.iter().enumerate() {
+                    ui.label(label);
+                    if ui.small_button("Restore").clicked() {
+                        restore = Some(i);
+                    }
+                    if ui.small_button("Discard").clicked() {
+                        discard = Some(i);
+                    }
+                    ui.separator();
+                }
+                if let Some(i) = restore {
+                    self.restore_recovery(i);
+                }
+                if let Some(i) = discard {
+                    self.discard_recovery(i);
+                }
             });
         });
     }
@@ -3834,7 +4350,7 @@ impl ScriptCraftApp {
                 .filter(|b| b.element_type == ElementType::SceneHeading)
                 .and_then(|b| b.kit_uuid.clone())
         });
-        self.commit();
+        let before_blocks = p.blocks.clone();
         if let Some(p) = self.project.as_mut() {
             let scenes = p.scenes();
             let mut order: Vec<usize> = (0..scenes.len()).collect();
@@ -3866,11 +4382,18 @@ impl ScriptCraftApp {
                 }
             }
         }
-        self.text_snapshot_for = None;
-        self.pending_focus = None;
-        self.pending_scroll = None;
-        self.dirty = true;
-        self.refresh_derived();
+        self.record_structural(before_blocks);
+        if let (Some(sel), Some(p)) = (self.editor2.selection, &self.project) {
+            let anchor = edit::clamp_pos(&p.blocks, sel.anchor);
+            let focus = edit::clamp_pos(&p.blocks, sel.focus);
+            self.editor2.selection = match (anchor, focus) {
+                (Some(anchor), Some(focus)) => {
+                    Some(crate::script_view::Selection { anchor, focus })
+                }
+                _ => None,
+            };
+        }
+        self.editor2.autocomplete = None;
         self.status = "Scenes reordered — save to persist.".to_string();
     }
 
@@ -4648,7 +5171,7 @@ impl ScriptCraftApp {
                 let dur = format_duration(p.duration_secs())
                     .trim_matches(['(', ')'])
                     .to_string();
-                let pages_s = self.pages.len().to_string();
+                let pages_s = self.page_count().to_string();
                 let words_s = total_words.to_string();
                 let chars_s = total_chars.to_string();
                 kit_big_numbers(
@@ -4901,7 +5424,7 @@ impl ScriptCraftApp {
                 out.push_str(&format!(
                     "Duration {}\r\nPages {}\r\nWords {}\r\nCharacters {}\r\n\r\n",
                     format_duration(p.duration_secs()).trim_matches(['(', ')']),
-                    self.pages.len(),
+                    self.page_count(),
                     total_words,
                     total_chars
                 ));
@@ -5347,8 +5870,9 @@ impl ScriptCraftApp {
         changed
     }
 
-    /// Fixed-size A4 pages on a recessed desk. Geometry derives from the body
-    /// size, so zoom scales pages without ever reflowing them (like Word).
+    /// Fixed-size A4 pages on a recessed desk: the shared layout engine
+    /// paints the pages, the widget turns input into commands. Zoom scales
+    /// painted geometry only — never a line or page break.
     fn editor_view(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default()
             .frame(
@@ -5363,856 +5887,48 @@ impl ScriptCraftApp {
                             ui.heading("ScriptCraft");
                             ui.label("A 100% Rust screenwriting studio (egui + eframe).");
                             ui.label(
-                                "Open a .kitsp via the File menu, or create a new script with File ▸ New…",
+                                "Open a .kitsp via the File menu, or create a new script with File \u{25b8} New\u{2026}",
                             );
                         });
                     });
                     return;
                 }
-                let mut focused: Option<(usize, usize, usize)> = None; // (si, bi, start)
-                let mut advance_from: Option<(usize, usize, usize)> = None; // (bi, start, end)
-                let mut cycle: Option<usize> = None; // bi (refocuses focused_chunk)
-                let mut jump_to: Option<(usize, bool)> = None; // (flat chunk idx, forward)
-                let mut delete_empty: Option<(usize, usize, usize)> = None; // (bi, start, end)
-                let mut became_dirty = false;
-
-                // Trackpad pinch (or ⌘/Ctrl+scroll) zooms the fixed pages.
-                let pinch = ctx.input(|i| i.zoom_delta());
+                // Trackpad pinch (or \u{2318}/Ctrl+scroll) zooms the fixed pages,
+                // keeping the point under the pointer pinned (camera zoom).
+                let (pinch, pointer) = ctx.input(|i| (i.zoom_delta(), i.pointer.latest_pos()));
+                let mut zoom_anchor = None;
                 if (pinch - 1.0).abs() > 1e-3 {
+                    self.fit = FitMode::Off;
                     self.zoom = (self.zoom * pinch).clamp(0.25, 4.0);
+                    zoom_anchor = pointer;
                 }
-
-                let scenes: Vec<Scene> = self
-                    .project
-                    .as_ref()
-                    .map(|p| p.scenes())
-                    .unwrap_or_default();
-                // Owner scene per block for focus-sync + heading numbers.
-                let mut scene_of =
-                    vec![0usize; self.project.as_ref().map(|p| p.blocks.len()).unwrap_or(0)];
-                for (si, s) in scenes.iter().enumerate() {
-                    for &bi in &s.blocks {
-                        if bi < scene_of.len() {
-                            scene_of[bi] = si;
-                        }
-                    }
-                }
-                let pages: Vec<Page> = self.pages.clone();
-                // Flat chunk order for arrow-key traversal across pages.
-                let flat: Vec<(usize, usize, usize)> = pages
-                    .iter()
-                    .flat_map(|p| p.chunks.iter().map(|c| (c.bi, c.start, c.end)))
-                    .collect();
-                if scenes.is_empty() {
-                    ui.label("Project has no scenes.");
-                    return;
-                }
-                self.selected_scene = self.selected_scene.min(scenes.len() - 1);
-                let focus_now = self.pending_focus.take();
-                let caret_now = self.pending_caret.take();
-                let scroll_now = self.pending_scroll;
-                // Rendered zoom is snapped to the glyph pixel grid so pages
-                // and letters step together at every pinch interval.
-                let zoom = self.render_zoom(ui.ctx().pixels_per_point());
-                let body = BODY_PT * zoom;
-                // Measured Courier New row factor (see docs/kit-design.md).
-                let line_h = body * ROW_FACTOR;
-                let text_w = 58.0 * 0.6 * body;
-                let page_w = text_w / (147.5 / 210.0);
-                let page_h = page_w * 297.0 / 210.0;
-                let (pad_l, pad_r, pad_t, pad_b) = (
-                    page_w * 37.5 / 210.0,
-                    page_w * 25.0 / 210.0,
-                    page_h * 25.0 / 297.0,
-                    page_h * 12.5 / 297.0,
-                );
-
-                // Every rendered text row, for click-anywhere caret placement.
-                let mut chunk_rects: Vec<(usize, usize, usize, egui::Rect)> = Vec::new();
-                let mut page_click: Option<egui::Pos2> = None;
-                self.debug_row_bounds.clear();
-
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-                        ui.spacing_mut().item_spacing.y = 18.0 * zoom;
-                        ui.add_space(22.0 * zoom);
-                        for (pi, page) in pages.iter().enumerate() {
-                            let (prect, presp) = ui.allocate_exact_size(
-                                egui::vec2(page_w, page_h),
-                                egui::Sense::click(),
-                            );
-                            paint_page(ui.painter(), prect);
-                            // KIT numbering: first script page unnumbered,
-                            // the rest "2.", "3."… in the top margin.
-                            if pi > 0 {
-                                ui.painter().text(
-                                    egui::pos2(
-                                        prect.right() - pad_r,
-                                        prect.top() + pad_t - line_h * 0.4,
-                                    ),
-                                    egui::Align2::RIGHT_BOTTOM,
-                                    format!("{}.", pi + 1),
-                                    egui::FontId::new(body, MONO),
-                                    kit().disabled_text,
-                                );
-                            }
-                            let content = egui::Rect::from_min_max(
-                                egui::pos2(prect.left() + pad_l, prect.top() + pad_t),
-                                egui::pos2(prect.right() - pad_r, prect.bottom() - pad_b),
-                            );
-                            let mut cui = ui.new_child(
-                                egui::UiBuilder::new()
-                                    .max_rect(content)
-                                    .layout(egui::Layout::top_down(egui::Align::Min)),
-                            );
-                            cui.set_width(text_w);
-                            cui.spacing_mut().item_spacing.y = 0.0;
-                            // Chunks are placed on an absolute row grid: each
-                            // starts exactly at its model line index, so no
-                            // per-chunk layout offsets can accumulate.
-                            let mut cursor_lines: usize = 0;
-                            for chunk in &page.chunks {
-                                let bi = chunk.bi;
-                                let (btype, btext) =
-                                    match self.project.as_ref().and_then(|p| p.blocks.get(bi)) {
-                                        Some(b) => (
-                                            b.element_type,
-                                            chunk_text(
-                                                &self.project.as_ref().unwrap().blocks,
-                                                bi,
-                                                chunk.start,
-                                                chunk.end,
-                                            ),
-                                        ),
-                                        None => continue,
-                                    };
-                                let rows = chunk_rows(&btext, btype);
-                                let top_lines = usize::from(chunk.top);
-                                let cue_lines = usize::from(chunk.contd);
-                                let more_lines = usize::from(chunk.more);
-                                let y_cue =
-                                    content.top() + line_h * (cursor_lines + top_lines) as f32;
-                                let y_text = y_cue + line_h * cue_lines as f32;
-                                let y_more = y_text + line_h * rows as f32;
-                                cursor_lines += top_lines + cue_lines + rows + more_lines;
-                                let si = scene_of.get(bi).copied().unwrap_or(0);
-                                let focus_row = focus_now == Some((bi, chunk.start));
-                                let caret_off = caret_now
-                                    .filter(|&(b, s, _)| b == bi && s == chunk.start)
-                                    .map(|(_, _, off)| off);
-                                let resp = self.row_editor(
-                                    &mut cui,
-                                    bi,
-                                    si,
-                                    btype,
-                                    chunk.start,
-                                    chunk.end,
-                                    chunk.more,
-                                    chunk.contd,
-                                    text_w,
-                                    body,
-                                    rows,
-                                    if chunk.contd { Some(y_cue) } else { None },
-                                    y_text,
-                                    if chunk.more { Some(y_more) } else { None },
-                                    focus_row,
-                                    caret_off,
-                                    &mut became_dirty,
-                                );
-                                chunk_rects.push((bi, chunk.start, chunk.end, resp.rect));
-                                self.debug_row_bounds.push((pi, resp.rect, prect));
-                                if scroll_now == Some((bi, chunk.start)) {
-                                    resp.scroll_to_me(Some(
-                                        if btype == ElementType::SceneHeading {
-                                            egui::Align::TOP
-                                        } else {
-                                            egui::Align::Center
-                                        },
-                                    ));
-                                }
-                                if resp.has_focus() {
-                                    focused = Some((si, bi, chunk.start));
-                                    self.focused_chunk = Some((bi, chunk.start));
-                                    // Consume navigation keys so the editor
-                                    // doesn't also move its cursor.
-                                    let tab = ctx.input_mut(|i| {
-                                        i.consume_key(egui::Modifiers::NONE, egui::Key::Tab)
-                                    });
-                                    if tab {
-                                        cycle = Some(bi);
-                                    } else if ctx.input(|i| {
-                                        i.key_pressed(egui::Key::Enter)
-                                            && !i.modifiers.command
-                                            && !i.modifiers.shift
-                                    }) {
-                                        advance_from = Some((bi, chunk.start, chunk.end));
-                                    } else if ctx.input_mut(|i| {
-                                        i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp)
-                                    }) && at_text_start(ctx, bi, chunk.start)
-                                    {
-                                        // Move to the previous visible chunk.
-                                        if let Some(pos) = flat
-                                            .iter()
-                                            .position(|&(b, s, _)| b == bi && s == chunk.start)
-                                        {
-                                            jump_to = Some((pos, false));
-                                        }
-                                    } else if ctx.input_mut(|i| {
-                                        i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)
-                                    }) && at_text_end(ctx, bi, chunk.start, &btext)
-                                    {
-                                        if let Some(pos) = flat
-                                            .iter()
-                                            .position(|&(b, s, _)| b == bi && s == chunk.start)
-                                        {
-                                            jump_to = Some((pos, true));
-                                        }
-                                    } else if ctx.input_mut(|i| {
-                                        i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft)
-                                    }) && at_text_start(ctx, bi, chunk.start)
-                                    {
-                                        // Word-style: Left at the text start walks
-                                        // into the previous chunk, caret at its end.
-                                        if let Some(pos) = flat
-                                            .iter()
-                                            .position(|&(b, s, _)| b == bi && s == chunk.start)
-                                        {
-                                            jump_to = Some((pos, false));
-                                        }
-                                    } else if ctx.input_mut(|i| {
-                                        i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight)
-                                    }) && at_text_end(ctx, bi, chunk.start, &btext)
-                                    {
-                                        if let Some(pos) = flat
-                                            .iter()
-                                            .position(|&(b, s, _)| b == bi && s == chunk.start)
-                                        {
-                                            jump_to = Some((pos, true));
-                                        }
-                                    } else if btext.trim().is_empty()
-                                        && ctx.input_mut(|i| {
-                                            i.consume_key(
-                                                egui::Modifiers::NONE,
-                                                egui::Key::Backspace,
-                                            )
-                                        })
-                                    {
-                                        delete_empty = Some((bi, chunk.start, chunk.end));
-                                    }
-                                }
-                            }
-                            if presp.clicked() {
-                                page_click =
-                                    Some(presp.interact_pointer_pos().unwrap_or(prect.center()));
-                            }
-                            ui.add_space(26.0 * zoom);
-                        }
-                    });
-                });
-
-                // Click anywhere on a page: focus the nearest row and put the
-                // caret at the clicked column (Word-style, no dead zones).
-                if let Some(pos) = page_click {
-                    if let Some(&(bi, start, end, rect)) = chunk_rects.iter().min_by(|a, b| {
-                        let da = a.3.center().distance_sq(pos);
-                        let db = b.3.center().distance_sq(pos);
-                        da.total_cmp(&db)
-                    }) {
-                        let len = end.saturating_sub(start).max(1);
-                        let idx = (((pos.x - rect.left()) / (0.6 * body)).round().max(0.0)
-                            as usize)
-                            .min(len);
-                        set_caret(ctx, bi, start, idx, idx);
-                        self.pending_focus = Some((bi, start));
-                        self.selected_block = Some(bi);
-                        if let Some(p) = &self.project {
-                            for (si, s) in p.scenes().iter().enumerate() {
-                                if s.blocks.contains(&bi) {
-                                    self.selected_scene = si;
-                                    break;
-                                }
-                            }
-                        }
-                        self.text_snapshot_for = None;
-                    }
-                }
-
-                if let Some((si, bi, start)) = focused {
-                    if self.selected_block != Some(bi) {
-                        self.selected_block = Some(bi);
-                        self.selected_scene = si;
-                        self.text_snapshot_for = None;
-                    }
-                    self.focused_chunk = Some((bi, start));
-                    if self.typewriter {
-                        self.pending_scroll = Some((bi, start));
-                    }
-                }
-                if let Some(bi) = cycle {
-                    let back = ctx.input(|i| i.modifiers.shift);
-                    self.commit();
-                    if let Some(p) = self.project.as_mut() {
-                        if let Some(b) = p.blocks.get_mut(bi) {
-                            b.element_type = if back {
-                                tab_prev(b.element_type)
-                            } else {
-                                tab_next(b.element_type)
-                            };
-                            if b.element_type == ElementType::SceneHeading && b.kit_uuid.is_none() {
-                                b.kit_uuid = Some(format!("{{{}}}", uuid::Uuid::new_v4()));
-                            }
-                            if auto_upper(b.element_type) {
-                                b.text = b.text.to_uppercase();
-                            }
-                        }
-                    }
-                    self.text_snapshot_for = None;
-                    self.pending_focus = self.focused_chunk.or(Some((bi, 0)));
-                    became_dirty = true;
-                }
-                if let Some((bi, start, end)) = advance_from {
-                    // Strip the newline Enter just inserted into this chunk.
-                    let next = if let Some(p) = self.project.as_mut() {
-                        let slice = chunk_text(&p.blocks, bi, start, end);
-                        if slice.ends_with('\n') {
-                            let mut trimmed = slice.trim_end_matches('\n').to_string();
-                            if slice.ends_with("\n\n") {
-                                trimmed.push('\n');
-                            }
-                            replace_chunk(&mut p.blocks, bi, start, end, &trimmed);
-                        }
-                        p.blocks.get(bi).map(|b| enter_next(b.element_type))
-                    } else {
-                        None
-                    };
-                    if let Some(next) = next {
-                        self.commit();
-                        if let Some(p) = self.project.as_mut() {
-                            let at = (bi + 1).min(p.blocks.len());
-                            let mut nb = ScriptBlock::new(next, String::new());
-                            if next == ElementType::SceneHeading {
-                                nb.kit_uuid = Some(format!("{{{}}}", uuid::Uuid::new_v4()));
-                            }
-                            p.blocks.insert(at, nb);
-                            self.selected_block = Some(at);
-                            self.pending_focus = Some((at, 0));
-                        }
-                        self.text_snapshot_for = None;
-                        became_dirty = true;
-                    }
-                }
-                if let Some((flat_idx, forward)) = jump_to {
-                    let order: &[(usize, usize, usize)] = &flat;
-                    if !order.is_empty() {
-                        let t = if forward {
-                            (flat_idx + 1).min(order.len() - 1)
-                        } else {
-                            flat_idx.saturating_sub(1)
-                        };
-                        let (nbi, nstart, nend) = order[t];
-                        self.selected_block = Some(nbi);
-                        if let Some(p) = &self.project {
-                            for (si, s) in p.scenes().iter().enumerate() {
-                                if s.blocks.contains(&nbi) {
-                                    self.selected_scene = si;
-                                    break;
-                                }
-                            }
-                        }
-                        // Caret enters from the edge you're coming from:
-                        // forward jumps land at the start, backward at the end.
-                        let caret = if forward {
-                            0
-                        } else {
-                            nend.saturating_sub(nstart)
-                        };
-                        set_caret(ctx, nbi, nstart, caret, caret);
-                        self.pending_scroll = Some((nbi, nstart));
-                        self.pending_focus = Some((nbi, nstart));
-                        self.text_snapshot_for = None;
-                    }
-                }
-                if let Some((bi, start, end)) = delete_empty {
-                    // Backspace on an empty chunk: drop just its paragraphs if
-                    // the block spans pages, else the whole block (like Word).
-                    let n = self.project.as_ref().map(|p| p.blocks.len()).unwrap_or(0);
-                    if n > 1 {
-                        let multi = self
-                            .project
-                            .as_ref()
-                            .and_then(|p| p.blocks.get(bi))
-                            .map(|b| b.text.split('\n').count() > end.saturating_sub(start))
-                            .unwrap_or(false);
-                        self.commit();
-                        if multi {
-                            if let Some(p) = self.project.as_mut() {
-                                replace_chunk(&mut p.blocks, bi, start, end, "");
-                            }
-                            self.selected_block = Some(bi);
-                            self.pending_focus = Some((bi, start.saturating_sub(1)));
-                            self.pending_scroll = Some((bi, start.saturating_sub(1)));
-                        } else {
-                            self.selected_block = Some(bi);
-                            self.delete_selected();
-                            self.goto_block(bi.saturating_sub(1));
-                        }
-                        self.text_snapshot_for = None;
-                        became_dirty = true;
-                    }
-                }
-                if became_dirty {
-                    self.dirty = true;
-                    self.refresh_derived();
-                }
-                if scroll_now.is_some() {
-                    self.pending_scroll = None;
-                }
+                let avail = ui.available_size();
+                let zoom = match self.fit {
+                    FitMode::Off => self.zoom,
+                    FitMode::Page => crate::script_view::fit_page_zoom(avail),
+                    FitMode::Width => crate::script_view::fit_width_zoom(avail),
+                };
+                self.last_viewport = avail;
+                self.last_render_zoom = zoom;
+                let out = match (&self.project, &self.doc) {
+                    (Some(p), Some(doc)) => crate::script_view::script_view(
+                        ui,
+                        zoom,
+                        zoom_anchor,
+                        &p.blocks,
+                        doc,
+                        self.typewriter,
+                        &mut self.editor2,
+                    ),
+                    _ => crate::script_view::ScriptViewOutput::default(),
+                };
+                self.apply_editor2_output(out);
+                self.selected_block = self.editor2.selection.map(|s| s.focus.bi);
             });
     }
-
-    /// One always-editable draft chunk. Frameless Courier New on the page:
-    /// reads like a document, edits like one — the cursor goes wherever
-    /// you click, no select-to-arm step. Split blocks render (MORE) /
-    /// character (CONT'D) markers exactly like KIT's pagination.
-    #[allow(clippy::too_many_arguments)]
-    fn row_editor(
-        &mut self,
-        ui: &mut egui::Ui,
-        bi: usize,
-        si: usize,
-        btype: ElementType,
-        start: usize,
-        end: usize,
-        more: bool,
-        contd: bool,
-        text_w: f32,
-        body: f32,
-        rows: usize,
-        // Grid y for the (CONT'D) cue line, when this chunk is a continuation.
-        y_cue: Option<f32>,
-        // Grid y where the text band starts.
-        y_text: f32,
-        // Grid y for the (MORE) line, when this chunk continues on.
-        y_more: Option<f32>,
-        want_focus: bool,
-        caret_off: Option<usize>,
-        became_dirty: &mut bool,
-    ) -> egui::Response {
-        // Exact template columns (offsets × widths); dialogue is a centered
-        // fixed column so long lines wrap instead of running right.
-        let (offset, _) = match btype {
-            ElementType::Character | ElementType::NonPrintable => (
-                text_w * FRAC_CHARACTER_OFF,
-                text_w * (1.0 - FRAC_CHARACTER_OFF),
-            ),
-            ElementType::Parenthetical => (text_w * FRAC_PAREN_OFF, text_w * FRAC_PAREN_W),
-            ElementType::Dialogue => (text_w * FRAC_DIALOG_OFF, text_w * FRAC_DIALOG_W),
-            ElementType::Lyrics => (text_w * FRAC_LYRICS_OFF, text_w * FRAC_LYRICS_W),
-            _ => (0.0, text_w),
-        };
-        let font = match btype {
-            ElementType::SceneHeading | ElementType::Character | ElementType::Transition => {
-                egui::FontId::new(body, bold_mono())
-            }
-            ElementType::Lyrics => egui::FontId::new(body, italic_mono()),
-            _ => egui::FontId::new(body, MONO),
-        };
-        let color = match btype {
-            ElementType::NonPrintable => kit().disabled_text,
-            ElementType::SceneHeading => kit().heading_text,
-            _ => kit().text,
-        };
-        let single_line = matches!(
-            btype,
-            ElementType::SceneHeading
-                | ElementType::SceneCharacters
-                | ElementType::Character
-                | ElementType::Parenthetical
-                | ElementType::Transition
-        );
-        let slice = self
-            .project
-            .as_ref()
-            .map(|p| chunk_text(&p.blocks, bi, start, end))
-            .unwrap_or_default();
-
-        let line_h = body * ROW_FACTOR;
-        // Continued dialogue gets its character cue back, KIT-style — its own
-        // grid row above the text, click-to-focus.
-        if contd {
-            if let Some(y_cue) = y_cue {
-                if let Some(cue) = self
-                    .project
-                    .as_ref()
-                    .and_then(|p| cue_name_for(&p.blocks, bi))
-                {
-                    let band = egui::Rect::from_min_size(
-                        egui::pos2(ui.max_rect().left() + offset, y_cue),
-                        egui::vec2((text_w - offset).max(40.0), line_h),
-                    );
-                    let mut cue_ui = ui.new_child(
-                        egui::UiBuilder::new()
-                            .max_rect(band)
-                            .layout(egui::Layout::top_down(egui::Align::Min)),
-                    );
-                    cue_ui.spacing_mut().button_padding = egui::vec2(2.0, 0.0);
-                    if cue_ui
-                        .selectable_label(
-                            false,
-                            egui::RichText::new(format!("{cue} (CONT'D)"))
-                                .strong()
-                                .size(body)
-                                .family(bold_mono())
-                                .color(kit().text),
-                        )
-                        .clicked()
-                    {
-                        self.pending_focus = Some((bi, start));
-                    }
-                }
-            }
-        }
-
-        // The editor sits top-aligned in its exact grid band with zero margin,
-        // so the typed text can never creep away from the page grid.
-        let x0 = ui.max_rect().left()
-            + if btype == ElementType::SceneHeading {
-                0.0
-            } else {
-                offset
-            };
-        // Rendered glyph advances snap to the physical pixel grid, which can be
-        // a hair wider than the nominal 0.6 em cell — allow that much slack so
-        // epaint never wraps a line the paginator counted as a single row.
-        let golden = ui.ctx().fonts(|f| {
-            f.layout_no_wrap(
-                "0".repeat(col_chars(btype)),
-                egui::FontId::new(body, MONO),
-                egui::Color32::WHITE,
-            )
-            .rect
-            .width()
-        });
-        let band = egui::Rect::from_min_size(
-            egui::pos2(x0, y_text),
-            egui::vec2(golden + 0.6 * body + 1.0, line_h * rows as f32),
-        );
-        let mut rui = ui.new_child(
-            egui::UiBuilder::new()
-                .max_rect(band)
-                .layout(egui::Layout::top_down(egui::Align::Min)),
-        );
-        let wrap_w = band.width();
-        // epaint snaps the row pitch of multiline text to whole physical
-        // pixels, so long paragraphs creep by up to half a pixel per row
-        // against the page grid (visible as tiny "skirting" while zooming).
-        // Re-pin every galley row to the exact model line grid instead.
-        let layouter_font = font.clone();
-        let mut layouter = |ui: &egui::Ui, buf: &dyn egui::TextBuffer, wrap_width: f32| {
-            let job = if single_line {
-                egui::text::LayoutJob::simple_singleline(
-                    buf.as_str().to_owned(),
-                    layouter_font.clone(),
-                    color,
-                )
-            } else {
-                egui::text::LayoutJob::simple(
-                    buf.as_str().to_owned(),
-                    layouter_font.clone(),
-                    color,
-                    wrap_width,
-                )
-            };
-            let galley = ui.fonts(|f| f.layout_job(job));
-            if galley.rows.len() <= 1 {
-                return galley;
-            }
-            let mut g = (*galley).clone();
-            for (i, row) in g.rows.iter_mut().enumerate() {
-                row.pos.y = i as f32 * line_h;
-            }
-            let mut rect = egui::Rect::ZERO;
-            let mut bounds = egui::Rect::NOTHING;
-            for row in &g.rows {
-                rect |= row.rect();
-                bounds |= row.visuals.mesh_bounds.translate(row.pos.to_vec2());
-            }
-            g.rect = rect;
-            g.mesh_bounds = bounds;
-            std::sync::Arc::new(g)
-        };
-        let wrapper = {
-            let ui = &mut rui;
-            let mut buf = slice.clone();
-            let output = if single_line {
-                egui::TextEdit::singleline(&mut buf)
-            } else {
-                egui::TextEdit::multiline(&mut buf).desired_rows(rows.clamp(1, 30))
-            }
-            .id(egui::Id::new(("script-block", bi, start)))
-            .desired_width(wrap_w)
-            .margin(egui::Margin::ZERO)
-            .frame(false)
-            .font(font)
-            .text_color(color)
-            .layouter(&mut layouter)
-            .show(ui);
-            let resp = output.response;
-            if buf != slice {
-                // First keystroke of a focus session snapshots for Ctrl+Z.
-                if self.text_snapshot_for != Some(bi) {
-                    self.commit();
-                    self.text_snapshot_for = Some(bi);
-                }
-                if let Some(p) = self.project.as_mut() {
-                    let mut new_text = buf.clone();
-                    if auto_upper(btype) {
-                        new_text = new_text.to_uppercase();
-                    }
-                    if replace_chunk(&mut p.blocks, bi, start, end, &new_text) {
-                        *became_dirty = true;
-                    }
-                }
-                if btype == ElementType::SceneHeading {
-                    self.sync_card_title(bi);
-                }
-            }
-            if want_focus {
-                resp.request_focus();
-                if let Some(off) = caret_off {
-                    set_caret(ui.ctx(), bi, start, off, off);
-                }
-            }
-            // Floating autocomplete at the caret (KIT-style dropdown).
-            // State lives in `self.autocomplete` so the popup keeps
-            // rendering on the frame where pressing a suggestion moves
-            // focus from this TextEdit to the popup — otherwise the
-            // click's release lands on a popup that already vanished.
-            // Only an actual edit opens the dropdown: merely focusing a
-            // block (clicking a scene in the navigator, clicking into the
-            // text) must not pop it up.
-            if resp.has_focus() && resp.changed() {
-                let fresh = caret_prefix(ui.ctx(), bi, start, &buf)
-                    .filter(|(prefix, _)| !prefix.trim().is_empty())
-                    .and_then(|(prefix, caret)| {
-                        let sugg = self
-                            .project
-                            .as_ref()
-                            .map(|p| candidates(p, btype, &prefix))
-                            .unwrap_or_default();
-                        if sugg.is_empty() {
-                            None
-                        } else {
-                            Some((caret, sugg))
-                        }
-                    });
-                self.autocomplete = fresh.map(|(caret, sugg)| AutoState {
-                    bi,
-                    start,
-                    caret,
-                    sugg,
-                });
-            }
-            let owns_popup = self
-                .autocomplete
-                .as_ref()
-                .is_some_and(|a| a.bi == bi && a.start == start);
-            if owns_popup {
-                let (caret, sugg) = {
-                    let a = self.autocomplete.as_ref().unwrap();
-                    (a.caret, a.sugg.clone())
-                };
-                let mut pick: Option<String> = None;
-                let mut popup_rect: Option<egui::Rect> = None;
-                // Anchor the dropdown at the typing caret, not the box.
-                let anchor = output
-                    .cursor_range
-                    .map(|cr| {
-                        let r = output.galley.pos_from_cursor(cr.primary);
-                        output.galley_pos + r.left_bottom().to_vec2() + egui::vec2(0.0, 6.0)
-                    })
-                    .unwrap_or_else(|| resp.rect.left_bottom() + egui::vec2(0.0, 6.0));
-                egui::Popup::new(
-                    egui::Id::new(("autocomplete", bi, start)),
-                    ui.ctx().clone(),
-                    egui::PopupAnchor::Position(anchor),
-                    egui::LayerId::new(
-                        egui::Order::Foreground,
-                        egui::Id::new("autocomplete-layer"),
-                    ),
-                )
-                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-                .show(|ui| {
-                    ui.set_min_width(220.0);
-                    for s in &sugg {
-                        if ui.selectable_label(false, s).clicked() {
-                            pick = Some(s.clone());
-                        }
-                    }
-                    popup_rect = Some(ui.min_rect());
-                });
-                if let Some(s) = pick {
-                    self.commit();
-                    let mut after = 0usize;
-                    let changed = self
-                        .project
-                        .as_mut()
-                        .map(|p| {
-                            // Scene-heading suggestions are whole lines, so
-                            // replace the line; other elements complete the
-                            // token under the caret.
-                            let mut completed = if btype == ElementType::SceneHeading {
-                                complete_line_at(&buf, caret, &s)
-                            } else {
-                                complete_at(&buf, caret, &s)
-                            };
-                            if auto_upper(btype) {
-                                completed = completed.to_uppercase();
-                            }
-                            let chars: Vec<char> = buf.chars().collect();
-                            let caret = caret.min(chars.len());
-                            let replaced_from = if btype == ElementType::SceneHeading {
-                                chars[..caret]
-                                    .iter()
-                                    .rposition(|&c| c == '\n')
-                                    .map(|i| i + 1)
-                                    .unwrap_or(0)
-                            } else {
-                                let mut tok = caret;
-                                while tok > 0 && !chars[tok - 1].is_whitespace() {
-                                    tok -= 1;
-                                }
-                                tok
-                            };
-                            after = replaced_from + s.chars().count();
-                            replace_chunk(&mut p.blocks, bi, start, end, &completed)
-                        })
-                        .unwrap_or(false);
-                    if changed {
-                        *became_dirty = true;
-                    }
-                    self.text_snapshot_for = None;
-                    // Caret right after the completed token/line.
-                    set_caret(ui.ctx(), bi, start, after, after);
-                    self.pending_focus = Some((bi, start));
-                    self.autocomplete = None;
-                } else {
-                    // Close on Escape, on caret movement, or on any click
-                    // outside the popup (including one back in this editor).
-                    let close = ui.input(|i| {
-                        i.key_pressed(egui::Key::Escape)
-                            || [
-                                egui::Key::ArrowLeft,
-                                egui::Key::ArrowRight,
-                                egui::Key::ArrowUp,
-                                egui::Key::ArrowDown,
-                                egui::Key::Home,
-                                egui::Key::End,
-                            ]
-                            .iter()
-                            .any(|k| i.key_pressed(*k))
-                            || (i.pointer.any_pressed()
-                                && i.pointer
-                                    .interact_pos()
-                                    .map(|p| !popup_rect.map(|r| r.contains(p)).unwrap_or(false))
-                                    .unwrap_or(false))
-                    });
-                    if close {
-                        self.autocomplete = None;
-                    }
-                }
-            }
-            if more {
-                // (MORE) occupies the reserved grid row right below the text.
-                if let Some(y_more) = y_more {
-                    ui.painter().text(
-                        egui::pos2(ui.max_rect().right(), y_more),
-                        egui::Align2::RIGHT_TOP,
-                        "(MORE)",
-                        egui::FontId::new(body, MONO),
-                        kit().text,
-                    );
-                }
-            }
-            if btype == ElementType::SceneHeading {
-                // Hanging number in the margin: same baseline, zero layout cost.
-                ui.painter().text(
-                    egui::pos2(resp.rect.left() - 8.0, resp.rect.center().y),
-                    egui::Align2::RIGHT_CENTER,
-                    self.scene_label(si),
-                    egui::FontId::new(body, bold_mono()),
-                    kit().disabled_text,
-                );
-            }
-            resp
-        };
-        wrapper
-    }
 }
 
-/// Rendered rows for a chunk slice — the same paragraph wrap the paginator
-/// counts, so the row grid always matches the fixed page height.
-fn chunk_rows(text: &str, t: ElementType) -> usize {
-    let cpl = col_chars(t);
-    text.split('\n')
-        .map(|p| wrap_rows_chars(p, cpl))
-        .sum::<usize>()
-        .max(1)
-}
-
-/// Chunk text before the caret, plus the caret offset, for autocomplete.
-fn caret_prefix(
-    ctx: &egui::Context,
-    bi: usize,
-    start: usize,
-    text: &str,
-) -> Option<(String, usize)> {
-    let id = egui::Id::new(("script-block", bi, start));
-    let cursor = egui::TextEdit::load_state(ctx, id)?.cursor.char_range()?;
-    let idx = cursor.primary.index.min(cursor.secondary.index);
-    let upto: String = text.chars().take(idx).collect();
-    // Complete the current visual line: text after its last newline.
-    let line = upto.rsplit('\n').next().unwrap_or("");
-    Some((line.to_string(), idx))
-}
-
-/// Move the stored cursor of a chunk editor to the char range [from, to].
-fn set_caret(ctx: &egui::Context, bi: usize, start: usize, from: usize, to: usize) {
-    let id = egui::Id::new(("script-block", bi, start));
-    if let Some(mut state) = egui::TextEdit::load_state(ctx, id) {
-        use egui::{epaint::text::cursor::CCursor, text_selection::CCursorRange};
-        state.cursor.set_char_range(Some(CCursorRange::two(
-            CCursor {
-                index: from,
-                prefer_next_row: false,
-            },
-            CCursor {
-                index: to,
-                prefer_next_row: true,
-            },
-        )));
-        egui::TextEdit::store_state(ctx, id, state);
-    }
-}
-
-/// Cursor at the very start of the block's text (for ArrowUp traversal).
-fn at_text_start(ctx: &egui::Context, bi: usize, start: usize) -> bool {
-    egui::TextEdit::load_state(ctx, egui::Id::new(("script-block", bi, start)))
-        .and_then(|s| s.cursor.char_range())
-        .map(|r| r.primary.index == 0 && r.secondary.index == 0)
-        .unwrap_or(false)
-}
-
-/// Cursor at the very end of the block's text (for ArrowDown traversal).
-fn at_text_end(ctx: &egui::Context, bi: usize, start: usize, text: &str) -> bool {
-    let len = text.chars().count();
-    egui::TextEdit::load_state(ctx, egui::Id::new(("script-block", bi, start)))
-        .and_then(|s| s.cursor.char_range())
-        .map(|r| r.primary.index >= len && r.secondary.index >= len)
-        .unwrap_or(false)
-}
-
-/// Cue text normalized for matching ("NAME (V.O.)" → "NAME").
+/// Cue text normalized for report matching ("NAME (V.O.)" -> "NAME").
 fn cue_name(text: &str) -> String {
     let t = text.trim().to_uppercase();
     match t.find(" (") {

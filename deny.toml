@@ -1,0 +1,57 @@
+# cargo-deny configuration — https://embarkstudios.github.io/cargo-deny/
+# Run locally with: cargo deny check
+
+[graph]
+# Targets we ship/support. Restricting the graph keeps platform-only
+# dependencies (Android, wasm, UEFI) out of the license/advisory checks.
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+]
+
+[advisories]
+version = 2
+yanked = "deny"
+# Only flag unmaintained crates that are direct dependencies of workspace
+# members. The transitive unmaintained findings (bincode and ttf-parser via
+# printpdf's azul-css layout stack, paste and proc-macro-error via the GUI
+# stack, zbus_names/zvariant via rfd/accesskit on Linux) all lack fixed
+# releases and none of them parse untrusted input on our behalf. Revisit on
+# each dependency bump; any *vulnerability* (not just unmaintained) is still
+# a hard failure.
+unmaintained = "workspace"
+
+[licenses]
+version = 2
+# Permissive licenses, plus MPL-2.0 (file-level copyleft; azul-simplecss via
+# printpdf's layout stack — no obligations on our own files). OFL/Ubuntu-font
+# come from the fonts embedded in epaint_default_fonts; BSL-1.0 is Boost
+# (Windows clipboard support).
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "MPL-2.0",
+    "OFL-1.1",
+    "Ubuntu-font-1.0",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

@@ -1,4 +1,5 @@
-use scriptcraft_core::{kitsp, pdf};
+use scriptcraft_core::kitsp;
+use scriptcraft_layout::pdf;
 
 fn main() {
     let path =

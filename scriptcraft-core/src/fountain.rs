@@ -88,9 +88,10 @@ mod tests {
     use crate::model::ScriptBlock;
 
     fn meta(author: &str) -> crate::kitsp::Metadata {
-        let mut m = crate::kitsp::Metadata::default();
-        m.author = author.to_string();
-        m
+        crate::kitsp::Metadata {
+            author: author.to_string(),
+            ..Default::default()
+        }
     }
 
     #[test]
@@ -351,9 +352,9 @@ pub fn parse_fountain(text: &str) -> (Project, FountainMeta) {
             }
             continue;
         }
-        if t.starts_with("[[") {
-            if let Some(end) = t.find("]]") {
-                let inner = t[2..end].trim();
+        if let Some(stripped) = t.strip_prefix("[[") {
+            if let Some(end) = stripped.find("]]") {
+                let inner = stripped[..end].trim();
                 push(
                     &mut blocks,
                     &mut prev,
@@ -361,7 +362,7 @@ pub fn parse_fountain(text: &str) -> (Project, FountainMeta) {
                     inner.to_string(),
                 );
             } else {
-                open_note = Some(t[2..].trim().to_string());
+                open_note = Some(stripped.trim().to_string());
             }
             continue;
         }

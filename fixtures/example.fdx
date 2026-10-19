@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+<FinalDraft DocumentType="Script" Template="No" Version="1">
+<Content>
+<Paragraph Type="Scene Heading" Number="1">
+<Text>INT. COFFEE SHOP - MORNING</Text>
+</Paragraph>
+<Paragraph Type="Action">
+<Text>The room hums with morning chatter.</Text>
+<ScriptNote Type="General" Color="#000000" ID="1"><Text>Check the shop name with production.</Text></ScriptNote>
+</Paragraph>
+<Paragraph Type="Character">
+<Text>MIRA</Text>
+</Paragraph>
+<Paragraph Type="Parenthetical">
+<Text>(over the noise)</Text>
+</Paragraph>
+<Paragraph Type="Dialogue">
+<Text>One espresso, please.</Text>
+</Paragraph>
+<Paragraph Type="Cast List">
+<Text>MIRA, BARISTA</Text>
+</Paragraph>
+<Paragraph Type="Transition">
+<Text>CUT TO:</Text>
+</Paragraph>
+<Paragraph Type="Shot">
+<Text>CLOSE ON THE ESPRESSO MACHINE</Text>
+</Paragraph>
+<Paragraph Type="Scene Heading" Number="2">
+<Text>EXT. STREET - CONTINUOUS</Text>
+</Paragraph>
+<Paragraph Type="Action">
+<Text>Mira steps into the rain &amp; opens her umbrella.</Text>
+</Paragraph>
+<Paragraph Type="General">
+<Text>Outline note: keep the scene under a page.</Text>
+</Paragraph>
+<Paragraph Type="Lyrics">
+<Text>Raindrops keep falling...</Text>
+</Paragraph>
+<Paragraph Type="New Act">
+<Text>ACT TWO</Text>
+</Paragraph>
+</Content>
+<TitlePage>
+<Content>
+<Paragraph Alignment="Center">
+<Text>THE MORNING RITUAL</Text>
+</Paragraph>
+<Paragraph Alignment="Center">
+<Text>Written by</Text>
+</Paragraph>
+<Paragraph Alignment="Center">
+<Text>M. HAYLL</Text>
+</Paragraph>
+<Paragraph Alignment="Left">
+<Text>mihail@example.com</Text>
+</Paragraph>
+</Content>
+</TitlePage>
+<Revisions>
+<Revision Color="White" FullRevision="No" ID="0" Mark="" Name="White" PageColor="White" TextColor="White" Visible="Yes"/>
+</Revisions>
+</FinalDraft>

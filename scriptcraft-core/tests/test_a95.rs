@@ -60,88 +60,6 @@ fn create_file_makes_loadable_project() {
 }
 
 #[test]
-fn a95_paginates_into_stable_pages() {
-    use scriptcraft_core::{editing, model::ElementType};
-    let p = kitsp::load_file(FIXTURE).expect("fixture must load");
-    let pages = editing::paginate(&p.blocks, editing::A4_LINES_PER_PAGE);
-    // ~27 screenplay pages expected for ~4900 words.
-    assert!(
-        (20..=35).contains(&pages.len()),
-        "unexpected page count {}",
-        pages.len()
-    );
-    // Every block appears exactly once, in order (chunks may repeat blocks).
-    let mut seen = vec![0usize; p.blocks.len()];
-    for page in &pages {
-        for c in &page.chunks {
-            for i in c.start..c.end {
-                seen[c.bi] += 1;
-                let _ = i;
-            }
-        }
-    }
-    // Paragraph ranges tile each block exactly (checked per block).
-    for (bi, b) in p.blocks.iter().enumerate() {
-        let n_paras = b.text.split('\n').count();
-        let mut covered = vec![false; n_paras];
-        for page in &pages {
-            for c in page.chunks.iter().filter(|c| c.bi == bi) {
-                for slot in covered.iter_mut().take(c.end.min(n_paras)).skip(c.start) {
-                    *slot = true;
-                }
-            }
-        }
-        assert!(covered.iter().all(|&x| x), "block {bi} not fully covered");
-    }
-    assert!(seen.iter().all(|&x| x >= 1), "every block placed");
-    // Only splittable types continue across pages.
-    for page in &pages {
-        for c in &page.chunks {
-            if c.contd || c.more {
-                let t = p.blocks[c.bi].element_type;
-                assert!(
-                    matches!(
-                        t,
-                        ElementType::Action
-                            | ElementType::Shot
-                            | ElementType::Dialogue
-                            | ElementType::Lyrics
-                    ),
-                    "unexpected split of {t:?} at block {}",
-                    c.bi
-                );
-            }
-        }
-    }
-    // No anchor stranded last on a page (except the final page).
-    let last_page = pages.len() - 1;
-    for (pi, page) in pages.iter().enumerate() {
-        if pi == last_page {
-            continue;
-        }
-        if let Some(last) = page.chunks.last() {
-            // An anchor may end a page only if its own content forced it
-            // (oversized single block); headings/cues split never.
-            if last.more || last.contd {
-                continue;
-            }
-            let t = p.blocks[last.bi].element_type;
-            assert!(
-                !matches!(
-                    t,
-                    ElementType::SceneHeading
-                        | ElementType::Character
-                        | ElementType::SceneCharacters
-                        | ElementType::Parenthetical
-                ),
-                "anchor stranded at page bottom: block {}",
-                last.bi
-            );
-        }
-    }
-}
-
-#[test]
 fn a95_fountain_export_import_is_stable() {
     use scriptcraft_core::fountain;
     let p = kitsp::load_file(FIXTURE).expect("fixture must load");
@@ -186,41 +104,6 @@ fn a95_save_persists_new_scene_card() {
     assert!(cards.iter().any(|c| c.title == "INT. ADDED - DAY"));
     let _ = std::fs::remove_file(&tmp);
     let _ = std::fs::remove_file(tmp.with_extension("kitsp.bak"));
-}
-
-#[test]
-fn a95_exports_valid_pdf() {
-    use scriptcraft_core::pdf;
-    let p = kitsp::load_file(FIXTURE).expect("fixture must load");
-    let regular = std::fs::read(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../scriptcraft-app/assets/fonts/cour.ttf"
-    ))
-    .expect("bundled Courier New");
-    let bold = std::fs::read(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../scriptcraft-app/assets/fonts/courb.ttf"
-    ))
-    .expect("bundled Courier New Bold");
-    let meta = kitsp::load_metadata(FIXTURE).expect("load metadata");
-    let bytes = pdf::to_pdf_bytes(&p, &meta, &pdf::ExportOptions::default(), &regular, &bold)
-        .expect("pdf renders");
-    assert!(bytes.starts_with(b"%PDF-"), "not a PDF");
-    assert!(
-        bytes.len() > 50_000,
-        "suspiciously small PDF: {}",
-        bytes.len()
-    );
-    let text = String::from_utf8_lossy(&bytes);
-    assert!(text.contains("A95"), "title missing from PDF");
-    // Page count matches the paginator's page count plus the title page
-    // (lopdf writes "/Type/Page" without a space; subtract the "/Type/Pages" node).
-    let pages = text
-        .matches("/Type/Page")
-        .count()
-        .saturating_sub(text.matches("/Type/Pages").count());
-    let expected = pdf::layout_pages(&p, &meta, &pdf::ExportOptions::default()).len() + 1;
-    assert_eq!(pages, expected, "PDF page count mismatch");
 }
 
 #[test]
@@ -306,7 +189,7 @@ fn a95_metadata_roundtrip() {
     m.logline_html = kitsp::text_to_html("Logline here.");
     m.synopsis_html = kitsp::text_to_html("Para one.\n\nPara two.");
     kitsp::save_metadata(&tmp, &m).expect("save metadata");
-    let m2 = kitsp::load_metadata(&tmp).expect("reload metadata");
+    let mut m2 = kitsp::load_metadata(&tmp).expect("reload metadata");
     assert_eq!(m2.genre, "Thriller/Horror");
     assert_eq!(m2.year, "2026");
     assert_eq!(m2.director, "Test Director");
@@ -317,6 +200,22 @@ fn a95_metadata_roundtrip() {
         kitsp::html_to_text(&m2.synopsis_html),
         "Para one.\n\nPara two."
     );
+    // Scene numbering round-trips through KIT's canonical keys.
+    m2.scene_number_prefix = "SC".to_string();
+    m2.scene_number_start = "5".to_string();
+    kitsp::save_metadata(&tmp, &m2).expect("save numbering");
+    let conn = rusqlite::Connection::open(&tmp).unwrap();
+    assert_eq!(
+        scenario_data_value(&conn, "scene_numbers_prefix").as_deref(),
+        Some("SC")
+    );
+    assert_eq!(
+        scenario_data_value(&conn, "scene_start_number").as_deref(),
+        Some("5")
+    );
+    let m3 = kitsp::load_metadata(&tmp).expect("reload metadata");
+    assert_eq!(m3.scene_number_prefix, "SC");
+    assert_eq!(m3.scene_number_start, "5");
     let _ = std::fs::remove_file(&tmp);
 }
 
@@ -359,4 +258,308 @@ fn research_image_roundtrip() {
     let entries = kitsp::load_research(&tmp).expect("reload");
     assert!(entries[0].image.is_none());
     let _ = std::fs::remove_file(&tmp);
+}
+
+/// Deterministic dump of every row of a query, for before/after comparison.
+/// BLOBs are hex-encoded, so a single changed byte cannot hide.
+fn dump_sql(conn: &rusqlite::Connection, sql: &str) -> Vec<String> {
+    use rusqlite::types::Value;
+    let mut stmt = conn.prepare(sql).expect("prepare dump");
+    let cols = stmt.column_count();
+    let mut rows = stmt.query([]).expect("query dump");
+    let mut out = Vec::new();
+    while let Some(row) = rows.next().expect("row") {
+        let mut vals = Vec::new();
+        for i in 0..cols {
+            let v: Value = row.get(i).expect("col");
+            vals.push(match v {
+                Value::Null => "NULL".to_string(),
+                Value::Integer(i) => format!("int:{i}"),
+                Value::Real(r) => format!("real:{r:?}"),
+                Value::Text(t) => format!("text:{t}"),
+                Value::Blob(b) => format!(
+                    "blob:{}",
+                    b.iter().map(|x| format!("{x:02x}")).collect::<String>()
+                ),
+            });
+        }
+        out.push(vals.join("\u{1f}"));
+    }
+    out
+}
+
+fn dump_table(conn: &rusqlite::Connection, table: &str) -> Vec<String> {
+    dump_sql(conn, &format!("SELECT * FROM {table}"))
+}
+
+fn scenario_data_value(conn: &rusqlite::Connection, key: &str) -> Option<String> {
+    conn.query_row(
+        "SELECT data_value FROM scenario_data WHERE data_name=?1",
+        rusqlite::params![key],
+        |r| r.get(0),
+    )
+    .ok()
+    .flatten()
+}
+
+/// KIT stores scene numbering in `scenario_data` under these keys
+/// (`KITScenaristCore/Domain/ScenarioData.cpp`): `scene_numbers_prefix`,
+/// `scene_start_number`. Loading must read them, not the legacy spelling.
+#[test]
+fn metadata_reads_kit_scene_number_keys() {
+    let tmp = std::env::temp_dir().join("scriptcraft_test_kit_keys.kitsp");
+    std::fs::copy(FIXTURE, &tmp).expect("copy fixture");
+    {
+        let conn = rusqlite::Connection::open(&tmp).unwrap();
+        conn.execute(
+            "UPDATE scenario_data SET data_value='SC' WHERE data_name='scene_numbers_prefix'",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE scenario_data SET data_value='3' WHERE data_name='scene_start_number'",
+            [],
+        )
+        .unwrap();
+    }
+    let m = kitsp::load_metadata(&tmp).expect("load metadata");
+    assert_eq!(m.scene_number_prefix, "SC");
+    assert_eq!(m.scene_number_start, "3");
+    let _ = std::fs::remove_file(&tmp);
+}
+
+/// Older ScriptCraft builds wrote the singular spelling; those projects must
+/// still load, and saving must not let the two spellings diverge.
+#[test]
+fn metadata_reads_and_migrates_legacy_scene_number_keys() {
+    let tmp = std::env::temp_dir().join("scriptcraft_test_legacy_keys.kitsp");
+    let _ = std::fs::remove_file(&tmp);
+    kitsp::create_file(&tmp, "Legacy").expect("create");
+    {
+        let conn = rusqlite::Connection::open(&tmp).unwrap();
+        // Emulate an old ScriptCraft project: canonical rows absent.
+        conn.execute(
+            "DELETE FROM scenario_data
+             WHERE data_name IN ('scene_numbers_prefix','scene_start_number')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO scenario_data (data_name, data_value)
+             VALUES ('scene_number_prefix','L'), ('scene_number_start','7')",
+            [],
+        )
+        .unwrap();
+    }
+
+    let mut m = kitsp::load_metadata(&tmp).expect("load metadata");
+    assert_eq!(m.scene_number_prefix, "L");
+    assert_eq!(m.scene_number_start, "7");
+
+    m.scene_number_prefix = "SC".to_string();
+    m.scene_number_start = "12".to_string();
+    kitsp::save_metadata(&tmp, &m).expect("save metadata");
+    {
+        let conn = rusqlite::Connection::open(&tmp).unwrap();
+        assert_eq!(
+            scenario_data_value(&conn, "scene_numbers_prefix").as_deref(),
+            Some("SC"),
+            "canonical KIT key must be written"
+        );
+        assert_eq!(
+            scenario_data_value(&conn, "scene_start_number").as_deref(),
+            Some("12")
+        );
+        assert_eq!(
+            scenario_data_value(&conn, "scene_number_prefix").as_deref(),
+            Some("SC"),
+            "existing legacy row must stay in sync"
+        );
+        assert_eq!(
+            scenario_data_value(&conn, "scene_number_start").as_deref(),
+            Some("12")
+        );
+    }
+    let m2 = kitsp::load_metadata(&tmp).expect("reload");
+    assert_eq!(m2.scene_number_prefix, "SC");
+    assert_eq!(m2.scene_number_start, "12");
+    let _ = std::fs::remove_file(&tmp);
+    let _ = std::fs::remove_file(tmp.with_extension("kitsp.bak"));
+}
+
+/// A project that never had the legacy keys must not gain them on save.
+#[test]
+fn save_metadata_does_not_invent_legacy_keys() {
+    let tmp = std::env::temp_dir().join("scriptcraft_test_no_legacy.kitsp");
+    let _ = std::fs::remove_file(&tmp);
+    kitsp::create_file(&tmp, "Fresh").expect("create");
+    let mut m = kitsp::load_metadata(&tmp).expect("load");
+    m.scene_number_prefix = "SC".to_string();
+    m.scene_number_start = "2".to_string();
+    kitsp::save_metadata(&tmp, &m).expect("save");
+    let conn = rusqlite::Connection::open(&tmp).unwrap();
+    assert_eq!(
+        scenario_data_value(&conn, "scene_numbers_prefix").as_deref(),
+        Some("SC")
+    );
+    assert_eq!(
+        scenario_data_value(&conn, "scene_number_prefix"),
+        None,
+        "legacy key should not be created"
+    );
+    let _ = std::fs::remove_file(&tmp);
+    let _ = std::fs::remove_file(tmp.with_extension("kitsp.bak"));
+}
+
+/// `save_file` must swap the file atomically: `.bak` holds the previous
+/// bytes, no temp file survives, and the result loads cleanly.
+#[test]
+fn save_file_keeps_bak_and_leaves_no_temp_files() {
+    let tmp = std::env::temp_dir().join("scriptcraft_test_atomic.kitsp");
+    std::fs::copy(FIXTURE, &tmp).expect("copy fixture");
+    let original = std::fs::read(&tmp).expect("read original");
+
+    let mut p = kitsp::load_file(&tmp).expect("load");
+    p.blocks[0].text = "INT. TEST - DAY".to_string();
+    kitsp::save_file(&tmp, &p).expect("save");
+
+    let bak = std::fs::read(tmp.with_extension("kitsp.bak")).expect(".bak exists");
+    assert_eq!(
+        bak, original,
+        ".bak must hold the previous file byte-for-byte"
+    );
+
+    let stem = tmp.file_name().unwrap().to_string_lossy().into_owned();
+    let leftovers: Vec<String> = std::fs::read_dir(tmp.parent().unwrap())
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.starts_with(&format!("{stem}.tmp")))
+        .collect();
+    assert!(
+        leftovers.is_empty(),
+        "temp files left behind: {leftovers:?}"
+    );
+
+    let q = kitsp::load_file(&tmp).expect("reload");
+    assert_eq!(q.blocks[0].text, "INT. TEST - DAY");
+    let _ = std::fs::remove_file(&tmp);
+    let _ = std::fs::remove_file(tmp.with_extension("kitsp.bak"));
+}
+
+/// A recovery copy is a full loadable project with the origin path recorded;
+/// rewriting it replaces the previous copy (and can drop the origin).
+#[test]
+fn recovery_file_roundtrip() {
+    let dir = std::env::temp_dir().join("scriptcraft_test_recovery");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("mkdir");
+    let rec = dir.join("script-abc.kitsp");
+
+    let p = kitsp::load_file(FIXTURE).expect("load fixture");
+    let origin = "/tmp/original project.kitsp";
+    kitsp::write_recovery_file(&rec, Some(origin), &p).expect("write recovery");
+
+    let q = kitsp::load_file(&rec).expect("reload recovery");
+    assert_eq!(q.blocks.len(), p.blocks.len());
+    assert_eq!(q.blocks[0].text, p.blocks[0].text);
+    assert_eq!(kitsp::recovery_origin(&rec).as_deref(), Some(origin));
+
+    let mut p2 = p.clone();
+    p2.blocks[0].text = "INT. CHANGED - DAY".to_string();
+    kitsp::write_recovery_file(&rec, None, &p2).expect("rewrite recovery");
+    let q2 = kitsp::load_file(&rec).expect("reload 2");
+    assert_eq!(q2.blocks[0].text, "INT. CHANGED - DAY");
+    assert_eq!(kitsp::recovery_origin(&rec), None);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `save_file` may only touch `scenario` id=1 (text + corkboard sync).
+/// Every other table and row in the KIT database must survive untouched.
+#[test]
+fn a95_save_file_preserves_all_other_tables() {
+    let tmp = std::env::temp_dir().join("scriptcraft_test_preserve.kitsp");
+    std::fs::copy(FIXTURE, &tmp).expect("copy fixture");
+
+    const TABLES: [&str; 10] = [
+        "_database_history",
+        "system_variables",
+        "places",
+        "scenary_days",
+        "times",
+        "character_states",
+        "transitions",
+        "scenario_changes",
+        "research",
+        "script_versions",
+    ];
+    let (before, data_before, second_scenario) = {
+        let conn = rusqlite::Connection::open(&tmp).unwrap();
+        let before: Vec<(&str, Vec<String>)> =
+            TABLES.iter().map(|t| (*t, dump_table(&conn, t))).collect();
+        let data_before = dump_table(&conn, "scenario_data");
+        let second_scenario = dump_sql(&conn, "SELECT * FROM scenario WHERE id=2");
+        (before, data_before, second_scenario)
+    };
+
+    let mut p = kitsp::load_file(&tmp).expect("load copy");
+    p.blocks[0].text = "EXT. ПАРКИНГ ПРЕД ПАНЕЛЕН БЛОК - NIGHT".to_string();
+    kitsp::save_file(&tmp, &p).expect("save back");
+
+    let conn = rusqlite::Connection::open(&tmp).unwrap();
+    for (table, rows) in &before {
+        assert_eq!(
+            &dump_table(&conn, table),
+            rows,
+            "save_file modified unrelated table {table}"
+        );
+    }
+    assert_eq!(
+        dump_table(&conn, "scenario_data"),
+        data_before,
+        "save_file modified scenario_data"
+    );
+    assert_eq!(
+        dump_sql(&conn, "SELECT * FROM scenario WHERE id=2"),
+        second_scenario,
+        "save_file modified the second scenario row"
+    );
+
+    let q = kitsp::load_file(&tmp).expect("reload");
+    assert_eq!(q.blocks.len(), p.blocks.len());
+    assert_eq!(q.blocks[0].text, p.blocks[0].text);
+    let cards = kitsp::load_cards(&tmp).expect("cards");
+    assert_eq!(cards.len(), q.scenes().len(), "one card per scene");
+    assert_eq!(cards[0].title, p.blocks[0].text, "card title synced");
+    assert!(format::validate(&q).is_empty());
+    let _ = std::fs::remove_file(&tmp);
+    let _ = std::fs::remove_file(tmp.with_extension("kitsp.bak"));
+}
+
+#[test]
+fn a95_fdx_round_trip() {
+    let p = kitsp::load_file(FIXTURE).expect("fixture must load");
+    let meta = kitsp::load_metadata(FIXTURE).expect("metadata must load");
+    let xml = scriptcraft_core::fdx::to_fdx(&p, &meta);
+    let (q, qm) = scriptcraft_core::fdx::from_fdx(&xml).expect("exported fdx must parse");
+    assert_eq!(qm.title, "A95");
+    assert_eq!(q.title, "A95");
+    assert_eq!(q.scenes().len(), 21);
+    assert_eq!(q.blocks.len(), p.blocks.len());
+    for (a, b) in p.blocks.iter().zip(q.blocks.iter()) {
+        assert_eq!(a.element_type, b.element_type, "type for {:?}", a.text);
+        assert_eq!(a.text, b.text);
+    }
+    // Final Draft numbers round-trip and are frozen on import.
+    let numbers: Vec<&str> = qm.locked_scene_numbers.split(',').collect();
+    assert_eq!(numbers.len(), 21);
+    assert_eq!(numbers[0], "1");
+    assert_eq!(numbers[20], "21");
+    // Title-page fields the FDX title page carries survive.
+    assert_eq!(qm.genre, meta.genre.trim());
+    assert_eq!(qm.author, meta.author.trim());
+    assert_eq!(qm.contacts, meta.contacts.trim());
+    // Exporting the imported project reproduces the same XML byte-for-byte.
+    assert_eq!(scriptcraft_core::fdx::to_fdx(&q, &qm), xml);
 }

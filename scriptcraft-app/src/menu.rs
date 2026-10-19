@@ -15,6 +15,7 @@ pub const ID_OPEN: &str = "kit.open";
 pub const ID_SAVE: &str = "kit.save";
 pub const ID_SAVE_AS: &str = "kit.save_as";
 pub const ID_IMPORT: &str = "kit.import";
+pub const ID_IMPORT_FDX: &str = "kit.import_fdx";
 pub const ID_EXPORT: &str = "kit.export";
 pub const ID_PREVIEW: &str = "kit.preview";
 pub const ID_TWO_PANEL: &str = "kit.two_panel";
@@ -27,6 +28,8 @@ pub const ID_TYPEWRITER: &str = "kit.typewriter";
 pub const ID_ZOOM_IN: &str = "kit.zoom_in";
 pub const ID_ZOOM_OUT: &str = "kit.zoom_out";
 pub const ID_ZOOM_RESET: &str = "kit.zoom_reset";
+pub const ID_ZOOM_FIT_PAGE: &str = "kit.zoom_fit_page";
+pub const ID_ZOOM_FIT_WIDTH: &str = "kit.zoom_fit_width";
 pub const ID_ABOUT: &str = "kit.about";
 pub const ID_HELP: &str = "kit.help";
 
@@ -50,7 +53,8 @@ impl NativeMenu {
         let open = MenuItem::with_id(ID_OPEN, "Open...", true, acc("CmdOrCtrl+O"));
         let save = MenuItem::with_id(ID_SAVE, "Save", true, acc("CmdOrCtrl+S"));
         let save_as = MenuItem::with_id(ID_SAVE_AS, "Save as...", true, acc("Shift+CmdOrCtrl+S"));
-        let import = MenuItem::with_id(ID_IMPORT, "Import...", true, None);
+        let import = MenuItem::with_id(ID_IMPORT, "Import Fountain...", true, None);
+        let import_fdx = MenuItem::with_id(ID_IMPORT_FDX, "Import Final Draft...", true, None);
         let export = MenuItem::with_id(ID_EXPORT, "Export to...", true, None);
         let preview = MenuItem::with_id(ID_PREVIEW, "Print preview script", true, acc("F12"));
         let two_panel_item =
@@ -94,6 +98,7 @@ impl NativeMenu {
                 &save_as,
                 &sep_a,
                 &import,
+                &import_fdx,
                 &export,
                 &preview,
                 &sep_b,
@@ -121,6 +126,8 @@ impl NativeMenu {
         let zoom_in = MenuItem::with_id(ID_ZOOM_IN, "Zoom In", true, acc("CmdOrCtrl+="));
         let zoom_out = MenuItem::with_id(ID_ZOOM_OUT, "Zoom Out", true, acc("CmdOrCtrl+-"));
         let zoom_reset = MenuItem::with_id(ID_ZOOM_RESET, "Actual Size", true, acc("CmdOrCtrl+0"));
+        let zoom_fit_page = MenuItem::with_id(ID_ZOOM_FIT_PAGE, "Fit Page", true, None);
+        let zoom_fit_width = MenuItem::with_id(ID_ZOOM_FIT_WIDTH, "Fit Width", true, None);
         let sep_d = PredefinedMenuItem::separator();
         let view = Submenu::with_items(
             "View",
@@ -133,6 +140,8 @@ impl NativeMenu {
                 &zoom_in,
                 &zoom_out,
                 &zoom_reset,
+                &zoom_fit_page,
+                &zoom_fit_width,
             ],
         )?;
 

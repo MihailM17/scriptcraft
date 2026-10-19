@@ -1,14 +1,19 @@
-use crate::editing::{paginate_m, wrap_lines, FINAL_DRAFT_A4};
-use crate::kitsp::Metadata;
-use crate::model::{ElementType, Project};
-use printpdf::{Color, Greyscale, Line, Mm, PdfDocument, Point};
+use crate::paginate::paginate;
+use crate::wrap::wrap_lines;
+use printpdf::{
+    Color, Greyscale, Line, LinePoint, Mm, Op, ParsedFont, PdfDocument, PdfFontHandle, PdfPage,
+    PdfSaveOptions, Point, Pt, TextItem, TextMatrix,
+};
+use scriptcraft_core::editing::{cue_name_for, FINAL_DRAFT_A4};
+use scriptcraft_core::kitsp::Metadata;
+use scriptcraft_core::model::{ElementType, Project};
 use std::collections::HashMap;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum PdfError {
-    #[error("pdf backend: {0}")]
-    Backend(#[from] printpdf::Error),
+    #[error("font could not be parsed")]
+    Font,
     #[error("no printable content")]
     Empty,
 }
@@ -25,6 +30,8 @@ const FONT_PT: f32 = 12.0;
 const CHAR_MM: f32 = 2.54;
 /// Template line pitch: single-spaced 12pt = 4.2333mm.
 const PITCH_MM: f32 = FONT_PT / 72.0 * 25.4;
+/// Millimetres per PDF point (TextMatrix offsets are in points).
+const MM_TO_PT: f32 = 72.0 / 25.4;
 /// Baseline offset below the slot top under the top margin.
 const BASELINE_OFF: f32 = 3.0;
 /// Right edge of the text column.
@@ -128,7 +135,7 @@ fn locked_scene_labels(meta: &Metadata) -> Option<Vec<String>> {
 
 /// Number of spoken lines per character (one per dialogue block whose most
 /// recent cue is that character).
-fn speech_counts(blocks: &[crate::model::ScriptBlock]) -> HashMap<String, usize> {
+fn speech_counts(blocks: &[scriptcraft_core::model::ScriptBlock]) -> HashMap<String, usize> {
     let mut counts: HashMap<String, usize> = HashMap::new();
     let mut last_cue: Option<String> = None;
     for b in blocks {
@@ -154,9 +161,9 @@ pub fn layout_pages(p: &Project, meta: &Metadata, opts: &ExportOptions) -> Vec<V
     let blocks: Vec<usize> = (0..p.blocks.len())
         .filter(|&i| p.blocks[i].element_type.is_printable())
         .collect();
-    let renum: Vec<crate::model::ScriptBlock> =
+    let renum: Vec<scriptcraft_core::model::ScriptBlock> =
         blocks.iter().map(|&i| p.blocks[i].clone()).collect();
-    let pages = paginate_m(&renum, &FINAL_DRAFT_A4);
+    let pages = paginate(&renum, &FINAL_DRAFT_A4);
     let locked = locked_scene_labels(meta);
     let prefix = meta.scene_number_prefix.trim().to_string();
     let start: u32 = meta.scene_number_start.trim().parse().unwrap_or(1);
@@ -198,7 +205,7 @@ pub fn layout_pages(p: &Project, meta: &Metadata, opts: &ExportOptions) -> Vec<V
                 ElementType::NonPrintable => (X_CUE, false),
             };
             if chunk.contd {
-                if let Some(cue) = crate::editing::cue_name_for(&renum, chunk.bi) {
+                if let Some(cue) = cue_name_for(&renum, chunk.bi) {
                     lines.push(PrintLine::text_line(X_CUE, format!("{cue} (CONT'D)"), true));
                 }
             }
@@ -230,7 +237,7 @@ pub fn layout_pages(p: &Project, meta: &Metadata, opts: &ExportOptions) -> Vec<V
                     text = format!("{} ({n})", text.trim_end());
                 }
             }
-            // Same wrap budget as paginate_m(): identical line breaks.
+            // Same wrap budget as the paginator: identical line breaks.
             let wrapped = wrap_lines(&text, FINAL_DRAFT_A4.col_chars(b.element_type));
             for (li, line) in wrapped.into_iter().enumerate() {
                 let mut l = PrintLine::text_line(x, line, bold);
@@ -310,7 +317,52 @@ pub fn layout_title_page(meta: &Metadata) -> Vec<PrintLine> {
     lines
 }
 
-/// Render laid-out pages to a PDF file (Courier New embedded). The first
+/// Fonts embedded in an exported PDF. Courier Prime carries the screenplay
+/// metrics; IBM Plex Mono covers what Courier Prime lacks (Cyrillic, Greek) at
+/// the same 0.6 em advance, so the monospace grid — and with it the abstract
+/// pagination — stays identical. Text is split into runs and each grabby
+/// character is rendered with the first font that has it.
+pub struct ExportFonts<'a> {
+    pub regular: &'a [u8],
+    pub bold: &'a [u8],
+    pub fallback_regular: &'a [u8],
+    pub fallback_bold: &'a [u8],
+}
+
+struct Face {
+    id: printpdf::FontId,
+    font: ParsedFont,
+}
+
+/// Split `text` into runs that must be drawn with either the primary or the
+/// fallback face. A character missing from both stays in a primary run (it
+/// renders as .notdef, same as before there was a fallback).
+fn split_runs<'t>(
+    text: &'t str,
+    primary: &ParsedFont,
+    fallback: &ParsedFont,
+) -> Vec<(bool, &'t str)> {
+    let mut runs: Vec<(bool, &'t str)> = Vec::new();
+    let mut start = 0usize;
+    let mut mode = false;
+    for (i, c) in text.char_indices() {
+        let fb = primary.lookup_glyph_index(c as u32).is_none()
+            && fallback.lookup_glyph_index(c as u32).is_some();
+        if i == 0 {
+            mode = fb;
+        } else if fb != mode {
+            runs.push((mode, &text[start..i]));
+            start = i;
+            mode = fb;
+        }
+    }
+    if start < text.len() {
+        runs.push((mode, &text[start..]));
+    }
+    runs
+}
+
+/// Render laid-out pages to a PDF file (fonts embedded). The first
 /// page is the KIT title page (unless disabled); script pages follow with
 /// KIT numbering (first script page unnumbered, the rest bold "N." in the
 /// top-right margin).
@@ -318,8 +370,7 @@ pub fn to_pdf_bytes(
     p: &Project,
     meta: &Metadata,
     opts: &ExportOptions,
-    font_regular: &[u8],
-    font_bold: &[u8],
+    fonts: &ExportFonts<'_>,
 ) -> Result<Vec<u8>, PdfError> {
     if p.blocks.is_empty() {
         return Err(PdfError::Empty);
@@ -329,10 +380,29 @@ pub fn to_pdf_bytes(
     } else {
         p.title.clone()
     };
-    let (doc, first_page, first_layer) =
-        PdfDocument::new(&title, Mm(PAGE_W), Mm(PAGE_H), "Layer 1");
-    let regular = doc.add_external_font(&mut &font_regular[..])?;
-    let bold = doc.add_external_font(&mut &font_bold[..])?;
+    let mut doc = PdfDocument::new(&title);
+    let mut font_warnings = Vec::new();
+    let mut parse = |bytes: &[u8]| ParsedFont::from_bytes(bytes, 0, &mut font_warnings);
+    let regular_font = parse(fonts.regular).ok_or(PdfError::Font)?;
+    let bold_font = parse(fonts.bold).ok_or(PdfError::Font)?;
+    let fallback_regular_font = parse(fonts.fallback_regular).ok_or(PdfError::Font)?;
+    let fallback_bold_font = parse(fonts.fallback_bold).ok_or(PdfError::Font)?;
+    let regular = Face {
+        id: doc.add_font(&regular_font),
+        font: regular_font,
+    };
+    let bold = Face {
+        id: doc.add_font(&bold_font),
+        font: bold_font,
+    };
+    let fallback_regular = Face {
+        id: doc.add_font(&fallback_regular_font),
+        font: fallback_regular_font,
+    };
+    let fallback_bold = Face {
+        id: doc.add_font(&fallback_bold_font),
+        font: fallback_bold_font,
+    };
     let mut pages: Vec<Vec<PrintLine>> = Vec::new();
     if opts.title_page {
         pages.push(layout_title_page(meta));
@@ -344,43 +414,63 @@ pub fn to_pdf_bytes(
         .map(str::trim)
         .filter(|s| !s.is_empty());
 
-    for (pi, lines) in pages.iter().enumerate() {
-        let (page, layer) = if pi == 0 {
-            (first_page, first_layer)
-        } else {
-            doc.add_page(Mm(PAGE_W), Mm(PAGE_H), format!("Layer {}", pi + 1))
+    let black = Color::Greyscale(Greyscale::new(0.0, None));
+    // All coordinates in this module are millimetres; TextMatrix takes points.
+    let show =
+        |ops: &mut Vec<Op>, font: &printpdf::FontId, size: f32, x: f32, y: f32, text: &str| {
+            ops.push(Op::StartTextSection);
+            ops.push(Op::SetFont {
+                font: PdfFontHandle::External(font.clone()),
+                size: Pt(size),
+            });
+            ops.push(Op::SetTextMatrix {
+                matrix: TextMatrix::Translate(Pt(x * MM_TO_PT), Pt(y * MM_TO_PT)),
+            });
+            ops.push(Op::ShowText {
+                items: vec![TextItem::Text(text.to_string())],
+            });
+            ops.push(Op::EndTextSection);
         };
-        let layer = doc.get_page(page).get_layer(layer);
-        layer.set_outline_thickness(0.72);
+
+    let mut doc_pages: Vec<PdfPage> = Vec::new();
+    for lines in pages.iter() {
+        let mut ops: Vec<Op> = vec![Op::SetOutlineThickness { pt: Pt(0.72) }];
         if let Some(wm) = watermark {
-            layer.set_fill_color(Color::Greyscale(Greyscale::new(0.82, None)));
             let size = 40.0;
             let w = wm.chars().count() as f32 * CHAR_MM * (size / FONT_PT);
-            layer.use_text(
-                wm,
-                size,
-                Mm(((PAGE_W - w) / 2.0).max(0.0)),
-                Mm(PAGE_H / 2.0),
-                &regular,
-            );
-            layer.set_fill_color(Color::Greyscale(Greyscale::new(0.0, None)));
+            ops.push(Op::SetFillColor {
+                col: Color::Greyscale(Greyscale::new(0.82, None)),
+            });
+            let mut cx = ((PAGE_W - w) / 2.0).max(0.0);
+            for (use_fb, run) in split_runs(wm, &regular.font, &fallback_regular.font) {
+                let id = if use_fb {
+                    &fallback_regular.id
+                } else {
+                    &regular.id
+                };
+                show(&mut ops, id, size, cx, PAGE_H / 2.0, run);
+                cx += run.chars().count() as f32 * CHAR_MM * (size / FONT_PT);
+            }
         }
         let mut y = PAGE_H - MARGIN_T - BASELINE_OFF;
         for line in lines.iter() {
             if line.share_row {
                 y += PITCH_MM;
             }
+            ops.push(Op::SetFillColor { col: black.clone() });
             if line.is_page_number {
                 let w = line.text.chars().count() as f32 * CHAR_MM;
-                let x = TEXT_RIGHT - w;
-                let font = if line.bold { &bold } else { &regular };
-                layer.use_text(
-                    line.text.clone(),
-                    FONT_PT,
-                    Mm(x),
-                    Mm(PAGE_H - PAGE_NUM_BASELINE),
-                    font,
-                );
+                let mut cx = TEXT_RIGHT - w;
+                let (face, fb_face) = if line.bold {
+                    (&bold, &fallback_bold)
+                } else {
+                    (&regular, &fallback_regular)
+                };
+                for (use_fb, run) in split_runs(&line.text, &face.font, &fb_face.font) {
+                    let id = if use_fb { &fb_face.id } else { &face.id };
+                    show(&mut ops, id, FONT_PT, cx, PAGE_H - PAGE_NUM_BASELINE, run);
+                    cx += run.chars().count() as f32 * CHAR_MM;
+                }
                 continue;
             }
             let yy = y - line.dy_mm;
@@ -397,30 +487,49 @@ pub fn to_pdf_bytes(
                 } else {
                     line.x_mm
                 };
-                let font = if line.bold { &bold } else { &regular };
-                layer.use_text(line.text.clone(), FONT_PT, Mm(x), Mm(yy), font);
+                let (face, fb_face) = if line.bold {
+                    (&bold, &fallback_bold)
+                } else {
+                    (&regular, &fallback_regular)
+                };
+                let mut cx = x;
+                for (use_fb, run) in split_runs(&line.text, &face.font, &fb_face.font) {
+                    let id = if use_fb { &fb_face.id } else { &face.id };
+                    show(&mut ops, id, FONT_PT, cx, yy, run);
+                    cx += run.chars().count() as f32 * CHAR_MM;
+                }
                 if line.underline {
-                    layer.add_line(Line {
-                        points: vec![
-                            (Point::new(Mm(x), Mm(yy - 1.2)), false),
-                            (Point::new(Mm(x + w), Mm(yy - 1.2)), false),
-                        ],
-                        is_closed: false,
+                    ops.push(Op::DrawLine {
+                        line: Line {
+                            points: vec![
+                                LinePoint {
+                                    p: Point::new(Mm(x), Mm(yy - 1.2)),
+                                    bezier: false,
+                                },
+                                LinePoint {
+                                    p: Point::new(Mm(x + w), Mm(yy - 1.2)),
+                                    bezier: false,
+                                },
+                            ],
+                            is_closed: false,
+                        },
                     });
                 }
             }
             y -= PITCH_MM;
         }
+        doc_pages.push(PdfPage::new(Mm(PAGE_W), Mm(PAGE_H), ops));
     }
-    let mut out = std::io::BufWriter::new(Vec::new());
-    doc.save(&mut out)?;
-    Ok(out.into_inner().unwrap_or_default())
+    doc.with_pages(doc_pages);
+    let mut warnings = Vec::new();
+    let bytes = doc.save(&PdfSaveOptions::default(), &mut warnings);
+    Ok(bytes)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::ScriptBlock;
+    use scriptcraft_core::model::ScriptBlock;
 
     fn sample() -> Project {
         let mut p = Project {
@@ -451,7 +560,7 @@ mod tests {
     #[test]
     fn layout_matches_pagination_line_budget() {
         let p = sample();
-        let pages = paginate_m(&p.blocks, &FINAL_DRAFT_A4);
+        let pages = paginate(&p.blocks, &FINAL_DRAFT_A4);
         let laid = layout_pages(&p, &Default::default(), &default_opts());
         assert_eq!(laid.len(), pages.len());
         // One printed row per budgeted row, plus out-of-band lines:
@@ -569,8 +678,8 @@ mod tests {
         assert!(laid[0].iter().any(|l| l.text == "IVAN"));
     }
 
-    fn sample_meta() -> crate::kitsp::Metadata {
-        crate::kitsp::Metadata {
+    fn sample_meta() -> scriptcraft_core::kitsp::Metadata {
+        scriptcraft_core::kitsp::Metadata {
             title: "Test Title".to_string(),
             genre: "Drama".to_string(),
             author: "Jane Doe".to_string(),

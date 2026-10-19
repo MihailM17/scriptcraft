@@ -1,0 +1,15 @@
+[package]
+name = "scriptcraft-layout"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/MihailM17/scriptcraft"
+description = "Screenplay layout engine: wrapping, pagination and placed lines in document units."
+
+[dependencies]
+scriptcraft-core = { path = "../scriptcraft-core", version = "0.1.0" }
+printpdf = "0.12"
+thiserror = "2"
+
+[dev-dependencies]
+lopdf = "0.44"

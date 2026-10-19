@@ -1,6 +1,6 @@
 use crate::model::{ElementType, Project, ScriptBlock};
 use quick_xml::events::Event;
-use quick_xml::Reader;
+use quick_xml::{Reader, XmlVersion};
 use rusqlite::{params, Connection};
 use std::path::Path;
 use thiserror::Error;
@@ -29,6 +29,22 @@ const BLOCK_TAGS: &[&str] = &[
     "note",
     "lyrics",
 ];
+
+/// KIT's canonical `scenario_data` keys for scene numbering
+/// (KITScenaristCore `ScenarioData.cpp`).
+pub const SCENE_NUMBERS_PREFIX_KEY: &str = "scene_numbers_prefix";
+pub const SCENE_START_NUMBER_KEY: &str = "scene_start_number";
+/// Legacy ScriptCraft 0.4.0 spelling; still read as a fallback and kept in
+/// sync when present so older builds and new builds agree.
+const LEGACY_SCENE_NUMBER_PREFIX_KEY: &str = "scene_number_prefix";
+const LEGACY_SCENE_START_NUMBER_KEY: &str = "scene_number_start";
+/// ScriptCraft extension: comma-separated frozen scene numbers, optional
+/// leading `*` for "lock new scenes numbers". KIT has no such key and
+/// ignores it.
+pub const LOCKED_SCENE_NUMBERS_KEY: &str = "locked_scene_numbers";
+/// ScriptCraft extension: inside a recovery copy, the project path the
+/// session belongs to. KIT has no such key and ignores it.
+pub const RECOVERY_ORIGIN_KEY: &str = "scriptcraft_recovery_origin";
 
 /// Open a .kitsp file read-only and load scenario id=1 + title.
 pub fn load_file(path: impl AsRef<Path>) -> Result<Project, KitspError> {
@@ -87,28 +103,88 @@ pub fn project_to_scenario_xml(p: &Project) -> String {
 
 /// Save a project into an EXISTING .kitsp file: updates scenario text and
 /// syncs corkboard card titles (plus cards for new scenes). Makes a `.bak`
-/// copy first.
+/// copy first, then writes a temp file next to the target and renames it
+/// over the target, so a crash mid-save can never leave a half-written
+/// project behind.
 pub fn save_file(path: impl AsRef<Path>, p: &Project) -> Result<(), KitspError> {
     let path = path.as_ref();
     let bak = path.with_extension("kitsp.bak");
     std::fs::copy(path, &bak)?;
-    let xml = project_to_scenario_xml(p);
-    let conn = Connection::open(path)?;
-    conn.execute("UPDATE scenario SET text=?1 WHERE id=1", params![xml])?;
-    // Corkboard sync must never break the save itself.
-    if let Ok(scheme) = conn.query_row("SELECT scheme FROM scenario WHERE id=1", params![], |r| {
-        r.get::<_, String>(0)
-    }) {
-        let scenes: Vec<(Option<String>, String)> = p
-            .scenes()
-            .into_iter()
-            .map(|s| (s.kit_uuid, s.heading))
-            .collect();
-        if let Ok(synced) = sync_scheme_cards(&scheme, &scenes) {
-            let _ = conn.execute("UPDATE scenario SET scheme=?1 WHERE id=1", params![synced]);
+
+    let tmp = path.with_extension(format!("kitsp.tmp.{}", std::process::id()));
+    let result = (|| -> Result<(), KitspError> {
+        std::fs::copy(path, &tmp)?;
+        let xml = project_to_scenario_xml(p);
+        let conn = Connection::open(&tmp)?;
+        conn.execute("UPDATE scenario SET text=?1 WHERE id=1", params![xml])?;
+        // Corkboard sync must never break the save itself.
+        if let Ok(scheme) =
+            conn.query_row("SELECT scheme FROM scenario WHERE id=1", params![], |r| {
+                r.get::<_, String>(0)
+            })
+        {
+            let scenes: Vec<(Option<String>, String)> = p
+                .scenes()
+                .into_iter()
+                .map(|s| (s.kit_uuid, s.heading))
+                .collect();
+            if let Ok(synced) = sync_scheme_cards(&scheme, &scenes) {
+                let _ = conn.execute("UPDATE scenario SET scheme=?1 WHERE id=1", params![synced]);
+            }
         }
+        drop(conn);
+        std::fs::File::open(&tmp)?.sync_all()?;
+        std::fs::rename(&tmp, path)?;
+        // Best-effort: make the rename itself durable.
+        if let Some(dir) = path.parent() {
+            if let Ok(d) = std::fs::File::open(dir) {
+                let _ = d.sync_all();
+            }
+        }
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
     }
-    Ok(())
+    result
+}
+
+/// Write a standalone recovery copy of `p` at `dst` (replacing any previous
+/// one), recording `origin` — the project path the session belongs to — so a
+/// restored session can keep saving to the same file. `None` origin means the
+/// project was never saved; the user will have to Save As.
+pub fn write_recovery_file(
+    dst: impl AsRef<Path>,
+    origin: Option<&str>,
+    p: &Project,
+) -> Result<(), KitspError> {
+    let dst = dst.as_ref();
+    let title = if p.title.trim().is_empty() {
+        "Recovered script"
+    } else {
+        p.title.as_str()
+    };
+    create_file(dst, title)?;
+    if let Some(origin) = origin {
+        let conn = Connection::open(dst)?;
+        conn.execute(
+            "INSERT INTO scenario_data (data_name, data_value) VALUES (?1, ?2)
+             ON CONFLICT(data_name) DO UPDATE SET data_value=excluded.data_value",
+            params![RECOVERY_ORIGIN_KEY, origin],
+        )?;
+    }
+    save_file(dst, p)
+}
+
+/// The original project path recorded in a recovery file, if any.
+pub fn recovery_origin(path: impl AsRef<Path>) -> Option<String> {
+    let conn = Connection::open(path).ok()?;
+    let origin = get_data(&conn, RECOVERY_ORIGIN_KEY);
+    if origin.is_empty() {
+        None
+    } else {
+        Some(origin)
+    }
 }
 
 fn esc_attr(s: &str) -> String {
@@ -130,21 +206,23 @@ pub fn sync_scheme_cards(
     let mut root_attrs: Vec<(String, String)> = Vec::new();
     let mut root_name = String::from("cards");
     // (attrs in original order, id, title)
-    let mut cards: Vec<(Vec<(String, String)>, String, String)> = Vec::new();
+    type CardRow = (Vec<(String, String)>, String, String);
+    let mut cards: Vec<CardRow> = Vec::new();
 
-    let attr_list =
-        |e: &quick_xml::events::BytesStart, r: &Reader<&[u8]>| -> Vec<(String, String)> {
-            let mut out = Vec::new();
-            for a in e.attributes().flatten() {
-                if let Ok(v) = a.decode_and_unescape_value(r.decoder()) {
-                    out.push((
-                        String::from_utf8_lossy(a.key.as_ref()).into_owned(),
-                        v.into_owned(),
-                    ));
-                }
+    let attr_list = |e: &quick_xml::events::BytesStart,
+                     r: &Reader<&[u8]>|
+     -> Vec<(String, String)> {
+        let mut out = Vec::new();
+        for a in e.attributes().flatten() {
+            if let Ok(v) = a.decoded_and_normalized_value(XmlVersion::Implicit1_0, r.decoder()) {
+                out.push((
+                    String::from_utf8_lossy(a.key.as_ref()).into_owned(),
+                    v.into_owned(),
+                ));
             }
-            out
-        };
+        }
+        out
+    };
 
     loop {
         match reader.read_event()? {
@@ -245,7 +323,7 @@ pub fn sync_scheme_cards(
                 ordered.push(cards.remove(pos));
             }
         }
-        ordered.extend(cards.drain(..));
+        ordered.append(&mut cards);
         cards = ordered;
         // Renumber sequentially so KIT keeps the visual order.
         for (i, (attrs, _, _)) in cards.iter_mut().enumerate() {
@@ -518,9 +596,9 @@ pub fn create_file(path: impl AsRef<Path>, title: &str) -> Result<Project, Kitsp
         ("header", ""),
         ("footer", ""),
         ("additional_info", ""),
-        ("scene_number_prefix", ""),
-        ("scene_number_start", "1"),
-        ("locked_scene_numbers", ""),
+        (SCENE_NUMBERS_PREFIX_KEY, ""),
+        (SCENE_START_NUMBER_KEY, "1"),
+        (LOCKED_SCENE_NUMBERS_KEY, ""),
     ] {
         conn.execute(
             "INSERT INTO scenario_data (data_name, data_value) VALUES (?1, ?2)",
@@ -533,8 +611,9 @@ pub fn create_file(path: impl AsRef<Path>, title: &str) -> Result<Project, Kitsp
 
 /// Title-page fields from `scenario_data`. `director` is a ScriptCraft
 /// extension (plain TEXT key, ignored by KIT); everything else mirrors
-/// KIT's own title page data. The scene-numbering keys are ScriptCraft
-/// extensions (KIT keeps them in export settings, not the project).
+/// KIT's own title page data. Scene numbering maps to KIT's
+/// `scene_numbers_prefix` / `scene_start_number` keys; `locked_scene_numbers`
+/// is a ScriptCraft extension KIT ignores.
 #[derive(Debug, Clone, Default)]
 pub struct Metadata {
     pub title: String,
@@ -548,7 +627,9 @@ pub struct Metadata {
     pub synopsis_html: String,
     pub header: String,
     pub footer: String,
+    /// Stored as KIT `scene_numbers_prefix`.
     pub scene_number_prefix: String,
+    /// Stored as KIT `scene_start_number`.
     pub scene_number_start: String,
     /// Comma-separated frozen scene numbers; a leading `*` marks
     /// "lock new scenes numbers" (future scenes keep their number).
@@ -557,11 +638,22 @@ pub struct Metadata {
 
 fn get_data(conn: &Connection, key: &str) -> String {
     conn.query_row(
-        "SELECT data_value FROM scenario_data WHERE data_name=?1",
+        "SELECT COALESCE(data_value,'') FROM scenario_data WHERE data_name=?1",
         params![key],
         |r| r.get(0),
     )
     .unwrap_or_default()
+}
+
+/// First non-empty value among `keys`, for keys that were renamed over time.
+fn get_data_alias(conn: &Connection, keys: &[&str]) -> String {
+    for key in keys {
+        let value = get_data(conn, key);
+        if !value.is_empty() {
+            return value;
+        }
+    }
+    String::new()
 }
 
 /// Load title-page metadata (any .kitsp path, read-only).
@@ -584,15 +676,31 @@ pub fn load_metadata(path: impl AsRef<Path>) -> Result<Metadata, KitspError> {
         synopsis_html: get_data(&conn, "synopsis"),
         header: get_data(&conn, "header"),
         footer: get_data(&conn, "footer"),
-        scene_number_prefix: get_data(&conn, "scene_number_prefix"),
-        scene_number_start: get_data(&conn, "scene_number_start"),
-        locked_scene_numbers: get_data(&conn, "locked_scene_numbers"),
+        scene_number_prefix: get_data_alias(
+            &conn,
+            &[SCENE_NUMBERS_PREFIX_KEY, LEGACY_SCENE_NUMBER_PREFIX_KEY],
+        ),
+        scene_number_start: get_data_alias(
+            &conn,
+            &[SCENE_START_NUMBER_KEY, LEGACY_SCENE_START_NUMBER_KEY],
+        ),
+        locked_scene_numbers: get_data(&conn, LOCKED_SCENE_NUMBERS_KEY),
     })
 }
 
 /// Save all title-page fields (logline/synopsis stored as rich HTML).
+/// Scene numbering is written under KIT's canonical keys; legacy ScriptCraft
+/// rows are updated too when they already exist, but never created.
 pub fn save_metadata(path: impl AsRef<Path>, m: &Metadata) -> Result<(), KitspError> {
     let conn = Connection::open(path.as_ref())?;
+    let upsert = |k: &str, v: &str| -> Result<(), KitspError> {
+        conn.execute(
+            "INSERT INTO scenario_data (data_name, data_value) VALUES (?1, ?2)
+             ON CONFLICT(data_name) DO UPDATE SET data_value=excluded.data_value",
+            params![k, v],
+        )?;
+        Ok(())
+    };
     for (k, v) in [
         ("name", &m.title),
         ("genre", &m.genre),
@@ -605,15 +713,26 @@ pub fn save_metadata(path: impl AsRef<Path>, m: &Metadata) -> Result<(), KitspEr
         ("synopsis", &m.synopsis_html),
         ("header", &m.header),
         ("footer", &m.footer),
-        ("scene_number_prefix", &m.scene_number_prefix),
-        ("scene_number_start", &m.scene_number_start),
-        ("locked_scene_numbers", &m.locked_scene_numbers),
+        (SCENE_NUMBERS_PREFIX_KEY, &m.scene_number_prefix),
+        (SCENE_START_NUMBER_KEY, &m.scene_number_start),
+        (LOCKED_SCENE_NUMBERS_KEY, &m.locked_scene_numbers),
     ] {
-        conn.execute(
-            "INSERT INTO scenario_data (data_name, data_value) VALUES (?1, ?2)
-             ON CONFLICT(data_name) DO UPDATE SET data_value=excluded.data_value",
-            params![k, v],
-        )?;
+        upsert(k, v)?;
+    }
+    for (legacy, value) in [
+        (LEGACY_SCENE_NUMBER_PREFIX_KEY, &m.scene_number_prefix),
+        (LEGACY_SCENE_START_NUMBER_KEY, &m.scene_number_start),
+    ] {
+        let exists: bool = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM scenario_data WHERE data_name=?1)",
+                params![legacy],
+                |r| r.get(0),
+            )
+            .unwrap_or(false);
+        if exists {
+            upsert(legacy, value)?;
+        }
     }
     Ok(())
 }
@@ -773,7 +892,10 @@ fn parse_cards(xml: &str) -> Result<Vec<Card>, KitspError> {
                     let mut description = String::new();
                     for key in ["id", "title", "description"] {
                         if let Ok(Some(a)) = e.try_get_attribute(key) {
-                            if let Ok(v) = a.decode_and_unescape_value(reader.decoder()) {
+                            if let Ok(v) = a.decoded_and_normalized_value(
+                                XmlVersion::Implicit1_0,
+                                reader.decoder(),
+                            ) {
                                 match key {
                                     "id" => id = v.into_owned(),
                                     "title" => title = v.into_owned(),
@@ -815,7 +937,13 @@ pub fn parse_scenario(xml: &str) -> Result<Project, KitspError> {
                         e.try_get_attribute("uuid")
                             .ok()
                             .flatten()
-                            .and_then(|a| a.decode_and_unescape_value(reader.decoder()).ok())
+                            .and_then(|a| {
+                                a.decoded_and_normalized_value(
+                                    XmlVersion::Implicit1_0,
+                                    reader.decoder(),
+                                )
+                                .ok()
+                            })
                             .map(|v| v.into_owned())
                     } else {
                         None

@@ -8,7 +8,7 @@ KIT code.
 
 ## Features
 
-- Fixed A4 page editor with Courier New, page-accurate pagination, scene
+- Fixed A4 page editor with Courier Prime, page-accurate pagination, scene
   numbers, `(MORE)` / `(CONT'D)` markers and zoom that scales pages without
   reflowing text.
 - Autocomplete for scene headings, characters, locations and transitions.
@@ -17,16 +17,20 @@ KIT code.
 - Script, Research, Cards, Statistics and Settings modules.
 - Dark and light themes with the ScriptCraft icon-blue accent.
 - Native macOS menu bar plus the KIT-style in-app menu.
-- Fountain import/export and template-matched PDF export.
+- Fountain and Final Draft `.fdx` import/export, plus template-matched PDF
+  export (title page, scene numbers, letters).
 - Reads and writes real KIT `.kitsp` projects (SQLite + XML).
 
 ## Layout
 
-- `scriptcraft-core/` — UI-free model, `.kitsp` reader/writer, Fountain,
-  pagination, format validation, coaching checks and PDF layout.
+- `scriptcraft-core/` — UI-free model, `.kitsp` reader/writer, Fountain and
+  FDX converters, format validation and coaching checks.
+- `scriptcraft-layout/` — the shared wrap/pagination/placement engine that
+  drives both the editor pages and the PDF renderer.
 - `scriptcraft-app/` — `eframe`/`egui` desktop app, theme, native menu and
   modules.
-- `fixtures/A95.kitsp` — 21-scene Bulgarian test project used by the tests.
+- `fixtures/A95.kitsp` — 21-scene Bulgarian test project used by the tests;
+  `fixtures/example.fdx` — small Final Draft sample for the FDX tests.
 - `docs/` — reverse-engineered KIT file/design notes.
 
 ## Build and run
@@ -47,7 +51,7 @@ platforms supported by `eframe`.
 ## Tests
 
 ```sh
-cargo test -p scriptcraft-core -p scriptcraft-app
+cargo test --workspace
 cargo fmt --check
 ```
 
@@ -60,4 +64,6 @@ UPDATE_SNAPSHOTS=1 cargo test -p scriptcraft-app --test ui_snapshots
 ## Status
 
 The editor, project format, export pipeline and all five workspace modules are
-implemented. Planned next: FDX import/export and deeper workspace tooling.
+implemented; Final Draft `.fdx` import/export shipped 2026-10-19. Planned
+next: DOCX export, editor/PDF template unification and deeper workspace
+tooling.

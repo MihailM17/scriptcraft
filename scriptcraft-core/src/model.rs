@@ -55,7 +55,7 @@ impl ElementType {
 }
 
 /// One screenplay block.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ScriptBlock {
     pub id: Uuid,
     /// Only scene headings carry the KIT uuid; others get a fresh v4.

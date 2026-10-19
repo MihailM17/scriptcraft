@@ -144,3 +144,36 @@ fn snap_10_research_character_photo() {
     h.run();
     h.snapshot("10_research_character_photo");
 }
+
+/// Selection highlight and caret on the first page.
+#[test]
+fn snap_12_script_selection() {
+    let mut h = harness(SideTab::Script, None);
+    h.run();
+    h.run_steps(2);
+
+    // Click into the page to focus the editor (focus draws the caret).
+    let page = h.state().editor2_page_rects()[0];
+    let pos = egui::pos2(page.left() + 120.0, page.top() + 80.0);
+    h.input_mut().events.push(egui::Event::PointerMoved(pos));
+    h.input_mut().events.push(egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: egui::Modifiers::NONE,
+    });
+    h.run();
+    h.input_mut().events.push(egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: egui::Modifiers::NONE,
+    });
+    h.run();
+
+    let bi = h.state().find_first_heading_block().expect("heading");
+    h.state_mut()
+        .editor2_set_selection((bi, 0, 0), (bi + 1, 0, 6));
+    h.run();
+    h.snapshot("12_script_selection");
+}
