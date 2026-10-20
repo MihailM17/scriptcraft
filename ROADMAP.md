@@ -18,14 +18,14 @@ Status legend: `[ ]` to do `[-]` in progress `[x]` done `[!]` blocked
 
 | Field | Value |
 |---|---|
-| Date | 2026-10-19 |
+| Date | 2026-10-20 |
 | Project | ScriptCraft — open-source, local-first screenwriting studio |
 | Repo | `/Users/mihailmihaylov/Documents/Dev_work/scriptcraft` |
-| Branch / commit | `main`; initial commit `48e2fed` "Initial commit: ScriptCraft 100% Rust screenwriting studio" |
+| Branch / commit | `main`; HEAD `3884e01` "Fix cross-platform CI…"; template-parity + writer-polish changes uncommitted |
 | Rust workspace | `scriptcraft-core`, `scriptcraft-app`, `scriptcraft-layout` (`Cargo.toml`, resolver 2) |
-| App crate version | `scriptcraft-app 0.1.0`, `scriptcraft-core 0.1.0` |
-| Distribution | `dist/ScriptCraft-0.4.0-macos-arm64.zip`, `dist/ScriptCraft.app` (unsigned, manual builds) |
-| Current one-liner | KIT-compatible prototype with one screenplay engine (Editor 2.0), crash-safe saves + recovery, OFL fonts, FDX import/export; editor/PDF templates still diverge. |
+| App crate version | `scriptcraft-app 0.6.0`, `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
+| Distribution | `dist/ScriptCraft-0.6.0-macos-arm64.dmg` (arm64, ad-hoc signed); installed `/Applications/ScriptCraft.app` 0.5.0 |
+| Current one-liner | KIT-compatible prototype with one screenplay engine (Editor 2.0), crash-safe saves + recovery, OFL fonts, FDX import/export; PDF export now paginates exactly like the editor. |
 
 **Positioning (locked):** the pro-grade, open-source, local-first screenplay
 studio for working writers. Moat = lossless KIT `.kitsp` + Final Draft `.fdx`
@@ -121,14 +121,17 @@ direct workspace dependencies. There is still no benchmark harness.
 - [x] **Editor is per-chunk `TextEdit`.** Fixed 2026-10-19 (M5): the chunk
   editor and old paginator were deleted; `ScriptView` (Editor 2.0) is the only
   editor — one layout engine for pages, commands via `core::edit::History`.
-- [-] **Editor and PDF template divergence.** Both now render through
-  `scriptcraft-layout`, but the editor shows the `RUSSIAN` (54-row) template
-  while the PDF export renders `FINAL_DRAFT_A4` (58-row); breaks are
-  consistent within each template, yet WYSIWYG (same template in editor and
-  PDF) is still open. (`editing.rs` templates; `scriptcraft-layout/src/pdf.rs`.)
-- [ ] **Snapshot tests on CI GPUs unverified.** `ui_snapshots.rs` renders with
-  wgpu/Metal; locally green, but GitHub's macOS runner GPU may produce pixel
-  diffs. If CI goes red on snapshots only, gate them behind an env var.
+- [x] **Editor and PDF template divergence.** Fixed 2026-10-20: the PDF
+  exporter now uses the editor's `RUSSIAN` template and row pitch (`ROW_MM`),
+  37.5/25/25 mm margins, the shared `RUSSIAN_GEOMETRY` columns, and the
+  editor's page-number slot; transitions print bold/left-aligned like the
+  screen. New `a95_pdf_matches_editor_layout` compares every page's rows,
+  texts, weights and x anchors against `place::layout`. Residual nuances:
+  non-printable notes are shown by the editor but excluded from print (so a
+  project with notes can break pages differently), and PDF lyrics are not
+  italic because the exporter has no italic face. (`src/pdf.rs`.)
+- [x] **Snapshot tests on CI GPUs unverified.** Verified 2026-10-19: the
+  GitHub macOS runner passes all 11 kittest snapshots (run 39302899804).
 - [ ] **`block v0.1.6` is future-incompatible** (transitive via `metal`/
   `wgpu-hal`, macOS-only). Not a build failure; disappears when wgpu updates.
 - [-] **Unimplemented formats exposed in UI.** Fixed 2026-10-19: FDX shipped,
@@ -137,7 +140,7 @@ direct workspace dependencies. There is still no benchmark harness.
 - [x] **Proprietary fonts bundled.** Fixed 2026-10-19: `cour*.ttf` removed;
   editor and PDF now use Courier Prime (OFL), OFL license texts added for all
   bundled fonts, root `LICENSE` (Apache-2.0) and `NOTICE` added.
-- [ ] **Monolith.** `app.rs` is 6,077 lines; state, IO, layout and UI are entangled.
+- [ ] **Monolith.** `app.rs` is 6,224 lines; state, IO, layout and UI are entangled.
 - [ ] **No production/revision layer.** No revision sets/colors, A/B pages,
   locked pages, dual dialogue, omitted scenes, title-page editor, scene
   metadata, spellcheck, or autosave recovery.
@@ -161,21 +164,21 @@ direct workspace dependencies. There is still no benchmark harness.
 - [x] A95 round-trip test: untouched tables/rows compared (deterministic dump,
   BLOBs hex-encoded) before and after `save_file`.
 - [x] CI: fmt, clippy `-D warnings`, tests on macOS/Windows/Linux; `cargo deny`
-  (RustSec audit included). Workflow added 2026-10-19; first green run pending
-  the next push. (cargo-audit itself is redundant next to `cargo deny advisories`.)
+  (RustSec audit included). Workflow added 2026-10-19; all five jobs green in
+  run 39302899804 (cargo-audit itself is redundant next to `cargo deny advisories`).
 - [x] Hide DOCX/FDX in the UI until implemented; correct README claims. Done 2026-10-19: FDX implemented, DOCX radio hidden, README updated.
 
 Exit: no known data-loss path; license surface clean; CI green.
 
 ### Phase 1 — Pro writing core (weeks 2–6)
 
-- [ ] New crate `scriptcraft-layout`: one pagination/wrap engine shared by editor and PDF; golden tests.
-- [ ] `scriptcraft-core`: format-agnostic document model, stable IDs, `EditCommand` + inverse ops.
-- [ ] Custom `ScriptView` widget: global `Selection{anchor,focus}`, cross-block selection, multi-block delete/copy/paste, smart paste (FDX/Fountain/text), IME/accessibility baseline.
-- [ ] Command-based undo/redo (replace full-snapshot history in `app.rs:429`).
+- [x] New crate `scriptcraft-layout`: one pagination/wrap engine shared by editor and PDF; golden tests + A95 editor/PDF parity. Done 2026-10-20.
+- [-] `scriptcraft-core`: format-agnostic document model, stable IDs, `EditCommand` + inverse ops. `EditCommand` + exact inverses + `History` shipped 2026-10-19; stable block IDs still open.
+- [-] Custom `ScriptView` widget: global `Selection{anchor,focus}`, cross-block selection, multi-block delete/copy/paste, smart paste (FDX/Fountain/text), IME/accessibility baseline. Selection/clipboard/IME shipped 2026-10-19; FDX/Fountain smart paste still open.
+- [x] Command-based undo/redo (replaced full-snapshot history; `core::edit::History`). Done 2026-10-19.
 - [-] FDX import/export: paragraphs, title page, scene numbers, revisions scaffold + sample fixture + round-trip tests shipped 2026-10-19. Remaining: FDX clipboard smart paste.
 - [ ] Fountain 1.1 completion: sections, synopsis, notes, boneyard, dual dialogue, page breaks, emphasis; round-trip tests.
-- [ ] PDF export with embedded/subset Courier Prime; title page, scene/page numbers, watermarks; in-app print preview from the shared layout.
+- [-] PDF export with embedded/subset Courier Prime; title page, scene/page numbers, watermarks; in-app print preview from the shared layout. Export done (plus Cyrillic fallback); in-app print preview still open.
 - [ ] Split `app.rs` into `ui/state.rs`, `ui/toolbar.rs`, `ui/editor.rs`, `ui/navigator.rs`, `ui/modules/*`, `ui/dialogs/*` (no behavior change).
 
 Exit: open KIT or FDX, edit, save KIT losslessly, deliver page-exact PDF/FDX/Fountain.
@@ -218,7 +221,7 @@ Order matters; do not start a later item before the earlier one is verified.
 2. [x] Metadata fix + A95 round-trip test.
 3. [x] Atomic save + recovery file.
 4. [x] CI + `cargo deny`/`audit`.
-5. [-] **Editor 2.0** — merges the former items 5 + 7 (user decision
+5. [x] **Editor 2.0** — merges the former items 5 + 7 (user decision
    2026-10-19): one shared layout engine + a custom `ScriptView` widget, before
    FDX. Zoom scales/pans the page only (never reflows; Fit width/Fit page/
    100% shipped 2026-10-19; continuous pointer-anchored zoom + middle-drag
@@ -244,6 +247,13 @@ Order matters; do not start a later item before the earlier one is verified.
 6. [x] FDX import/export with sample fixtures (moved after Editor 2.0). Done
    2026-10-19: `core::fdx` + `fixtures/example.fdx`, A95 round-trip, menu
    import, Export ▸ FDX.
+7. [x] **Writer polish + template parity** (user asks, 2026-10-20):
+   - [x] PDF export uses the editor's template/geometry; A95 parity test.
+   - [x] Scene headings, cues and transitions auto-capitalize typed/pasted text.
+   - [x] Scene-heading time-of-day autocomplete after `"INT. PLACE - "`
+     (fixes KIT-style bare times plus times already used in the script).
+   - [x] Start view: removed the `kitscenarist.ru` tab; recent projects can be
+     removed from the list (files stay on disk); snapshot 06 regenerated.
 
 ---
 
@@ -696,6 +706,67 @@ Newest entries at the bottom. Each entry: date — what changed / what was found
   - Verification: `cargo test --workspace` green locally; the Windows
     helper type-checks for `x86_64-pc-windows-msvc` (a full cross-build
     would need a Windows C toolchain for bundled SQLite).
+
+- **2026-10-20** — Writer polish + editor/PDF template parity (user asks:
+  template parity, auto-capitalized scene headings, time-of-day autocomplete,
+  remove the kitscenarist.ru start tab, deletable recent projects). Also
+  refreshed stale roadmap statuses.
+  - **Template parity:** `scriptcraft-layout/src/pdf.rs` now uses the editor's
+    `RUSSIAN` template and `ROW_MM` pitch (12 pt × 2300/2048), margins
+    37.5/25/25, columns from `RUSSIAN_GEOMETRY` (`cue/paren/dialog`), text
+    right edge from `TEXT_W_MM`, the editor's page-number slot, and Courier
+    Prime hhea ascent/descent for baselines. Transitions now print bold and
+    left-aligned and `(MORE)` sits at the column right, matching `place.rs`.
+    New `tests/pdf_export.rs::a95_pdf_matches_editor_layout` compares every
+    page's rows, texts, bold flags and x anchors against `place::layout`
+    (passes). Residual nuances documented in known issues: non-printable
+    notes still affect editor pagination only; PDF lyrics are not italic.
+  - **Auto-caps:** `script_view::Editor::insert` uppercases typed text for
+    `auto_upper` element types (scene headings, character cues,
+    `SceneCharacters`, transitions); structured paste does the same for its
+    first fragment. Unit test `typing_uppercases_heading_cues_and_transitions`.
+  - **Time autocomplete:** `core::editing` has `TIME_OPTIONS` (DAY, NIGHT,
+    MORNING, AFTERNOON, EVENING, LATER, MOMENTS LATER, A FEW MOMENTS LATER,
+    CONTINUOUS, THE NEXT DAY) plus `known_times` (parses times already used
+    after the last `" - "` in scene headings). Once a heading contains
+    `" - "`, `candidates` offers full-line time completions (deduped, only
+    longer matches, max 16); accepting keeps the caret at the end. Tests:
+    `scene_heading_times_are_suggested`, `known_times_parses_headings`,
+    interaction `scene_heading_caps_and_time_autocomplete`.
+  - **Start view:** `StartTab` removed; one "Projects from Local Computer"
+    toolbar; `project_card` returns a `ProjectCard` with an × button
+    ("Remove from list") that drops the entry from `recent` (persisted only
+    for real projects) without deleting the file. New interaction test
+    `start_view_removes_recent_projects`; snapshot `06_start` regenerated and
+    visually checked. Snapshot count stays 11.
+  - **Roadmap statuses:** sprint item 5 and command undo/layout-crate boxes
+    ticked; snapshot-on-CI issue verified green; Phase 1 items annotated with
+    what remains (stable IDs, FDX/Fountain smart paste, print preview, app
+    split); distribution/app version rows and `app.rs` line count updated.
+  - Verification: `cargo test --workspace` all green (app 16 unit + 19
+    interaction + 11 snapshots; core 48 lib + 21 a95; layout 12 unit + 3
+    parity (+1 ignored) + 1 pagination + 3 place + 2 pdf_export + 3 scale +
+    2 relayout); `cargo fmt --check` OK; `cargo clippy --workspace
+    --all-targets -- -D warnings` OK; `cargo deny check` all four OK.
+  - Committed/pushed and released as v0.6.0 (next entry).
+
+- **2026-10-20** — Released **v0.6.0** (user request: DMG installer + GitHub
+  release).
+  - Bumped `scriptcraft-app` to 0.6.0 (core/layout stay 0.1.0); release build
+    (`cargo build --release -p scriptcraft-app`) installed into a fresh
+    `ScriptCraft.app` bundle with the existing icon, Apache-2.0 `LICENSE` and
+    `NOTICE` in `Contents/Resources`, and an ad-hoc signature
+    (`codesign --force --deep --sign -`, identifier `com.scriptcraft.app`).
+  - DMG: `dist/ScriptCraft-0.6.0-macos-arm64.dmg` (7.4 MB, UDZO) contains
+    `ScriptCraft.app` plus an `/Applications` symlink; mounted, version and
+    signature verified. SHA-256
+    `ed8d4d070b3d22efbcb03fdbe5c6baefe5bb6d02cdc57ba50edabc213671527a`.
+  - GitHub release `v0.6.0` attaches the DMG. The build is ad-hoc signed, not
+    notarized: first launch needs right-click ▸ Open (or System Settings ▸
+    Privacy & Security ▸ Open Anyway).
+  - Release contents since 0.5.0: WYSIWYG PDF export (editor template parity),
+    auto-capitalized headings/cues/transitions, scene-heading time
+    autocomplete, Start-view cleanup + removable recents.
 
 ---
 

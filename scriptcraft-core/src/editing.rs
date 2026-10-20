@@ -152,6 +152,38 @@ const TRANSITIONS: &[&str] = &[
     "FADE TO BLACK",
 ];
 
+/// Standard scene-heading times: KIT's seeded `times` list plus the common
+/// "A FEW MOMENTS LATER" variant.
+pub const TIME_OPTIONS: &[&str] = &[
+    "DAY",
+    "NIGHT",
+    "MORNING",
+    "AFTERNOON",
+    "EVENING",
+    "LATER",
+    "MOMENTS LATER",
+    "A FEW MOMENTS LATER",
+    "CONTINUOUS",
+    "THE NEXT DAY",
+];
+
+/// Times of day already used in the script, in order of first appearance.
+pub fn known_times(blocks: &[ScriptBlock]) -> Vec<String> {
+    let mut out = Vec::new();
+    for b in blocks
+        .iter()
+        .filter(|b| b.element_type == ElementType::SceneHeading)
+    {
+        if let Some((_, time)) = b.text.rsplit_once(" - ") {
+            let t = time.trim();
+            if !t.is_empty() && !out.iter().any(|s: &String| s.eq_ignore_ascii_case(t)) {
+                out.push(t.to_string());
+            }
+        }
+    }
+    out
+}
+
 /// Autocomplete candidates for `element_type` given the current `prefix`.
 /// Capped, most useful first.
 pub fn candidates(blocks: &[ScriptBlock], element_type: ElementType, prefix: &str) -> Vec<String> {
@@ -207,6 +239,29 @@ pub fn candidates(blocks: &[ScriptBlock], element_type: ElementType, prefix: &st
                             if out.len() >= CAP {
                                 break;
                             }
+                        }
+                    }
+                }
+            }
+            // Once the " - " separator is typed, suggest times of day so the
+            // writer can complete "INT. PARK - " in one pick.
+            if let Some((_, typed_time)) = prefix.rsplit_once(" - ") {
+                let head = &prefix[..prefix.len() - typed_time.len()];
+                let typed_up = typed_time.trim_start().to_uppercase();
+                let mut times: Vec<String> = TIME_OPTIONS.iter().map(|s| s.to_string()).collect();
+                for t in known_times(blocks) {
+                    if !times.iter().any(|x| x.eq_ignore_ascii_case(&t)) {
+                        times.push(t);
+                    }
+                }
+                for t in times {
+                    if t.len() > typed_up.len() && t.starts_with(&typed_up) {
+                        let suggestion = format!("{head}{t}");
+                        if !out.iter().any(|s| s.eq_ignore_ascii_case(&suggestion)) {
+                            out.push(suggestion);
+                        }
+                        if out.len() >= 16 {
+                            break;
                         }
                     }
                 }
@@ -544,6 +599,35 @@ mod tests {
         assert_eq!(
             known_locations(&p.blocks),
             vec!["PARK".to_string(), "CAR".to_string()]
+        );
+    }
+
+    #[test]
+    fn scene_heading_times_are_suggested() {
+        let p = sample();
+        let all = candidates(&p.blocks, ElementType::SceneHeading, "EXT. PARK - ");
+        assert!(all.iter().any(|s| s == "EXT. PARK - DAY"));
+        assert!(all.iter().any(|s| s == "EXT. PARK - NIGHT"));
+        assert!(all.iter().any(|s| s == "EXT. PARK - A FEW MOMENTS LATER"));
+        assert!(all.iter().all(|s| s.starts_with("EXT. PARK - ")));
+
+        let m = candidates(&p.blocks, ElementType::SceneHeading, "EXT. PARK - M");
+        assert!(m.iter().any(|s| s == "EXT. PARK - MORNING"));
+        assert!(m.iter().any(|s| s == "EXT. PARK - MOMENTS LATER"));
+        assert!(!m.iter().any(|s| s == "EXT. PARK - DAY"));
+
+        assert!(
+            candidates(&p.blocks, ElementType::SceneHeading, "EXT. PARK - DAY").is_empty(),
+            "a complete time needs no further suggestion"
+        );
+    }
+
+    #[test]
+    fn known_times_parses_headings() {
+        let p = sample();
+        assert_eq!(
+            known_times(&p.blocks),
+            vec!["DAY".to_string(), "NIGHT".to_string()]
         );
     }
 

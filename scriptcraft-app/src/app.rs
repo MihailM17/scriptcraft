@@ -330,14 +330,6 @@ pub enum SettingsPane {
     TemplatesLibrary,
 }
 
-/// Start module project-source tabs.
-#[derive(Default, PartialEq, Eq, Clone, Copy, Hash)]
-pub enum StartTab {
-    #[default]
-    Local,
-    Online,
-}
-
 /// Export dialog modules, mirroring KIT's Research / Outline / Script tabs.
 #[derive(Default, PartialEq, Eq, Clone, Copy)]
 enum ExportTab {
@@ -480,8 +472,6 @@ pub struct ScriptCraftApp {
     /// The block the Editor 2.0 caret is in (mirrors `editor2.selection`).
     selected_block: Option<usize>,
     side_tab: SideTab,
-    /// Start module: which project source tab is active.
-    start_tab: StartTab,
     /// Recent projects (path, "dd.mm.yyyy HH:MM"); persisted in recent.txt.
     recent: Vec<(String, String)>,
     /// Settings module: selected page and Common/Modules tab.
@@ -565,7 +555,6 @@ impl Default for ScriptCraftApp {
             selected_scene: 0,
             selected_block: None,
             side_tab: SideTab::default(),
-            start_tab: StartTab::default(),
             recent: Vec::new(),
             settings_pane: SettingsPane::default(),
             settings_modules: false,
@@ -5577,40 +5566,25 @@ impl ScriptCraftApp {
                                         .color(c.heading_text),
                                 );
                                 ui.add_space(12.0);
-                                self.start_tabs(ui);
+                                self.start_toolbar(ui);
                                 ui.add_space(12.0);
                                 egui::ScrollArea::vertical()
                                     .auto_shrink([false, false])
-                                    .show(ui, |ui| match self.start_tab {
-                                        StartTab::Local => self.start_recent_list(ui),
-                                        StartTab::Online => {
-                                            ui.add_space(8.0);
-                                            ui.label(
-                                                egui::RichText::new(
-                                                    "Projects from kitscenarist.ru are not available in this build.",
-                                                )
-                                                .color(c.disabled_text),
-                                            );
-                                        }
-                                    });
+                                    .show(ui, |ui| self.start_recent_list(ui));
                             });
                     });
                 });
             });
     }
 
-    /// Light/dark tab strip of the Start module + refresh button.
-    fn start_tabs(&mut self, ui: &mut egui::Ui) {
+    /// Title row of the Start module plus the refresh button.
+    fn start_toolbar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 6.0;
-            for (tab, label) in [
-                (StartTab::Local, "Projects from Local Computer"),
-                (StartTab::Online, "Projects from kitscenarist.ru"),
-            ] {
-                if settings_tab(ui, label, self.start_tab == tab).clicked() {
-                    self.start_tab = tab;
-                }
-            }
+            ui.label(
+                egui::RichText::new("Projects from Local Computer")
+                    .size(12.5)
+                    .color(kit().disabled_text),
+            );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if kit_square_button(ui, KitIcon::Refresh)
                     .on_hover_text("Refresh")
@@ -5645,14 +5619,26 @@ impl ScriptCraftApp {
             return;
         }
         let mut clicked: Option<String> = None;
+        let mut removed: Option<String> = None;
         for (path, when) in &self.recent {
             let name = std::path::Path::new(path)
                 .file_stem()
                 .map(|s| s.to_string_lossy().into_owned())
                 .unwrap_or_else(|| path.clone());
-            if project_card(ui, &name, path, when).clicked() {
+            let card = project_card(ui, &name, path, when);
+            if card.remove_clicked {
+                removed = Some(path.clone());
+            } else if card.response.clicked() {
                 clicked = Some(path.clone());
             }
+        }
+        if let Some(p) = removed {
+            // Only the start-list entry goes away; the project file stays.
+            self.recent.retain(|(r, _)| r != &p);
+            if self.persist {
+                save_recent(&self.recent);
+            }
+            self.status = "Removed from recent projects.".to_string();
         }
         if let Some(p) = clicked {
             self.open_path(&p);

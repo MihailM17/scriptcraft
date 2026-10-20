@@ -51,3 +51,62 @@ fn a95_exports_valid_pdf() {
         "Cyrillic heading text missing from PDF (font fallback broken)"
     );
 }
+
+/// The editor and the PDF share one engine: for the A95 fixture, every page's
+/// rows, texts, weights and horizontal anchors must be identical.
+#[test]
+fn a95_pdf_matches_editor_layout() {
+    use scriptcraft_core::editing::RUSSIAN;
+    use scriptcraft_layout::pdf;
+    use scriptcraft_layout::place::{layout, RUSSIAN_GEOMETRY, TEXT_W_MM};
+
+    const ML: f32 = 37.5;
+    const CELL: f32 = 2.54;
+
+    let p = kitsp::load_file(FIXTURE).expect("fixture must load");
+    let meta = kitsp::load_metadata(FIXTURE).expect("load metadata");
+    let labels: Vec<String> = (0..p.scenes().len())
+        .map(|i| format!("{}.", i + 1))
+        .collect();
+    let editor = layout(&p.blocks, &RUSSIAN, &RUSSIAN_GEOMETRY, &labels);
+    let pages = pdf::layout_pages(&p, &meta, &pdf::ExportOptions::default());
+
+    assert_eq!(editor.pages.len(), pages.len(), "page count");
+    for (pi, (epage, plines)) in editor.pages.iter().zip(&pages).enumerate() {
+        let mut want: Vec<(usize, String, f32, f32, bool)> = epage
+            .lines
+            .iter()
+            .map(|l| {
+                let w = l.text.chars().count() as f32 * CELL;
+                let left = if l.right_aligned {
+                    ML + l.x_mm - w
+                } else {
+                    ML + l.x_mm
+                };
+                (l.row, l.text.clone(), left, w, l.bold)
+            })
+            .collect();
+        let mut got: Vec<(usize, String, f32, f32, bool)> = Vec::new();
+        let mut row = 0usize;
+        for line in plines {
+            if line.share_row {
+                row = row.saturating_sub(1);
+            }
+            if !line.is_page_number {
+                if !line.text.is_empty() {
+                    let w = line.text.chars().count() as f32 * CELL;
+                    let left = if line.right_aligned {
+                        ML + TEXT_W_MM - w
+                    } else {
+                        line.x_mm
+                    };
+                    got.push((row, line.text.clone(), left, w, line.bold));
+                }
+                row += 1;
+            }
+        }
+        want.sort_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)));
+        got.sort_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)));
+        assert_eq!(want, got, "page {} differs from the editor", pi + 1);
+    }
+}

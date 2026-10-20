@@ -572,3 +572,64 @@ fn export_dialog_offers_fdx_not_docx() {
     h.run();
     h.run();
 }
+
+/// Start page: the × on a recent-project card removes the entry from the
+/// list (the project file itself is untouched).
+#[test]
+fn start_view_removes_recent_projects() {
+    let mut h = harness(SideTab::Start);
+    h.state_mut().pin_recent(vec![(
+        "/tmp/Delete_Me.kitsp".to_string(),
+        "18.10.2026 10:00".to_string(),
+    )]);
+    h.run();
+    assert!(
+        h.query_by_label("Delete_Me").is_some(),
+        "the pinned project should be listed"
+    );
+
+    h.get_by_label("Remove from list").click();
+    h.run();
+
+    assert!(
+        h.query_by_label("Delete_Me").is_none(),
+        "the card should disappear after removal"
+    );
+    assert!(
+        h.query_by_label("No recent projects yet").is_some(),
+        "empty state should be shown"
+    );
+}
+
+/// Typing into a scene heading forces caps, and once the " - " separator is
+/// typed the dropdown offers the standard times of day.
+#[test]
+fn scene_heading_caps_and_time_autocomplete() {
+    let mut h = focused_harness();
+    let bi = h
+        .state()
+        .find_first_heading_block()
+        .expect("A95 should contain a scene heading");
+    h.state_mut().focus_block_at(bi, 0);
+    h.run_steps(2);
+    h.input_mut()
+        .events
+        .push(egui::Event::Text("int. test - ".into()));
+    h.run();
+
+    let text = h.state().block_text(bi).unwrap_or_default();
+    assert!(
+        text.starts_with("INT. TEST - "),
+        "typed heading must be uppercase: {text}"
+    );
+    let rows = h.state().editor2_autocomplete_rows();
+    let labels: Vec<&str> = rows.iter().map(|(s, _)| s.as_str()).collect();
+    assert!(
+        labels.contains(&"INT. TEST - DAY"),
+        "times should be suggested: {labels:?}"
+    );
+    assert!(
+        labels.contains(&"INT. TEST - A FEW MOMENTS LATER"),
+        "all standard times should be suggested: {labels:?}"
+    );
+}

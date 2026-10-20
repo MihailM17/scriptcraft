@@ -1,10 +1,11 @@
 use crate::paginate::paginate;
+use crate::place::{ROW_MM, RUSSIAN_GEOMETRY, TEXT_W_MM};
 use crate::wrap::wrap_lines;
 use printpdf::{
     Color, Greyscale, Line, LinePoint, Mm, Op, ParsedFont, PdfDocument, PdfFontHandle, PdfPage,
     PdfSaveOptions, Point, Pt, TextItem, TextMatrix,
 };
-use scriptcraft_core::editing::{cue_name_for, FINAL_DRAFT_A4};
+use scriptcraft_core::editing::{cue_name_for, RUSSIAN};
 use scriptcraft_core::kitsp::Metadata;
 use scriptcraft_core::model::{ElementType, Project};
 use std::collections::HashMap;
@@ -18,34 +19,36 @@ pub enum PdfError {
     Empty,
 }
 
-/// A4 page geometry (mm) for KIT's `final_draft_a4.kitss` export template:
-/// margins 38/24/17/24, 155mm text column (61 chars at 10cpi Courier).
+/// A4 page geometry (mm) for KIT's Russian editor/export template:
+/// margins 37.5/25/25/25, 147.5mm text column (58 chars at 10cpi Courier).
 const PAGE_W: f32 = 210.0;
 const PAGE_H: f32 = 297.0;
-const MARGIN_L: f32 = 38.0;
-const MARGIN_T: f32 = 24.0;
-const MARGIN_R: f32 = 17.0;
+const MARGIN_L: f32 = 37.5;
+const MARGIN_T: f32 = 25.0;
 const FONT_PT: f32 = 12.0;
 /// 0.6em advance at 12pt = 7.2pt = 2.54mm per column.
 const CHAR_MM: f32 = 2.54;
-/// Template line pitch: single-spaced 12pt = 4.2333mm.
-const PITCH_MM: f32 = FONT_PT / 72.0 * 25.4;
+/// Template line pitch, shared with the editor's row grid.
+const PITCH_MM: f32 = ROW_MM;
 /// Millimetres per PDF point (TextMatrix offsets are in points).
 const MM_TO_PT: f32 = 72.0 / 25.4;
+/// Courier Prime 12pt metrics (hhea 1600/-700 per 2048 em).
+const ASCENT_MM: f32 = 1600.0 / 2048.0 * 12.0 / 72.0 * 25.4;
+const DESCENT_MM: f32 = 700.0 / 2048.0 * 12.0 / 72.0 * 25.4;
 /// Baseline offset below the slot top under the top margin.
-const BASELINE_OFF: f32 = 3.0;
+const BASELINE_OFF: f32 = ASCENT_MM;
 /// Right edge of the text column.
-const TEXT_RIGHT: f32 = PAGE_W - MARGIN_R;
-/// Block columns: character 51mm, parenthetical 36mm, dialogue 26mm in from
-/// the left margin; dialogue right margin 40mm.
-const X_CUE: f32 = MARGIN_L + 51.0;
-const X_PAREN: f32 = MARGIN_L + 36.0;
-const X_DLG: f32 = MARGIN_L + 26.0;
-const DLG_RIGHT: f32 = TEXT_RIGHT - 40.0;
-/// Baseline of the top-right page number, measured from the page top.
-const PAGE_NUM_BASELINE: f32 = 16.4;
+const TEXT_RIGHT: f32 = MARGIN_L + TEXT_W_MM;
+/// Block columns in from the left margin: character 67.5mm, parenthetical
+/// 55mm, dialogue 37.5mm — the editor's grid.
+const X_CUE: f32 = MARGIN_L + RUSSIAN_GEOMETRY.cue_mm;
+const X_PAREN: f32 = MARGIN_L + RUSSIAN_GEOMETRY.paren_mm;
+const X_DLG: f32 = MARGIN_L + RUSSIAN_GEOMETRY.dialog_mm;
+/// Baseline of the top-right page number: the editor bottom-aligns it 0.4
+/// rows above the first content row.
+const PAGE_NUM_BASELINE: f32 = MARGIN_T - 0.4 * PITCH_MM - DESCENT_MM;
 /// Scene numbers sit 4mm left of the text margin (measured from KIT).
-const SCENE_NUM_GAP: f32 = 4.0;
+const SCENE_NUM_GAP: f32 = RUSSIAN_GEOMETRY.scene_num_gap_mm;
 /// Title-page nudges measured from KIT's export (mm below the slot row).
 const TITLE_DY: f32 = 1.4;
 const TITLE_VALUE_DY: f32 = 1.5;
@@ -155,15 +158,15 @@ fn speech_counts(blocks: &[scriptcraft_core::model::ScriptBlock]) -> HashMap<Str
 
 /// Typeset a project into positioned lines per page (pure function of the
 /// document — unit-testable without fonts). Non-printable blocks are
-/// excluded, matching KIT's print behavior. Geometry follows KIT's default
-/// export template `Final Draft screenplay (A4)`.
+/// excluded, matching KIT's print behavior. Geometry follows the editor's
+/// Russian-locale KIT template so screen and PDF paginate identically.
 pub fn layout_pages(p: &Project, meta: &Metadata, opts: &ExportOptions) -> Vec<Vec<PrintLine>> {
     let blocks: Vec<usize> = (0..p.blocks.len())
         .filter(|&i| p.blocks[i].element_type.is_printable())
         .collect();
     let renum: Vec<scriptcraft_core::model::ScriptBlock> =
         blocks.iter().map(|&i| p.blocks[i].clone()).collect();
-    let pages = paginate(&renum, &FINAL_DRAFT_A4);
+    let pages = paginate(&renum, &RUSSIAN);
     let locked = locked_scene_labels(meta);
     let prefix = meta.scene_number_prefix.trim().to_string();
     let start: u32 = meta.scene_number_start.trim().parse().unwrap_or(1);
@@ -201,7 +204,7 @@ pub fn layout_pages(p: &Project, meta: &Metadata, opts: &ExportOptions) -> Vec<V
                 ElementType::Parenthetical => (X_PAREN, false),
                 ElementType::Dialogue => (X_DLG, false),
                 ElementType::Lyrics => (X_DLG, false),
-                ElementType::Transition => (MARGIN_L, false),
+                ElementType::Transition => (MARGIN_L, true),
                 ElementType::NonPrintable => (X_CUE, false),
             };
             if chunk.contd {
@@ -238,10 +241,9 @@ pub fn layout_pages(p: &Project, meta: &Metadata, opts: &ExportOptions) -> Vec<V
                 }
             }
             // Same wrap budget as the paginator: identical line breaks.
-            let wrapped = wrap_lines(&text, FINAL_DRAFT_A4.col_chars(b.element_type));
+            let wrapped = wrap_lines(&text, RUSSIAN.col_chars(b.element_type));
             for (li, line) in wrapped.into_iter().enumerate() {
                 let mut l = PrintLine::text_line(x, line, bold);
-                l.right_aligned = matches!(b.element_type, ElementType::Transition);
                 l.share_row = li == 0 && number_pushed;
                 lines.push(l);
             }
@@ -477,13 +479,7 @@ pub fn to_pdf_bytes(
             if !line.text.is_empty() {
                 let w = line.text.chars().count() as f32 * CHAR_MM;
                 let x = if line.right_aligned {
-                    let right = if line.text == "(MORE)" {
-                        // (MORE) hugs the dialogue column's right edge.
-                        DLG_RIGHT
-                    } else {
-                        TEXT_RIGHT
-                    };
-                    (right - w).max(MARGIN_L)
+                    (TEXT_RIGHT - w).max(MARGIN_L)
                 } else {
                     line.x_mm
                 };
@@ -560,7 +556,7 @@ mod tests {
     #[test]
     fn layout_matches_pagination_line_budget() {
         let p = sample();
-        let pages = paginate(&p.blocks, &FINAL_DRAFT_A4);
+        let pages = paginate(&p.blocks, &RUSSIAN);
         let laid = layout_pages(&p, &Default::default(), &default_opts());
         assert_eq!(laid.len(), pages.len());
         // One printed row per budgeted row, plus out-of-band lines:
@@ -578,7 +574,7 @@ mod tests {
                     .take(c.end - c.start)
                     .collect::<Vec<_>>()
                     .join("\n");
-                rows += wrap_lines(&slice, FINAL_DRAFT_A4.col_chars(b.element_type))
+                rows += wrap_lines(&slice, RUSSIAN.col_chars(b.element_type))
                     .len()
                     .max(1);
                 if c.contd {
@@ -588,7 +584,7 @@ mod tests {
                     rows += 1;
                 }
             }
-            assert!(rows <= FINAL_DRAFT_A4.lines_per_page, "page {pi} overflow");
+            assert!(rows <= RUSSIAN.lines_per_page, "page {pi} overflow");
             let share = lines.iter().filter(|l| l.share_row).count();
             let banded = lines.iter().filter(|l| l.is_page_number).count();
             assert_eq!(
@@ -613,20 +609,20 @@ mod tests {
         assert_eq!(head.text, "EXT. PARK - DAY");
         assert_eq!(head.x_mm, MARGIN_L);
         assert!(head.bold && head.share_row);
-        // Character cue at 38 + 51.
+        // Character cue at 37.5 + 67.5.
         let cue = page.iter().find(|l| l.text == "IVAN").unwrap();
         assert!((cue.x_mm - X_CUE).abs() < 0.01);
         assert!(cue.bold);
-        // Dialogue at 38 + 26.
+        // Dialogue at 37.5 + 37.5.
         let dlg = page.iter().find(|l| l.text.starts_with("Hello")).unwrap();
         assert!((dlg.x_mm - X_DLG).abs() < 0.01);
         assert!(!dlg.bold);
-        // Parenthetical at 38 + 36.
+        // Parenthetical at 37.5 + 55.
         let par = page.iter().find(|l| l.text == "(softly)").unwrap();
         assert!((par.x_mm - X_PAREN).abs() < 0.01);
-        // Transition is right-aligned and not bold (FD template).
+        // Transition keeps the editor's left-aligned bold style.
         let tr = page.iter().find(|l| l.text == "FADE OUT:").unwrap();
-        assert!(tr.right_aligned && !tr.bold);
+        assert!(!tr.right_aligned && tr.bold);
     }
 
     #[test]

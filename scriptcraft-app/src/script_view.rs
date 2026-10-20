@@ -717,11 +717,17 @@ impl Editor {
                 para: 0,
                 ch: 0,
             });
+        // Scene headings, cues and transitions are uppercase-on-type in KIT;
+        // writers should never have to hold Shift or fix case afterwards.
+        let text = match self.work.get(at.bi) {
+            Some(b) if auto_upper(b.element_type) => text.to_uppercase(),
+            _ => text.to_string(),
+        };
         self.press(vec![EditCommand::InsertText {
             at,
-            text: text.to_string(),
+            text: text.clone(),
         }]);
-        self.sel = Some(Selection::caret(advance_pos(at, text)));
+        self.sel = Some(Selection::caret(advance_pos(at, &text)));
         self.scroll = true;
     }
 
@@ -753,11 +759,15 @@ impl Editor {
                 ch: 0,
             });
         let (_, first) = &internal[0];
+        let first = match self.work.get(at.bi) {
+            Some(b) if auto_upper(b.element_type) => first.to_uppercase(),
+            _ => first.clone(),
+        };
         self.press(vec![EditCommand::InsertText {
             at,
             text: first.clone(),
         }]);
-        let mut caret = advance_pos(at, first);
+        let mut caret = advance_pos(at, &first);
         for (insert_at, (t, s)) in (at.bi + 1..).zip(internal[1..].iter()) {
             self.press(vec![EditCommand::InsertBlock {
                 at: insert_at,
@@ -1566,6 +1576,65 @@ mod tests {
         // scales painted geometry (see `painted_geometry_scales_linearly`).
         let again = document_layout(&blocks, &RUSSIAN, &labels);
         assert_eq!(again, base, "layout must be deterministic");
+    }
+
+    #[test]
+    fn typing_uppercases_heading_cues_and_transitions() {
+        let mut blocks = sample();
+        let mut ed = Editor::new(
+            &blocks,
+            Some(Selection::caret(Pos {
+                bi: 0,
+                para: 0,
+                ch: 0,
+            })),
+        );
+        ed.insert("int. ");
+        apply_all(&mut blocks, &ed.cmds);
+        assert!(
+            blocks[0].text.starts_with("INT. "),
+            "scene heading typed in caps: {}",
+            blocks[0].text
+        );
+        assert_eq!(
+            ed.sel,
+            Some(Selection::caret(Pos {
+                bi: 0,
+                para: 0,
+                ch: 5
+            }))
+        );
+
+        let mut ed = Editor::new(
+            &blocks,
+            Some(Selection::caret(Pos {
+                bi: 1,
+                para: 0,
+                ch: 0,
+            })),
+        );
+        ed.insert("lower");
+        apply_all(&mut blocks, &ed.cmds);
+        assert!(
+            blocks[1].text.starts_with("lower"),
+            "action keeps the typed case"
+        );
+
+        let mut ed = Editor::new(
+            &blocks,
+            Some(Selection::caret(Pos {
+                bi: 2,
+                para: 0,
+                ch: 0,
+            })),
+        );
+        ed.insert("ivan ");
+        apply_all(&mut blocks, &ed.cmds);
+        assert!(
+            blocks[2].text.starts_with("IVAN "),
+            "character cue typed in caps: {}",
+            blocks[2].text
+        );
     }
 
     #[test]

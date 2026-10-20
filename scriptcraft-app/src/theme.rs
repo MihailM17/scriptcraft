@@ -448,12 +448,31 @@ pub fn overline(ui: &mut Ui, text: &str) {
 }
 
 /// Clickable recent-project card for the Start page.
-pub fn project_card(ui: &mut Ui, name: &str, path: &str, when: &str) -> Response {
+pub struct ProjectCard {
+    pub response: Response,
+    pub remove_clicked: bool,
+}
+
+pub fn project_card(ui: &mut Ui, name: &str, path: &str, when: &str) -> ProjectCard {
     let c = kit();
     let width = ui.available_width();
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(width, 64.0), Sense::click());
     let card = rect.shrink2(egui::vec2(0.0, 3.0));
-    let p = ui.painter();
+    let remove_rect = Rect::from_center_size(
+        Pos2::new(card.right() - 18.0, card.center().y),
+        egui::vec2(26.0, 26.0),
+    );
+    let remove = ui
+        .interact(
+            remove_rect,
+            ui.id().with(("remove_recent", path)),
+            Sense::click(),
+        )
+        .on_hover_text("Remove from list");
+    remove.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Remove from list")
+    });
+    let p = ui.painter().clone();
     let fill = if resp.hovered() {
         c.hover_light
     } else {
@@ -487,16 +506,17 @@ pub fn project_card(ui: &mut Ui, name: &str, path: &str, when: &str) -> Response
     }
 
     let x = tile.right() + 14.0;
+    let right = card.right() - 40.0;
     let when_g = p.layout_no_wrap(when.to_owned(), FontId::proportional(11.5), c.disabled_text);
     let when_w = when_g.size().x;
     p.galley(
-        Pos2::new(card.right() - 16.0 - when_w, card.top() + 16.0),
+        Pos2::new(right - when_w, card.top() + 16.0),
         when_g,
         c.disabled_text,
     );
-    let text_w = (card.right() - 16.0 - when_w - 12.0 - x).max(10.0);
+    let text_w = (right - 12.0 - x).max(10.0);
     paint_ellipsized(
-        p,
+        &p,
         Pos2::new(x, card.top() + 21.0),
         card.top() + 21.0,
         name,
@@ -505,14 +525,44 @@ pub fn project_card(ui: &mut Ui, name: &str, path: &str, when: &str) -> Response
         text_w,
     );
     paint_ellipsized(
-        p,
+        &p,
         Pos2::new(x, card.top() + 43.0),
         card.top() + 43.0,
         path,
         FontId::proportional(11.5),
         c.disabled_text,
-        card.right() - 16.0 - x,
+        right - x,
     );
+
+    if remove.hovered() {
+        p.rect_filled(remove_rect, 6.0, c.hover_light);
+    }
+    let ink = if remove.hovered() {
+        c.heading_text
+    } else {
+        c.disabled_text
+    };
+    let mid = remove_rect.center();
+    let r = 5.0;
+    let st = Stroke::new(1.4_f32, ink);
+    p.line_segment(
+        [
+            Pos2::new(mid.x - r, mid.y - r),
+            Pos2::new(mid.x + r, mid.y + r),
+        ],
+        st,
+    );
+    p.line_segment(
+        [
+            Pos2::new(mid.x + r, mid.y - r),
+            Pos2::new(mid.x - r, mid.y + r),
+        ],
+        st,
+    );
+
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name));
-    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+    ProjectCard {
+        response: resp.on_hover_cursor(egui::CursorIcon::PointingHand),
+        remove_clicked: remove.clicked(),
+    }
 }
