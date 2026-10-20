@@ -35,9 +35,10 @@ jobs:
           Copy-Item target/release/scriptcraft-app.exe "$dir/ScriptCraft.exe"
           Copy-Item LICENSE, NOTICE, README.md $dir
           Compress-Archive -Path $dir -DestinationPath "dist/ScriptCraft-$env:VERSION-windows-x64.zip"
-          $zip = "dist/ScriptCraft-$env:VERSION-windows-x64.zip"
+          $zipName = "ScriptCraft-$env:VERSION-windows-x64.zip"
+          $zip = "dist/$zipName"
           $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
-          "$hash  ScriptCraft-$env:VERSION-windows-x64.zip" | Set-Content "$zip.sha256"
+          [System.IO.File]::WriteAllText("$zip.sha256", "$hash  $zipName`n")
       - uses: actions/upload-artifact@v4
         with:
           name: windows-x64
@@ -69,7 +70,7 @@ jobs:
           cp scriptcraft-app/assets/ScriptCraft-1024.png "$dir/scriptcraft.png"
           cp packaging/linux/scriptcraft.desktop "$dir/"
           tar -C dist -czf "dist/ScriptCraft-${VERSION}-linux-x86_64.tar.gz" "ScriptCraft-${VERSION}-linux-x86_64"
-          sha256sum "dist/ScriptCraft-${VERSION}-linux-x86_64.tar.gz" > "dist/ScriptCraft-${VERSION}-linux-x86_64.tar.gz.sha256"
+          (cd dist && sha256sum "ScriptCraft-${VERSION}-linux-x86_64.tar.gz" > "ScriptCraft-${VERSION}-linux-x86_64.tar.gz.sha256")
       - uses: actions/upload-artifact@v4
         with:
           name: linux-x86_64
