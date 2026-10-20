@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=ScriptCraft
+Comment=Local-first screenwriting studio
+Exec=scriptcraft %f
+Icon=scriptcraft
+Terminal=false
+Categories=Office;Graphics;
+MimeType=application/x-kitsp;

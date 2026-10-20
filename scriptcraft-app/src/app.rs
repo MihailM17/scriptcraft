@@ -52,6 +52,7 @@ pub fn run() -> eframe::Result<()> {
             .unwrap_or_default();
     let viewport_builder = egui::ViewportBuilder::default()
         .with_inner_size([1360.0, 880.0])
+        .with_maximized(true)
         .with_icon(app_icon);
     // macOS: draw the toolbar behind a transparent native titlebar so the
     // app's dark surface continues to the window edge while the traffic
@@ -434,6 +435,15 @@ enum FitMode {
     Width,
 }
 
+/// Something the user asked for that would discard unsaved work. The save
+/// prompt resolves it with Save / Don't Save / Cancel.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum PendingAction {
+    Quit,
+    New,
+    Open(String),
+}
+
 pub struct ScriptCraftApp {
     project: Option<Project>,
     title: String,
@@ -524,6 +534,11 @@ pub struct ScriptCraftApp {
     /// The toolbar is painted behind a transparent native titlebar (macOS
     /// production window only; tests keep the native titlebar layout).
     custom_titlebar: bool,
+    /// Quit / new / open request waiting on the save-changes prompt.
+    pending_save: Option<PendingAction>,
+    /// Set once the user has resolved the quit prompt and the window may
+    /// actually close (prevents re-cancelling the close request).
+    allow_close: bool,
 }
 
 impl Default for ScriptCraftApp {
@@ -591,6 +606,8 @@ impl Default for ScriptCraftApp {
             last_window_title: String::new(),
             menu: None,
             custom_titlebar: false,
+            pending_save: None,
+            allow_close: false,
         }
     }
 }
@@ -613,6 +630,116 @@ impl ScriptCraftApp {
 
     pub fn goto_tab(&mut self, tab: SideTab) {
         self.side_tab = tab;
+    }
+
+    /// Unsaved script or title-page edits in an open project.
+    fn has_unsaved_changes(&self) -> bool {
+        self.project.is_some() && (self.dirty || self.meta_dirty)
+    }
+
+    /// Ask for something destructive, prompting first when work is unsaved.
+    fn request_pending(&mut self, action: PendingAction, ctx: &egui::Context) {
+        if self.has_unsaved_changes() {
+            self.pending_save = Some(action);
+        } else {
+            self.finish_pending(action, ctx);
+        }
+    }
+
+    fn finish_pending(&mut self, action: PendingAction, ctx: &egui::Context) {
+        match action {
+            PendingAction::Quit => {
+                self.allow_close = true;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            PendingAction::New => self.do_new(),
+            PendingAction::Open(path) => self.open_path(&path),
+        }
+    }
+
+    fn request_quit(&mut self, ctx: &egui::Context) {
+        self.request_pending(PendingAction::Quit, ctx);
+    }
+
+    /// Save / Don't Save / Cancel prompt for quit and project switching.
+    fn save_prompt(&mut self, ctx: &egui::Context) {
+        #[derive(Clone, Copy)]
+        enum Choice {
+            Save,
+            Discard,
+            Cancel,
+        }
+
+        let Some(pending) = self.pending_save.clone() else {
+            return;
+        };
+        let target = match pending {
+            PendingAction::Quit => "before quitting",
+            PendingAction::New => "before creating a new project",
+            PendingAction::Open(_) => "before opening another project",
+        };
+        let name = if self.title.trim().is_empty() {
+            "this script".to_string()
+        } else {
+            format!("\u{201c}{}\u{201d}", self.title.trim())
+        };
+        let mut choice: Option<Choice> = None;
+
+        let modal = egui::Modal::new(egui::Id::new("save_changes_prompt")).show(ctx, |ui| {
+            ui.set_width(420.0);
+            ui.label(egui::RichText::new("Save changes?").size(17.0).strong());
+            ui.add_space(6.0);
+            ui.label(format!("Save your changes to {name} {target}?"));
+            ui.add_space(4.0);
+            ui.label(
+                egui::RichText::new("Unsaved changes will be lost if you don't save them.")
+                    .size(12.0)
+                    .color(kit().disabled_text),
+            );
+            ui.add_space(14.0);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let save = ui.add(
+                    egui::Button::new(
+                        egui::RichText::new("Save")
+                            .strong()
+                            .color(egui::Color32::WHITE),
+                    )
+                    .fill(kit().accent),
+                );
+                if save.clicked() {
+                    choice = Some(Choice::Save);
+                }
+                if ui.button("Cancel").clicked() {
+                    choice = Some(Choice::Cancel);
+                }
+                if ui.button("Don't Save").clicked() {
+                    choice = Some(Choice::Discard);
+                }
+            });
+        });
+
+        if modal.should_close() {
+            choice = Some(Choice::Cancel);
+        }
+        match choice {
+            None => {}
+            Some(Choice::Cancel) => self.pending_save = None,
+            Some(Choice::Discard) => {
+                // An intentional discard must not resurface as a crash-recovery
+                // prompt on the next launch.
+                self.clear_recovery_files();
+                self.pending_save = None;
+                self.finish_pending(pending, ctx);
+            }
+            Some(Choice::Save) => {
+                self.do_save();
+                // Save As can be cancelled or fail; keep the prompt up then.
+                if !self.has_unsaved_changes() {
+                    self.pending_save = None;
+                    self.finish_pending(pending, ctx);
+                }
+            }
+        }
     }
 
     /// Arm disk persistence and load settings + recent projects.
@@ -677,6 +804,12 @@ impl ScriptCraftApp {
     #[doc(hidden)]
     pub fn is_dirty(&self) -> bool {
         self.dirty
+    }
+
+    /// Test hook: is the save-before-quit/switch prompt open?
+    #[doc(hidden)]
+    pub fn save_prompt_open(&self) -> bool {
+        self.pending_save.is_some()
     }
 
     /// Test hook: current project path ("" = never saved).
@@ -1335,6 +1468,10 @@ impl ScriptCraftApp {
     /// The current project is safely on disk: drop its recovery copy.
     fn clear_recovery_files(&mut self) {
         self.last_recovery = None;
+        // Tests run with persistence off and must never touch the real dir.
+        if !self.persist {
+            return;
+        }
         let _ = std::fs::remove_file(Self::recovery_dir().join(Self::recovery_key(&self.path)));
         let _ = std::fs::remove_file(Self::recovery_dir().join("untitled.kitsp"));
         self.recovery.retain(|(p, _)| p.exists());
@@ -1380,13 +1517,14 @@ impl ScriptCraftApp {
         self.recovery.retain(|(p, _)| p != &path);
     }
 
-    /// Pick an existing .kitsp and open it (menu + Start page).
-    fn open_dialog(&mut self) {
+    /// Pick an existing .kitsp and open it (menu + Start page), asking to
+    /// save the current project first when it has unsaved changes.
+    fn open_dialog(&mut self, ctx: &egui::Context) {
         if let Some(src) = rfd::FileDialog::new()
             .add_filter("KITScenarist", &["kitsp"])
             .pick_file()
         {
-            self.open_path(&src.to_string_lossy());
+            self.request_pending(PendingAction::Open(src.to_string_lossy().into_owned()), ctx);
         }
     }
 
@@ -2809,17 +2947,56 @@ fn fnv1a(s: &str) -> u64 {
     h
 }
 
+/// The current user's home directory, using the platform's own variable.
+fn home_dir() -> Option<std::path::PathBuf> {
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(profile) = std::env::var_os("USERPROFILE") {
+            return Some(std::path::PathBuf::from(profile));
+        }
+        let drive = std::env::var_os("HOMEDRIVE")?;
+        let path = std::env::var_os("HOMEPATH")?;
+        let mut home = std::path::PathBuf::from(drive);
+        home.push(path);
+        Some(home)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::env::var_os("HOME").map(std::path::PathBuf::from)
+    }
+}
+
+/// Per-platform settings, recent projects and recovery snapshots.
 fn config_dir() -> std::path::PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    std::path::PathBuf::from(home).join("Library/Application Support/ScriptCraft")
+    #[cfg(target_os = "windows")]
+    if let Some(appdata) = std::env::var_os("APPDATA") {
+        return std::path::PathBuf::from(appdata).join("ScriptCraft");
+    }
+    #[cfg(target_os = "macos")]
+    if let Some(home) = home_dir() {
+        return home.join("Library/Application Support/ScriptCraft");
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        if let Some(xdg) = std::env::var_os("XDG_CONFIG_HOME") {
+            if !xdg.is_empty() {
+                return std::path::PathBuf::from(xdg).join("scriptcraft");
+            }
+        }
+        if let Some(home) = home_dir() {
+            return home.join(".config/scriptcraft");
+        }
+    }
+    home_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("ScriptCraft")
 }
 
 fn default_backups_dir() -> String {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    std::path::PathBuf::from(home)
-        .join("Documents/ScriptCraft/backups")
-        .to_string_lossy()
-        .into_owned()
+    let dir = home_dir()
+        .map(|home| home.join("Documents").join("ScriptCraft").join("backups"))
+        .unwrap_or_else(|| std::path::PathBuf::from("ScriptCraft/backups"));
+    dir.to_string_lossy().into_owned()
 }
 
 fn load_settings() -> AppSettings {
@@ -3083,8 +3260,14 @@ impl eframe::App for ScriptCraftApp {
         if ctx.style().visuals.dark_mode != self.settings.dark_mode {
             apply_theme(ctx);
         }
+        // Window close (red button, Alt+F4, File ▸ Quit) must not discard
+        // unsaved work. Cancel the close, ask, and close again once resolved.
+        if ctx.input(|i| i.viewport().close_requested()) && !self.allow_close {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.request_quit(ctx);
+        }
         // Native macOS menu bar events (no-ops in tests).
-        self.poll_native_menu();
+        self.poll_native_menu(ctx);
         // Research-view title edits persist once no field has focus.
         if ctx.memory(|m| m.focused().is_none()) {
             self.flush_meta();
@@ -3092,6 +3275,7 @@ impl eframe::App for ScriptCraftApp {
         // Autosave: quiet periodic save of a real on-disk project.
         let autosave_due = self.settings.autosave
             && self.persist
+            && self.pending_save.is_none()
             && self.project.is_some()
             && self.dirty
             && !self.path.is_empty()
@@ -3124,7 +3308,10 @@ impl eframe::App for ScriptCraftApp {
             if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::F)) {
                 self.show_find = !self.show_find;
             }
-            if self.show_find && ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            if self.show_find
+                && self.pending_save.is_none()
+                && ctx.input(|i| i.key_pressed(egui::Key::Escape))
+            {
                 self.show_find = false;
             }
             if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Z)) {
@@ -3187,6 +3374,8 @@ impl eframe::App for ScriptCraftApp {
             SideTab::Statistics => self.statistics_view(ctx),
             SideTab::Settings => self.settings_view(ctx),
         }
+        // Above every module so it can block the app while open.
+        self.save_prompt(ctx);
     }
 }
 
@@ -3504,15 +3693,8 @@ impl ScriptCraftApp {
         }
         match action {
             None => {}
-            Some(M::New) => self.do_new(),
-            Some(M::Open) => {
-                if let Some(f) = rfd::FileDialog::new()
-                    .add_filter("KITScenarist", &["kitsp"])
-                    .pick_file()
-                {
-                    self.open_path(&f.to_string_lossy());
-                }
-            }
+            Some(M::New) => self.request_pending(PendingAction::New, ui.ctx()),
+            Some(M::Open) => self.open_dialog(ui.ctx()),
             Some(M::Save) => self.do_save(),
             Some(M::SaveAs) => self.do_save_as(),
             Some(M::Import) => self.do_import_fountain(),
@@ -3555,22 +3737,16 @@ impl ScriptCraftApp {
     }
 
     /// Handle native macOS menu bar events and mirror toggle state back.
-    fn poll_native_menu(&mut self) {
+    fn poll_native_menu(&mut self, ctx: &egui::Context) {
         use crate::menu;
         if self.menu.is_none() {
             return;
         }
         for id in menu::poll() {
             match id.as_str() {
-                menu::ID_NEW => self.do_new(),
-                menu::ID_OPEN => {
-                    if let Some(f) = rfd::FileDialog::new()
-                        .add_filter("KITScenarist", &["kitsp"])
-                        .pick_file()
-                    {
-                        self.open_path(&f.to_string_lossy());
-                    }
-                }
+                menu::ID_NEW => self.request_pending(PendingAction::New, ctx),
+                menu::ID_OPEN => self.open_dialog(ctx),
+                menu::ID_QUIT => self.request_quit(ctx),
                 menu::ID_SAVE => self.do_save(),
                 menu::ID_SAVE_AS => self.do_save_as(),
                 menu::ID_IMPORT => self.do_import_fountain(),
@@ -5514,11 +5690,11 @@ impl ScriptCraftApp {
                                         Some(KitIcon::Plus),
                                         "Create Project",
                                     ) {
-                                        self.do_new();
+                                        self.request_pending(PendingAction::New, ui.ctx());
                                     }
                                     ui.add_space(8.0);
                                     if start_button(ui, Some(KitIcon::Folder), "Open Project") {
-                                        self.open_dialog();
+                                        self.open_dialog(ui.ctx());
                                     }
                                     ui.add_space(36.0);
                                     egui::Frame::new()
@@ -5641,7 +5817,7 @@ impl ScriptCraftApp {
             self.status = "Removed from recent projects.".to_string();
         }
         if let Some(p) = clicked {
-            self.open_path(&p);
+            self.request_pending(PendingAction::Open(p), ui.ctx());
         }
     }
 

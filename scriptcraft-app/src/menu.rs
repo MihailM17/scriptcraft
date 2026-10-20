@@ -32,6 +32,7 @@ pub const ID_ZOOM_FIT_PAGE: &str = "kit.zoom_fit_page";
 pub const ID_ZOOM_FIT_WIDTH: &str = "kit.zoom_fit_width";
 pub const ID_ABOUT: &str = "kit.about";
 pub const ID_HELP: &str = "kit.help";
+pub const ID_QUIT: &str = "kit.quit";
 
 pub struct NativeMenu {
     _menu: Menu,
@@ -69,7 +70,7 @@ impl NativeMenu {
         let hide_others = PredefinedMenuItem::hide_others(Some("Hide Others"));
         let show_all = PredefinedMenuItem::show_all(Some("Show All"));
         let app_sep_c = PredefinedMenuItem::separator();
-        let quit = PredefinedMenuItem::quit(Some("Quit ScriptCraft"));
+        let quit = MenuItem::with_id(ID_QUIT, "Quit ScriptCraft", true, acc("CmdOrCtrl+Q"));
         let app_menu = Submenu::with_items(
             "ScriptCraft",
             true,

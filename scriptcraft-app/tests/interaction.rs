@@ -633,3 +633,132 @@ fn scene_heading_caps_and_time_autocomplete() {
         "all standard times should be suggested: {labels:?}"
     );
 }
+
+/// Switching projects from Start must ask before discarding unsaved edits;
+/// Cancel keeps the current project, Don't Save proceeds.
+#[test]
+fn switching_from_start_prompts_to_save() {
+    let mut h = focused_harness();
+    let bi = h
+        .state()
+        .find_first_heading_block()
+        .expect("A95 should contain a scene heading");
+    h.state_mut().focus_block_at(bi, 0);
+    h.run_steps(2);
+    h.input_mut().events.push(egui::Event::Text("Q".into()));
+    h.run();
+    assert!(h.state().is_dirty(), "typing must dirty the project");
+
+    h.state_mut().goto_tab(SideTab::Start);
+    h.run();
+
+    h.get_by_label("A95").click();
+    h.run();
+    assert!(
+        h.state().save_prompt_open(),
+        "switching projects must prompt when dirty"
+    );
+    assert!(h.state().is_dirty(), "nothing saved yet");
+
+    h.get_by_label("Cancel").click();
+    h.run();
+    assert!(!h.state().save_prompt_open());
+    assert!(h.state().is_dirty(), "Cancel must keep the unsaved project");
+
+    h.get_by_label("A95").click();
+    h.run();
+    h.get_by_label("Don't Save").click();
+    h.run();
+    assert!(!h.state().save_prompt_open());
+    assert!(!h.state().is_dirty(), "the project was reloaded from disk");
+}
+
+/// Save in the prompt writes the project, then the requested switch happens.
+#[test]
+fn switching_from_start_can_save_first() {
+    let fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/../fixtures/A95.kitsp");
+    let dir = std::env::temp_dir().join(format!("scriptcraft-save-prompt-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("Prompt_Test.kitsp");
+    std::fs::copy(fixture, &path).unwrap();
+    let path_str = path.to_string_lossy().into_owned();
+
+    let mut h = harness(SideTab::Script);
+    h.run();
+    h.state_mut().open_path(&path_str);
+    h.run();
+    click_editor2_page(&mut h);
+
+    let bi = h
+        .state()
+        .find_first_heading_block()
+        .expect("A95 should contain a scene heading");
+    h.state_mut().focus_block_at(bi, 0);
+    h.run_steps(2);
+    h.input_mut().events.push(egui::Event::Text("Q".into()));
+    h.run();
+    assert!(h.state().is_dirty());
+
+    h.state_mut().goto_tab(SideTab::Start);
+    h.run();
+    h.get_by_label("Prompt_Test").click();
+    h.run();
+    assert!(h.state().save_prompt_open());
+
+    h.get_by_label("Save").click();
+    h.run();
+    assert!(
+        !h.state().save_prompt_open(),
+        "prompt resolves after saving"
+    );
+    assert!(!h.state().is_dirty(), "the project must have been saved");
+
+    let saved = scriptcraft_core::kitsp::load_file(&path_str).expect("saved project loads");
+    assert_eq!(
+        saved.blocks[bi].text.chars().next().map(|c| c.to_string()),
+        Some("Q".to_string()),
+        "typed text must be on disk"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Quit (native menu / window close) asks before discarding unsaved work.
+#[test]
+fn quit_prompts_when_dirty() {
+    let mut h = focused_harness();
+    let bi = h
+        .state()
+        .find_first_heading_block()
+        .expect("A95 should contain a scene heading");
+    h.state_mut().focus_block_at(bi, 0);
+    h.run_steps(2);
+    h.input_mut().events.push(egui::Event::Text("Q".into()));
+    h.run();
+    assert!(h.state().is_dirty());
+
+    let mut info = h
+        .input()
+        .viewports
+        .get(&egui::ViewportId::ROOT)
+        .cloned()
+        .unwrap_or_default();
+    info.events.push(egui::ViewportEvent::Close);
+    h.input_mut().viewports.insert(egui::ViewportId::ROOT, info);
+    h.run();
+    assert!(h.state().save_prompt_open(), "quit must prompt when dirty");
+
+    let before = h.state().block_text(bi);
+    h.input_mut().events.push(egui::Event::Text("Z".into()));
+    h.run();
+    assert_eq!(
+        h.state().block_text(bi),
+        before,
+        "the modal must swallow typing meant for the editor behind it"
+    );
+
+    h.get_by_label("Cancel").click();
+    h.run();
+    assert!(!h.state().save_prompt_open());
+    assert!(h.state().is_dirty());
+}

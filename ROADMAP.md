@@ -21,10 +21,10 @@ Status legend: `[ ]` to do `[-]` in progress `[x]` done `[!]` blocked
 | Date | 2026-10-20 |
 | Project | ScriptCraft — open-source, local-first screenwriting studio |
 | Repo | `/Users/mihailmihaylov/Documents/Dev_work/scriptcraft` |
-| Branch / commit | `main`; HEAD `3884e01` "Fix cross-platform CI…"; template-parity + writer-polish changes uncommitted |
+| Branch / commit | `main`; v0.6.1 release commit (save prompts + cross-platform packaging) |
 | Rust workspace | `scriptcraft-core`, `scriptcraft-app`, `scriptcraft-layout` (`Cargo.toml`, resolver 2) |
-| App crate version | `scriptcraft-app 0.6.0`, `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
-| Distribution | `dist/ScriptCraft-0.6.0-macos-arm64.dmg` (arm64, ad-hoc signed); installed `/Applications/ScriptCraft.app` 0.5.0 |
+| App crate version | `scriptcraft-app 0.6.1`, `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
+| Distribution | v0.6.1 in progress: macOS arm64 DMG + Windows x64 zip + Linux x86_64 tar.gz; installed `/Applications/ScriptCraft.app` is 0.6.0 + save prompts |
 | Current one-liner | KIT-compatible prototype with one screenplay engine (Editor 2.0), crash-safe saves + recovery, OFL fonts, FDX import/export; PDF export now paginates exactly like the editor. |
 
 **Positioning (locked):** the pro-grade, open-source, local-first screenplay
@@ -65,7 +65,7 @@ no proprietary assets; keyboard-first and accessible; every UI claim must ship.
   - `pdf.rs` — print layout + `printpdf` renderer (title page, scene/page numbers, watermarks).
   - `tests/` — `parity.rs` (golden hashes), `pagination.rs`, `place.rs`, `pdf_export.rs`, `scale.rs` (500-page timings).
 - `scriptcraft-app/src/`
-  - `app.rs` — 6,077-line monolith: all state, IO, views, editor, export dialog.
+  - `app.rs` — 6,400-line monolith: all state, IO, views, editor, export dialog.
   - `script_view.rs` — Editor 2.0 `ScriptView` (the only editor since M5): paints `DocLayout` pages (visible pages only; zoom scales geometry, never breaks) and edits by emitting `core::edit` commands — selection/caret, keyboard/pointer, cross-block clipboard, IME, command-history undo/redo.
   - `theme.rs` — palette + egui style. `menu.rs` — native macOS menu. `main.rs`, `lib.rs`.
   - `assets/fonts/` — Courier Prime (Regular/Bold/Italic), PT Sans, IBM Plex Mono; all OFL, license texts in `assets/fonts/licenses/`.
@@ -89,7 +89,9 @@ cargo build --release -p scriptcraft-app
 
 CI lives in `.github/workflows/ci.yml`: fmt + clippy on Linux, full workspace
 tests (incl. snapshots) on macOS, core tests + app compile on Linux/Windows,
-`cargo-deny-action`. `deny.toml` allows permissive licenses plus MPL-2.0
+`cargo-deny-action`. `.github/workflows/packages.yml` (manual dispatch) builds
+the Windows x64 zip and Linux x86_64 tar.gz with SHA-256 files; the macOS DMG
+is still built locally. `deny.toml` allows permissive licenses plus MPL-2.0
 (azul-simplecss via printpdf) and only flags unmaintained crates that are
 direct workspace dependencies. There is still no benchmark harness.
 
@@ -130,6 +132,15 @@ direct workspace dependencies. There is still no benchmark harness.
   non-printable notes are shown by the editor but excluded from print (so a
   project with notes can break pages differently), and PDF lyrics are not
   italic because the exporter has no italic face. (`src/pdf.rs`.)
+- [ ] **macOS Dock/AppleScript quit bypasses the save prompt.** winit 0.30.13
+  has no `applicationShouldTerminate`, so Dock ▸ Quit / `osascript quit`
+  terminate immediately without `close_requested`. Window close (red button,
+  Alt+F4) and the custom Cmd+Q menu item are covered. Needs a small objc hook
+  if Dock quit must prompt too (`app.rs`, `menu.rs`).
+- [ ] **Windows/Linux builds are packaged but not runtime-tested.** CI compiles
+  the app and packages it; there is no GUI smoke test on those runners. The
+  first cross-platform release should be treated as experimental: no native
+  menu bar (in-app menu only), unsigned binaries, Linux needs GTK3.
 - [x] **Snapshot tests on CI GPUs unverified.** Verified 2026-10-19: the
   GitHub macOS runner passes all 11 kittest snapshots (run 39302899804).
 - [ ] **`block v0.1.6` is future-incompatible** (transitive via `metal`/
@@ -254,6 +265,15 @@ Order matters; do not start a later item before the earlier one is verified.
      (fixes KIT-style bare times plus times already used in the script).
    - [x] Start view: removed the `kitscenarist.ru` tab; recent projects can be
      removed from the list (files stay on disk); snapshot 06 regenerated.
+8. [x] **Unsaved-changes protection** (user ask, 2026-10-20): Save / Don't
+   Save / Cancel prompt before quitting and before switching/creating/opening
+   a project (Start view, in-app menu, native menu, window close); custom
+   Cmd+Q menu item. Interaction tests cover quit, Cancel/Don't Save and
+   Save-then-switch. Dock/AppleScript quit limitation documented.
+9. [x] **Cross-platform release v0.6.1** (user ask, 2026-10-20): per-OS config
+   directories (APPDATA on Windows, XDG on Linux, unchanged macOS), manual
+   `packages.yml` workflow for a Windows x64 zip and Linux x86_64 tar.gz with
+   SHA-256 files, README downloads section, macOS arm64 DMG built locally.
 
 ---
 
@@ -767,6 +787,55 @@ Newest entries at the bottom. Each entry: date — what changed / what was found
   - Release contents since 0.5.0: WYSIWYG PDF export (editor template parity),
     auto-capitalized headings/cues/transitions, scene-heading time
     autocomplete, Start-view cleanup + removable recents.
+
+- **2026-10-20** — Startup window now opens maximized (user request: fill the
+  screen without entering macOS fullscreen). `app::run` sets
+  `ViewportBuilder::with_maximized(true)`; verified offscreen on the 1512×982
+  display: window 1512×949 at y=33, i.e. the visible frame below the menu bar.
+  `cargo fmt --check`, clippy and the release build pass. Installed into
+  `/Applications/ScriptCraft.app` (ad-hoc re-signed) and launched; this tweak
+  is not yet in the v0.6.0 DMG/GitHub release.
+
+- **2026-10-20** — Unsaved-changes protection (user request: prompt before
+  quitting and before switching projects).
+  - `app.rs`: `PendingAction { Quit, New, Open(path) }`; `pending_save` +
+    `allow_close`; `has_unsaved_changes` counts script and title-page edits.
+    `request_pending` opens the prompt and `finish_pending` runs the action;
+    `save_prompt` is an `egui::Modal` ("Save changes?" with Save / Cancel /
+    Don't Save; Escape or backdrop = Cancel; Save runs `do_save` and only
+    proceeds once the project is clean, so a cancelled Save As keeps the
+    prompt). Window close requests are cancelled and turned into a prompt.
+  - Routed through the prompt: Start-view recent cards, Create Project, Open
+    Project, in-app File ▸ New/Open, native File ▸ New/Open/Quit.
+    `open_dialog` now takes `ctx`.
+  - `menu.rs`: replaced `PredefinedMenuItem::quit` (macOS bypassed the app)
+    with a custom `ID_QUIT` item + Cmd+Q, polled by `poll_native_menu(ctx)`.
+  - Tests (kittest): `quit_prompts_when_dirty` (real `ViewportEvent::Close`,
+    Cancel, modal swallows typing aimed at the editor),
+    `switching_from_start_prompts_to_save` (Cancel / Don't Save),
+    `switching_from_start_can_save_first` (temp copy, Save then switch,
+    typed text verified on disk). App now 16 unit + 22 interaction + 11
+    snapshots. Full workspace green; fmt clippy and `cargo deny check` pass.
+  - Installed into `/Applications/ScriptCraft.app` (ad-hoc re-signed,
+    verified) and launched. Not committed and not in the v0.6.0 release.
+    Dock/AppleScript quit still bypasses (see Known issues).
+
+- **2026-10-20** — Cross-platform release prep for **v0.6.1** (user request:
+  new GitHub release including Windows and Linux).
+  - `app.rs`: replaced the macOS-only `$HOME/Library/Application Support`
+    path with `config_dir()`/`home_dir()` branches — `%APPDATA%\ScriptCraft`
+    on Windows, `$XDG_CONFIG_HOME/scriptcraft` (or `~/.config/scriptcraft`)
+    on Linux, unchanged on macOS; backups use `%USERPROFILE%`/`$HOME` +
+    `Documents/ScriptCraft/backups`.
+  - `packages.yml` (workflow_dispatch): builds `ScriptCraft-<ver>-windows-x64.zip`
+    (`ScriptCraft.exe`, LICENSE, NOTICE, README) and
+    `ScriptCraft-<ver>-linux-x86_64.tar.gz` (binary `scriptcraft`, desktop
+    file, icon, docs), each with a SHA-256 file.
+  - Bumped `scriptcraft-app` to 0.6.1; README documents the three packages
+    and Linux GTK3 requirement. macOS DMG is still built locally.
+  - Verification: workspace tests/fmt/clippy below; CI package builds to be
+    verified before publishing. Windows/Linux are compile-tested and packaged
+    but not GUI smoke-tested (see Known issues).
 
 ---
 

@@ -1,0 +1,79 @@
+name: Packages
+
+# Manual cross-platform packaging. macOS is built locally as a signed .app/DMG;
+# this workflow produces the Windows and Linux release archives.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  windows:
+    name: Windows x64 zip
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Read version
+        shell: pwsh
+        run: |
+          $line = Select-String -Path scriptcraft-app/Cargo.toml -Pattern '^version = "(.+)"' | Select-Object -First 1
+          "VERSION=$($line.Matches[0].Groups[1].Value)" >> $env:GITHUB_ENV
+      - name: Build release
+        run: cargo build --release -p scriptcraft-app
+      - name: Package
+        shell: pwsh
+        run: |
+          $dir = "dist/ScriptCraft-$env:VERSION-windows-x64"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          Copy-Item target/release/scriptcraft-app.exe "$dir/ScriptCraft.exe"
+          Copy-Item LICENSE, NOTICE, README.md $dir
+          Compress-Archive -Path $dir -DestinationPath "dist/ScriptCraft-$env:VERSION-windows-x64.zip"
+          $zip = "dist/ScriptCraft-$env:VERSION-windows-x64.zip"
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  ScriptCraft-$env:VERSION-windows-x64.zip" | Set-Content "$zip.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64
+          path: |
+            dist/*.zip
+            dist/*.sha256
+          if-no-files-found: error
+
+  linux:
+    name: Linux x86_64 tar.gz
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Linux deps
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
+      - name: Read version
+        run: echo "VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' scriptcraft-app/Cargo.toml | head -1)" >> "$GITHUB_ENV"
+      - name: Build release
+        run: cargo build --release -p scriptcraft-app
+      - name: Package
+        run: |
+          set -euo pipefail
+          dir="dist/ScriptCraft-${VERSION}-linux-x86_64"
+          mkdir -p "$dir"
+          cp target/release/scriptcraft-app "$dir/scriptcraft"
+          cp LICENSE NOTICE README.md "$dir"
+          cp scriptcraft-app/assets/ScriptCraft-1024.png "$dir/scriptcraft.png"
+          cp packaging/linux/scriptcraft.desktop "$dir/"
+          tar -C dist -czf "dist/ScriptCraft-${VERSION}-linux-x86_64.tar.gz" "ScriptCraft-${VERSION}-linux-x86_64"
+          sha256sum "dist/ScriptCraft-${VERSION}-linux-x86_64.tar.gz" > "dist/ScriptCraft-${VERSION}-linux-x86_64.tar.gz.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86_64
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
+          if-no-files-found: error

@@ -16,7 +16,8 @@ KIT code.
   autosave.
 - Script, Research, Cards, Statistics and Settings modules.
 - Dark and light themes with the ScriptCraft icon-blue accent.
-- Native macOS menu bar plus the KIT-style in-app menu.
+- Native macOS menu bar plus the KIT-style in-app menu (Windows and
+  Linux use the in-app menu).
 - Fountain and Final Draft `.fdx` import/export, plus template-matched PDF
   export (title page, scene numbers, letters).
 - Reads and writes real KIT `.kitsp` projects (SQLite + XML).
@@ -39,14 +40,21 @@ KIT code.
 cargo run -p scriptcraft-app
 ```
 
-To build the optimized macOS binary:
+To build the optimized binary:
 
 ```sh
 cargo build --release -p scriptcraft-app
 ```
 
-The app expects macOS for the native menu; the main UI builds on other desktop
-platforms supported by `eframe`.
+Prebuilt packages are attached to each GitHub release:
+
+- macOS (Apple silicon): `ScriptCraft-<version>-macos-arm64.dmg`, ad-hoc signed
+  — right-click ▸ Open on first launch.
+- Windows 10/11 (x64): `ScriptCraft-<version>-windows-x64.zip` — unzip and run
+  `ScriptCraft.exe`.
+- Linux (x86_64): `ScriptCraft-<version>-linux-x86_64.tar.gz` — needs GTK3
+  (`sudo apt install libgtk-3-0` on Debian/Ubuntu); extract and run
+  `./scriptcraft`. The archive also contains a `.desktop` file and icon.
 
 ## Tests
 
@@ -64,6 +72,6 @@ UPDATE_SNAPSHOTS=1 cargo test -p scriptcraft-app --test ui_snapshots
 ## Status
 
 The editor, project format, export pipeline and all five workspace modules are
-implemented; Final Draft `.fdx` import/export shipped 2026-10-19. Planned
-next: DOCX export, editor/PDF template unification and deeper workspace
-tooling.
+implemented. The macOS, Windows and Linux desktop builds share the same UI and
+project format; Windows/Linux packages are unsigned. Planned next: DOCX export
+and deeper production/revision tooling.
