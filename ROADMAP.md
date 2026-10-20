@@ -21,10 +21,10 @@ Status legend: `[ ]` to do `[-]` in progress `[x]` done `[!]` blocked
 | Date | 2026-10-20 |
 | Project | ScriptCraft — open-source, local-first screenwriting studio |
 | Repo | `/Users/mihailmihaylov/Documents/Dev_work/scriptcraft` |
-| Branch / commit | `main`; v0.6.1 release commit (save prompts + cross-platform packaging) |
+| Branch / commit | `main`; tag `v0.6.1` at `80c3700` (save prompts + cross-platform packaging) |
 | Rust workspace | `scriptcraft-core`, `scriptcraft-app`, `scriptcraft-layout` (`Cargo.toml`, resolver 2) |
 | App crate version | `scriptcraft-app 0.6.1`, `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
-| Distribution | v0.6.1 in progress: macOS arm64 DMG + Windows x64 zip + Linux x86_64 tar.gz; installed `/Applications/ScriptCraft.app` is 0.6.0 + save prompts |
+| Distribution | **v0.6.1 released**: macOS arm64 DMG + Windows x64 zip + Linux x86_64 tar.gz (GitHub release); installed `/Applications/ScriptCraft.app` is 0.6.0 + save prompts |
 | Current one-liner | KIT-compatible prototype with one screenplay engine (Editor 2.0), crash-safe saves + recovery, OFL fonts, FDX import/export; PDF export now paginates exactly like the editor. |
 
 **Positioning (locked):** the pro-grade, open-source, local-first screenplay
@@ -838,6 +838,27 @@ Newest entries at the bottom. Each entry: date — what changed / what was found
   - Verification: workspace tests/fmt/clippy below; CI package builds to be
     verified before publishing. Windows/Linux are compile-tested and packaged
     but not GUI smoke-tested (see Known issues).
+
+- **2026-10-20** — Released **v0.6.1** (user request: GitHub release with
+  Windows and Linux).
+  - Tag `v0.6.1` at `80c3700`; release
+    https://github.com/MihailM17/scriptcraft/releases/tag/v0.6.1 publishes
+    three archives plus `.sha256` files:
+    - `ScriptCraft-0.6.1-macos-arm64.dmg` (7,767,043 bytes) SHA-256
+      `bebfd3dc94de604dab845acf449e78c642077f7881bd75bb95ffae8fcbf0da59`;
+      ad-hoc signed, version 0.6.1 verified on the mounted DMG.
+    - `ScriptCraft-0.6.1-windows-x64.zip` (6,279,416 bytes) SHA-256
+      `845f7cf8c5031aa2168bf2230a6469d4d33d9e795390a2a2ca074b74a6aa1b74`;
+      PE32+ GUI subsystem (no console), `APPDATA` used.
+    - `ScriptCraft-0.6.1-linux-x86_64.tar.gz` (10,562,164 bytes) SHA-256
+      `c915d8d12207ed488e0460a7edc489b1f0db11cd45fa636c331ec572bec11134`;
+      ELF x86-64, `XDG_CONFIG_HOME` used, includes desktop file + icon.
+  - Final package run 39451705298 (both jobs green) built from `80c3700`;
+    earlier runs caught a CRLF/relative-path checksum bug and the Windows
+    console window, both fixed. `ci.yml` runs for `605e4c7`, `fe0c36a`,
+    `80c3700` all green.
+  - `/Applications/ScriptCraft.app` was not replaced with 0.6.1 (the local
+    installed build remains 0.6.0 + save prompts).
 
 ---
 
