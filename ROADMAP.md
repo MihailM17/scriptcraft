@@ -833,6 +833,8 @@ Newest entries at the bottom. Each entry: date — what changed / what was found
     file, icon, docs), each with a SHA-256 file.
   - Bumped `scriptcraft-app` to 0.6.1; README documents the three packages
     and Linux GTK3 requirement. macOS DMG is still built locally.
+  - Windows release builds set `windows_subsystem = "windows"` (no console
+    window); checksum files use LF + bare filenames so `sha256sum -c` works.
   - Verification: workspace tests/fmt/clippy below; CI package builds to be
     verified before publishing. Windows/Linux are compile-tested and packaged
     but not GUI smoke-tested (see Known issues).
