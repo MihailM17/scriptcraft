@@ -172,7 +172,7 @@ direct workspace dependencies. There is still no benchmark harness.
   editor and PDF now use Courier Prime (OFL), OFL license texts added for all
   bundled fonts, root `LICENSE` (Apache-2.0) and `NOTICE` added.
 - [ ] **Monolith.** `app.rs` is 7,039 lines; state, IO, layout and UI are entangled. v0.8 extracts views one at a time; no big-bang rewrite.
-- [ ] **No draft comparison or restore.** Revision baselines exist, but there is no public `DraftDiff`, compare workspace, restore-as-copy or revision summary. Planned: v0.8 M1–M3 and M7.
+- [ ] **No compare workspace or restore.** The public `DraftDiff` engine exists (v0.8 M1), but there is no compare view, restore-as-copy or revision summary yet. Planned: v0.8 M2–M3 and M7.
 - [x] **Stable block/scene identity now survives `.kitsp` reopen.** Fixed
   2026-10-26 (v0.8 M0): versioned `scenario_data.scriptcraft_ids` and
   `scriptcraft_scene_meta` rows persist `ScriptBlock.id` and scene identity;
@@ -241,8 +241,8 @@ Source of truth: `docs/v0.8-plan.md`.
 - [x] **M0 Identity + schema** — block/scene IDs and scene metadata persist in
   versioned `scenario_data` rows; re-anchoring and warnings cover external KIT
   edits. Shipped 2026-10-26.
-- [ ] **M1 Draft diff** — public `DraftDiff` for any two baselines/current;
-  block-level, deterministic.
+- [x] **M1 Draft diff** — public `DraftDiff` for any two baselines/current;
+  block-level, deterministic. Shipped 2026-10-27.
 - [ ] **M2 Compare workspace** — unified/side-by-side, filters, jump-to-change.
 - [ ] **M3 Restore as copy** — never overwrite the current draft.
 - [ ] **M4 Omitted scenes** — keep identity/number, print `OMITTED`, FDX map.
@@ -295,8 +295,8 @@ gate**. M8 runs in parallel; M9 is continuous.
 - [x] M0 — persist block/scene IDs + scene metadata in versioned
       `scenario_data` rows; re-anchor after external KIT edits. Shipped
       2026-10-26.
-- [ ] M1 — public `DraftDiff`; any two baselines/current; deterministic,
-      block-level.
+- [x] M1 — public `DraftDiff`; any two baselines/current; deterministic,
+      block-level. Shipped 2026-10-27.
 - [ ] M2 — compare workspace: unified/side-by-side, filters, jump-to-change,
       read-only.
 - [ ] M3 — restore a revision as a new `.kitsp`; never overwrite current.
@@ -1084,6 +1084,23 @@ Newest entries at the bottom. Each entry: date — what changed / what was found
   - Bumped `scriptcraft-app` to 0.7.0 (and `Cargo.lock`); the release tag is
     still pending.
   - Next: commit/tag v0.7.0, then start M0.
+
+- **2026-10-27** — v0.8 M1: draft diff engine.
+  - `scriptcraft-core/src/revision.rs`: public `DiffKind`, `DiffEntry` and
+    `DraftDiff`, plus `RevisionSet`/`RevisionHistory` compare helpers.
+    `RevisionBlock` now carries an optional stable `block_id`; old baselines
+    without it still load and diff by content.
+  - Scenes match by stable block id, KIT UUID, heading text (identity-conflict
+    guard), shared body content, then position. Blocks match by stable id,
+    then a bounded edit-distance pass inside each scene. Removed scenes use
+    target insertion indices; unchanged entries are retained for context.
+  - 16 new unit tests cover unchanged/added/removed/changed blocks, scene
+    reorder, heading renames, duplicate headings, Cyrillic, empty drafts,
+    preamble blocks, baseline-to-baseline comparison, old JSON and
+    determinism. The 500-page compare gate runs under 20 ms.
+  - Release gate: `cargo fmt --all -- --check`, `cargo clippy --workspace
+    --all-targets -- -D warnings`, `cargo test --workspace` all pass.
+  - Next: M2 compare workspace.
 
 - **2026-10-27** — v0.7.0 released to git.
   - Committed the revision workflow as `9ce2e0e` and tagged `v0.7.0`:

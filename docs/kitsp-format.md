@@ -40,10 +40,11 @@ ignores unknown rows, and ScriptCraft's normal save path preserves them.
 
 - `scriptcraft_revisions` — JSON revision history: colour, display name,
   start timestamp, page count, and a block baseline for each revision
-  (`element_type`, `text`, optional scene-heading `kit_uuid`). Missing or
-  unreadable JSON is treated as no revisions; it never blocks opening the
-  script. Saved KIT `script_versions` rows can be imported as baselines;
-  imports are idempotent and capped at 24 revisions.
+  (`element_type`, `text`, optional scene-heading `kit_uuid`, optional stable
+  `block_id`). Older baselines without `block_id` still load and compare by
+  content. Missing or unreadable JSON is treated as no revisions; it never
+  blocks opening the script. Saved KIT `script_versions` rows can be imported
+  as baselines; imports are idempotent and capped at 24 revisions.
 - `scriptcraft_ids` — schema-versioned JSON identity map, one record per
   screenplay block in `scenario` order (`id`, `element_type`, save-time `text`,
   optional scene-heading `kit_uuid`). This is what makes `ScriptBlock.id` and

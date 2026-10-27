@@ -8,14 +8,15 @@ production revisions. Open KIT projects, exchange Final Draft files, lock
 pages, issue coloured revisions, and export page-exact PDFs — offline, on
 macOS, Windows and Linux.
 
-> **Status — v0.7 revision workflow, v0.8 M0.** The current tree implements
+> **Status — v0.7 revision workflow, v0.8 M1.** The current tree implements
 > revision sets, coloured margin marks, revision pages, page locks, `42A`/`42B`
 > numbering, KIT saved-version import, and revision metadata in PDF and FDX.
-> v0.8 has started: block and scene identity now survive save/reopen and
-> external KIT edits.
+> v0.8 has started: block and scene identity survive save/reopen and external
+> KIT edits, and the core now has a deterministic draft-diff engine.
 >
-> **Next — v0.8 revision-complete.** Draft comparison and restore, omitted
-> scenes, dual dialogue, a title-page editor, and a revision summary. See
+> **Next — v0.8 revision-complete.** The compare workspace and restore are the
+> next milestones, followed by omitted scenes, dual dialogue, a title-page
+> editor, and a revision summary. See
 > [`docs/v0.8-plan.md`](docs/v0.8-plan.md).
 
 ![ScriptCraft editor](scriptcraft-app/tests/snapshots/01_script_top.png)
