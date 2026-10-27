@@ -18,33 +18,48 @@ Status legend: `[ ]` to do `[-]` in progress `[x]` done `[!]` blocked
 
 | Field | Value |
 |---|---|
-| Date | 2026-10-20 |
-| Project | ScriptCraft — open-source, local-first screenwriting studio |
+| Date | 2026-10-27 |
+| Project | ScriptCraft — free, open-source, revision-first screenwriting studio |
 | Repo | `/Users/mihailmihaylov/Documents/Dev_work/scriptcraft` |
-| Branch / commit | `main`; tag `v0.6.1` at `80c3700` (save prompts + cross-platform packaging) |
+| Branch / commit | `main`; tag `v0.7.0` at `9ce2e0e` (revision workflow); v0.8 M0 identity committed on top; v0.8 plan written 2026-10-26 |
 | Rust workspace | `scriptcraft-core`, `scriptcraft-app`, `scriptcraft-layout` (`Cargo.toml`, resolver 2) |
-| App crate version | `scriptcraft-app 0.6.1`, `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
-| Distribution | **v0.6.1 released**: macOS arm64 DMG + Windows x64 zip + Linux x86_64 tar.gz (GitHub release); installed `/Applications/ScriptCraft.app` is 0.6.0 + save prompts |
-| Current one-liner | KIT-compatible prototype with one screenplay engine (Editor 2.0), crash-safe saves + recovery, OFL fonts, FDX import/export; PDF export now paginates exactly like the editor. |
+| App crate version | `scriptcraft-app 0.7.0`, `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
+| Distribution | **v0.7.0 tagged** at `9ce2e0e`; v0.7 packages and GitHub release notes still pending. Last published release: v0.6.1. Installed `/Applications/ScriptCraft.app` is 0.6.1 + unreleased shortcuts/theme/folder + revision M1/M2/M3 |
+| Current one-liner | Free, open-source, revision-first studio: one screenplay engine (Editor 2.0), crash-safe saves + recovery, revision colours/marks/pages, KIT version import, revision headers/title-page fields, production page locks with A/B page numbers and FDX revision metadata, OFL fonts, FDX/Fountain import/export; PDF export paginates exactly like the editor. |
+| Next release | **v0.8 revision-complete** — compare/restore, omitted scenes, dual dialogue, title-page editor, revision summary, signed builds and runtime CI. See `docs/v0.8-plan.md`. |
 
-**Positioning (locked):** the pro-grade, open-source, local-first screenplay
-studio for working writers. Moat = lossless KIT `.kitsp` + Final Draft `.fdx`
-interoperability, native Rust speed, and a writing surface better than Final
-Draft — no account, no subscription, no cloud dependency.
+**Positioning (locked 2026-10-26):** the free, open-source, revision-first
+screenwriting studio. Moat = the production revision workflow (colours, locked
+pages, A/B numbering, comparison/restore) plus KIT `.kitsp` and Final Draft
+`.fdx` interoperability, native Rust speed, and local-first ownership. Three
+on-ramps, one product: KIT migrants, Bulgarian/European production, and
+Linux/indie/offline writers. No account, no subscription, no cloud dependency.
 
-**Locked decisions (2026-10-19, user answers):**
+**Locked decisions (2026-10-26, user answers):**
 
-1. Product model: open-source, local-first. No subscription. Optional paid
-   sync/services much later. License target: Apache-2.0 (same as ArtCraft).
-2. Primary user for v1: professional film/TV writers. FDX, revisions,
-   production drafts, dual dialogue, writers-room reliability.
-3. Stack: evolve the existing egui/eframe app. No GPUI rewrite, no web frontend.
-4. Formats: keep reading/writing `.kitsp`; add `.fdx`; introduce a better native
-   format only if/when KIT's schema blocks pro features.
+1. Product model: open-source, local-first, free for anyone. No subscription,
+   no paywalled writing features. Optional paid services only if they can
+   sustain the work without locking the editor.
+2. Primary user for v1: working film/TV writers and production teams who issue
+   and receive revisions. Revisions are the wedge; the editor must still be
+   excellent.
+3. Segments: all three on-ramps are supported by one product and one roadmap —
+   KIT migrants, Bulgarian/European production, and Linux/indie/offline
+   writers. Segment differences are docs, templates, packaging and testing,
+   not separate apps.
+4. Stack: evolve the existing egui/eframe app. No GPUI rewrite, no web frontend.
+5. Formats: keep reading/writing `.kitsp`; add `.fdx`; introduce a better native
+   format only if/when KIT's schema blocks pro features. ScriptCraft-only data
+   lives in versioned `scenario_data` rows that KIT ignores.
+6. Scope for v0.8: revisions, compare/restore, omitted scenes, dual dialogue,
+   title page, revision summary and release engineering. Not collaboration,
+   plugins, production breakdowns, DOCX/RTF, spellcheck or AI.
 
 **Non-negotiables:** no data loss; editor pagination == PDF pagination; FDX/KIT
-round-trip fidelity; <16 ms typing latency; local-first/offline; Apache-2.0 with
-no proprietary assets; keyboard-first and accessible; every UI claim must ship.
+round-trip fidelity with a conversion report for loss; <16 ms typing latency;
+local-first/offline; Apache-2.0 with no proprietary assets; no account or
+telemetry by default; keyboard-first; every UI claim must ship; no paywalled
+writing features.
 
 ---
 
@@ -56,23 +71,28 @@ no proprietary assets; keyboard-first and accessible; every UI claim must ship.
   - `editing.rs` — element transitions, autocomplete candidates, template metrics (`RUSSIAN`, `FINAL_DRAFT_A4`), text helpers for coach/duration. The wrap/paginator were deleted at M5; layout lives in `scriptcraft-layout`.
   - `edit.rs` — `EditCommand` (insert/delete/set/split/merge) with exact inverse sequences + `History` undo/redo (Editor 2.0, M2 done).
   - `fountain.rs` — Fountain export/import.
-  - `fdx.rs` — Final Draft `.fdx` XML export/import (paragraphs, title page, scene numbers, revision scaffold).
+  - `fdx.rs` — Final Draft `.fdx` XML export/import (paragraphs, title page, scene numbers, revision colours/`*` marks).
+  - `revision.rs` — revision colours, baseline snapshots, scene/block diff, mark computation.
   - `format.rs`, `coach.rs` — validation and coaching lints.
 - `scriptcraft-layout/src/` — the layout engine (Editor 2.0, M5 done):
   - `wrap.rs` — greedy wrap ported 1:1 from `editing` + source char spans (ranges tile each paragraph); `row_count` is the count-only twin used on hot paths.
   - `paginate.rs` — page breaker ported 1:1 from `editing::paginate_m`; `Chunk`/`Page`; stepwise `Pager` state machine (M5 perf) so `place::relayout_from` can replay pagination from any page.
   - `place.rs` — `PlacedLine`s in document units (rows × `ROW_MM`; x in mm): body lines with `SourceSpan`, `(CONT'D)` cues, `(MORE)` rows, margin scene numbers, page numbers. `relayout_from` rebuilds only the pages an edit can have affected and splices the rest (differentially fuzzed against `layout` in `tests/relayout.rs`).
-  - `pdf.rs` — print layout + `printpdf` renderer (title page, scene/page numbers, watermarks).
+  - `pdf.rs` — print layout + `printpdf` renderer (title page, scene/page numbers, watermarks, current-revision margin bars/pages).
   - `tests/` — `parity.rs` (golden hashes), `pagination.rs`, `place.rs`, `pdf_export.rs`, `scale.rs` (500-page timings).
 - `scriptcraft-app/src/`
-  - `app.rs` — 6,400-line monolith: all state, IO, views, editor, export dialog.
+  - `app.rs` — 7,039-line monolith: all state, IO, views, editor, export dialog. v0.8 extracts compare, title page and revision summary into their own modules.
   - `script_view.rs` — Editor 2.0 `ScriptView` (the only editor since M5): paints `DocLayout` pages (visible pages only; zoom scales geometry, never breaks) and edits by emitting `core::edit` commands — selection/caret, keyboard/pointer, cross-block clipboard, IME, command-history undo/redo.
   - `theme.rs` — palette + egui style. `menu.rs` — native macOS menu. `main.rs`, `lib.rs`.
   - `assets/fonts/` — Courier Prime (Regular/Bold/Italic), PT Sans, IBM Plex Mono; all OFL, license texts in `assets/fonts/licenses/`.
 - `scriptcraft-app/tests/` — `ui_snapshots.rs` (kittest snapshots), `interaction.rs` (end-to-end clicks/keys), `snapshots/*.png`.
 - `scriptcraft-core/tests/test_a95.rs` — fixture tests (21 scenes, 352 blocks).
 - `fixtures/A95.kitsp` — 21-scene Bulgarian project, the compatibility fixture; `fixtures/example.fdx` — small Final Draft sample for the FDX tests.
-- `docs/kit-design.md`, `docs/kitsp-format.md` — reverse-engineered KIT notes.
+- `fixtures/real/` — permission-cleared real-world compatibility corpus; policy and provenance template in `fixtures/real/README.md` (empty until a file is cleared).
+- `docs/kit-design.md`, `docs/kitsp-format.md` — reverse-engineered KIT notes;
+  `docs/v0.7-plan.md` — revision-workflow milestones; `docs/v0.8-plan.md` —
+  revision-complete development plan; `docs/format-spikes.md` — FDX/KIT
+  omitted-scene, dual-dialogue, revision and title-page findings.
 
 Commands:
 
@@ -151,14 +171,28 @@ direct workspace dependencies. There is still no benchmark harness.
 - [x] **Proprietary fonts bundled.** Fixed 2026-10-19: `cour*.ttf` removed;
   editor and PDF now use Courier Prime (OFL), OFL license texts added for all
   bundled fonts, root `LICENSE` (Apache-2.0) and `NOTICE` added.
-- [ ] **Monolith.** `app.rs` is 6,224 lines; state, IO, layout and UI are entangled.
-- [ ] **No production/revision layer.** No revision sets/colors, A/B pages,
-  locked pages, dual dialogue, omitted scenes, title-page editor, scene
-  metadata, spellcheck, or autosave recovery.
+- [ ] **Monolith.** `app.rs` is 7,039 lines; state, IO, layout and UI are entangled. v0.8 extracts views one at a time; no big-bang rewrite.
+- [ ] **No draft comparison or restore.** Revision baselines exist, but there is no public `DraftDiff`, compare workspace, restore-as-copy or revision summary. Planned: v0.8 M1–M3 and M7.
+- [x] **Stable block/scene identity now survives `.kitsp` reopen.** Fixed
+  2026-10-26 (v0.8 M0): versioned `scenario_data.scriptcraft_ids` and
+  `scriptcraft_scene_meta` rows persist `ScriptBlock.id` and scene identity;
+  load re-anchors by KIT UUID, exact type + text, then equal-length runs between
+  anchors, and warns on ambiguous external edits instead of guessing. `Scene`
+  carries `id`; `Project` carries `scene_meta`. Tests:
+  `scriptcraft-core/tests/test_identity.rs`.
+- [-] **Production layer is partial.** Revision sets/colours/marks, revision
+  pages, FDX metadata, KIT version import, header/footer labels and Revised
+  title-page fields and page locks with A/B page numbers shipped 2026-10-21.
+  Still open: FDX revision-ID import, dual dialogue, omitted scenes,
+  title-page editor, revision summary, scene metadata, spellcheck. Planned:
+  v0.8 M4–M7.
+- [ ] **No signed/notarised builds or auto-update.** macOS is ad-hoc signed;
+  Windows/Linux packages are unsigned. Dock/AppleScript quit still bypasses the
+  save prompt, and Windows/Linux have no GUI smoke test. Planned: v0.8 M8.
 - [ ] **Hardcoded font metrics.** `ROW_MM` is the measured Courier Prime value
   (`scriptcraft-layout/src/place.rs:24`), but is still a constant. Must derive
   from the TTF at runtime (e.g. `ttf-parser`) so swapping fonts cannot break
-  pagination.
+  pagination. Planned: v0.8 M8.
 
 ---
 
@@ -184,23 +218,47 @@ Exit: no known data-loss path; license surface clean; CI green.
 ### Phase 1 — Pro writing core (weeks 2–6)
 
 - [x] New crate `scriptcraft-layout`: one pagination/wrap engine shared by editor and PDF; golden tests + A95 editor/PDF parity. Done 2026-10-20.
-- [-] `scriptcraft-core`: format-agnostic document model, stable IDs, `EditCommand` + inverse ops. `EditCommand` + exact inverses + `History` shipped 2026-10-19; stable block IDs still open.
+- [-] `scriptcraft-core`: format-agnostic document model, stable IDs, `EditCommand` + inverse ops. `EditCommand` + exact inverses + `History` shipped 2026-10-19; persisted block/scene IDs shipped 2026-10-26 (v0.8 M0).
 - [-] Custom `ScriptView` widget: global `Selection{anchor,focus}`, cross-block selection, multi-block delete/copy/paste, smart paste (FDX/Fountain/text), IME/accessibility baseline. Selection/clipboard/IME shipped 2026-10-19; FDX/Fountain smart paste still open.
 - [x] Command-based undo/redo (replaced full-snapshot history; `core::edit::History`). Done 2026-10-19.
-- [-] FDX import/export: paragraphs, title page, scene numbers, revisions scaffold + sample fixture + round-trip tests shipped 2026-10-19. Remaining: FDX clipboard smart paste.
+- [-] FDX import/export: paragraphs, title page, scene numbers, revision
+  colours/`*` marks, revised title-page fields + sample fixture + round-trip
+  tests shipped; importing revision IDs (no prior text) and FDX clipboard
+  smart paste remain.
 - [ ] Fountain 1.1 completion: sections, synopsis, notes, boneyard, dual dialogue, page breaks, emphasis; round-trip tests.
 - [-] PDF export with embedded/subset Courier Prime; title page, scene/page numbers, watermarks; in-app print preview from the shared layout. Export done (plus Cyrillic fallback); in-app print preview still open.
-- [ ] Split `app.rs` into `ui/state.rs`, `ui/toolbar.rs`, `ui/editor.rs`, `ui/navigator.rs`, `ui/modules/*`, `ui/dialogs/*` (no behavior change).
+- [ ] Split `app.rs` as views are touched (no behavior change); new views land in their own modules (`compare_view.rs`, `title_page.rs`, `revision_summary.rs`). v0.8 M9.
 
 Exit: open KIT or FDX, edit, save KIT losslessly, deliver page-exact PDF/FDX/Fountain.
 
-### Phase 2 — Production & revisions (weeks 6–12)
+### Phase 2 — Production & revisions (v0.8, weeks 1–10)
 
-- [ ] Revision sets/colors, revision marks, omitted scenes, A/B pages, locked page/scene numbers, version compare/restore.
-- [ ] Dual dialogue; more/cont'd edge cases; page-break controls.
-- [ ] Title-page WYSIWYG editor; templates (Final Draft A4/Letter, KIT, custom) as data.
-- [ ] Production reports: scene/location/cast/structure/activity, CSV + HTML export.
-- [ ] Spellcheck (pure-Rust, e.g. `zspell`); batch watermark; DOCX export.
+Source of truth: `docs/v0.8-plan.md`.
+
+- [x] Revision sets/colours, marks, current-revision pages, FDX metadata, KIT
+  version import, header/footer labels and page locks with A/B page numbers
+  shipped 2026-10-21.
+- [x] **M0 Identity + schema** — block/scene IDs and scene metadata persist in
+  versioned `scenario_data` rows; re-anchoring and warnings cover external KIT
+  edits. Shipped 2026-10-26.
+- [ ] **M1 Draft diff** — public `DraftDiff` for any two baselines/current;
+  block-level, deterministic.
+- [ ] **M2 Compare workspace** — unified/side-by-side, filters, jump-to-change.
+- [ ] **M3 Restore as copy** — never overwrite the current draft.
+- [ ] **M4 Omitted scenes** — keep identity/number, print `OMITTED`, FDX map.
+- [ ] **M5 Dual dialogue** — two-column layout, editor/PDF parity, FDX.
+- [ ] **M6 Title-page editor** — form + live preview, PDF/FDX parity.
+- [ ] **M7 Revision summary** — scene/page/block counts, CSV + printable view.
+- [ ] **M8 Release engineering** — signing/notarisation, auto-update, runtime
+  CI, Dock quit, font metrics, benchmarks.
+- [ ] **M9 Refactor + docs** — extract views, update format docs/release notes.
+- [ ] **v0.9** — production reports: scene/location/cast/structure/activity,
+  CSV + HTML; CLI/JSON export. Tags/breakdowns depend on M0.
+- [ ] Later: FDX revision-ID import, spellcheck (pure-Rust, e.g. `zspell`),
+  batch watermark, DOCX export.
+
+Exit: a writer can compare, restore, omit, dual-dialogue, title-page and
+summarise a revision-heavy project, with signed builds and tested platforms.
 
 ### Phase 3 — Story & research (weeks 12–20)
 
@@ -224,9 +282,43 @@ Exit: open KIT or FDX, edit, save KIT losslessly, deliver page-exact PDF/FDX/Fou
 
 ---
 
-## 5. Current sprint (two weeks)
+## 5. Sprints
 
-Order matters; do not start a later item before the earlier one is verified.
+### v0.8 — revision-complete (current, from 2026-10-26)
+
+Source of truth: `docs/v0.8-plan.md` (milestones, acceptance tests, release
+gate). Order: **v0.7.0 tag → M0 identity → M1 diff → M2 compare → M3 restore
+→ M4 omitted → M5 dual dialogue → M6 title page → M7 summary → M8 release
+gate**. M8 runs in parallel; M9 is continuous.
+
+- [x] Commit and tag **v0.7.0** (2026-10-27, `9ce2e0e`).
+- [x] M0 — persist block/scene IDs + scene metadata in versioned
+      `scenario_data` rows; re-anchor after external KIT edits. Shipped
+      2026-10-26.
+- [ ] M1 — public `DraftDiff`; any two baselines/current; deterministic,
+      block-level.
+- [ ] M2 — compare workspace: unified/side-by-side, filters, jump-to-change,
+      read-only.
+- [ ] M3 — restore a revision as a new `.kitsp`; never overwrite current.
+- [ ] M4 — omitted scenes: identity, numbering, `OMITTED`, pagination, FDX.
+- [ ] M5 — dual dialogue: two-column layout, editor/PDF parity, FDX, undo.
+      Gate at week 8; move to v0.8.1 if pagination is at risk.
+- [ ] M6 — title-page editor with live PDF-matched preview.
+- [ ] M7 — revision summary (scene/page/block counts, CSV, printable view).
+- [ ] M8 — signing/notarisation, auto-update, Windows/Linux runtime CI, Dock
+      quit, font metrics from TTF, benchmark harness.
+- [ ] M9 — extract compare/title/summary views; update README, ROADMAP and
+      `docs/kitsp-format.md`.
+- [ ] Release gate and 5–10 writer validation; tag v0.8.0.
+
+Exit: a writer can compare Blue vs Pink, jump changes, restore Blue as a copy,
+omit a scene, add dual dialogue, edit the title page, export a revision
+summary, and reopen with every identity intact — on signed, runtime-tested
+builds.
+
+### v0.7 — complete (2026-10-21)
+
+Order mattered; do not start a later item before the earlier one is verified.
 
 1. [x] Legal/asset cleanup (LICENSE, fonts, NOTICE).
 2. [x] Metadata fix + A95 round-trip test.
@@ -274,6 +366,28 @@ Order matters; do not start a later item before the earlier one is verified.
    directories (APPDATA on Windows, XDG on Linux, unchanged macOS), manual
    `packages.yml` workflow for a Windows x64 zip and Linux x86_64 tar.gz with
    SHA-256 files, README downloads section, macOS arm64 DMG built locally.
+10. [x] **FastFormat shortcuts + theme picker** (user ask, 2026-10-20):
+    `Cmd/Ctrl+1…0` retype every block in the editor selection, in writer order
+    (1 scene heading, 2 action, 3 character … 0 non-printable); the format
+    panel and Element menu show the keys. Settings ▸ Theme is a Light/Midnight
+    dropdown persisted as `theme=`, with legacy `dark_mode=` still honoured.
+11. [x] **Open Projects Folder from Start** (user ask, 2026-10-20): Start page
+    button reveals the current project's folder, else the latest recent
+    project's folder, else `~/Documents/ScriptCraft` (created if needed), via
+    `open` / `explorer` / `xdg-open`.
+12. [x] **Revision workflow M1** (v0.7, 2026-10-21): Blue→Pink→Yellow…
+    revision baselines, block-level diff, coloured editor margin bars,
+    Start/Clear actions, and `.kitsp` persistence under
+    `scenario_data.scriptcraft_revisions`.
+13. [x] **Revision pages + export M2** (v0.7, 2026-10-21): current-revision
+    editor filter, revision history window, page-count baselines, PDF margin
+    bars/current-revision pages, and FDX revision colours/`*` marks. See
+    `docs/v0.7-plan.md`.
+14. [x] **Revision production polish M3** (v0.7, 2026-10-21): header/footer
+    revision labels, Revised title-page fields, KIT saved-version import,
+    production page locks with A/B page numbers and a 500-page diff gate are
+    done. FDX revision IDs still carry no prior text. See
+    `docs/v0.7-plan.md`.
 
 ---
 
@@ -860,20 +974,167 @@ Newest entries at the bottom. Each entry: date — what changed / what was found
   - `/Applications/ScriptCraft.app` was not replaced with 0.6.1 (the local
     installed build remains 0.6.0 + save prompts).
 
+- **2026-10-20** — FastFormat shortcuts + theme picker (user request;
+  unreleased on top of v0.6.1).
+  - `app.rs`: `FORMAT_ORDER` is now writer-ordered and doubles as the shortcut
+    map; `set_selected_type` applies over the whole Editor 2.0 selection (with
+    auto-uppercase for heading/cue types) and falls back to the active block;
+    `update()` consumes Cmd/Ctrl+1…0 on the Script tab when no save prompt or
+    find bar is open. Format panel rows have shortcut tooltips and the Element
+    dropdown shows them.
+  - `theme.rs`: new `Theme { Light, Midnight }`; `AppSettings` stores it and
+    `settings.conf` writes `theme=light|midnight`, reading legacy `dark_mode=`
+    as a fallback. Settings ▸ Theme is a combo box; `set_dark_mode` remains a
+    snapshot/test shim.
+  - Tests: `format_shortcuts_apply_to_selection` (two-block Cmd+1 + uppercase)
+    and `theme_dropdown_switches_palette` (combo chosen by accesskit role;
+    Light ↔ Midnight); snapshots 01, 02, 07, 08, 09, 12 regenerated.
+  - Corrected the About window heading to use `env!("CARGO_PKG_VERSION")`
+    (was hardcoded 0.4.0).
+  - Verification: `cargo test --workspace` green; interaction 23/23;
+    ui_snapshots 11/11; `cargo fmt --all -- --check`; `cargo clippy
+    --workspace --all-targets -- -D warnings`.
+  - Rebuilt and installed `/Applications/ScriptCraft.app` from this tree
+    (version 0.6.1, ad-hoc signed, launched successfully).
+
+- **2026-10-20** — Start ▸ Open Projects Folder (user request; unreleased).
+  - `app.rs`: `projects_dir()` resolves the open project's parent folder, then
+    the newest recent project's parent, then `~/Documents/ScriptCraft`;
+    `open_projects_folder()` creates the directory if needed and reveals it
+    with `open` on macOS, `explorer` on Windows and `xdg-open` elsewhere.
+  - Start page: new "Open Projects Folder" action under Open Project; snapshot
+    06 regenerated.
+  - Test: `projects_folder_follows_latest_project` pins a temp recent project
+    and verifies the resolved folder.
+  - Verification: `cargo test --workspace` green; interaction 24/24;
+    ui_snapshots 11/11; `cargo fmt --all -- --check`; `cargo clippy
+    --workspace --all-targets -- -D warnings`.
+  - Rebuilt and installed `/Applications/ScriptCraft.app` from this tree.
+
+
+- **2026-10-21** — Revision workflow M1 + M2 (v0.7 plan + implementation).
+  - Added `docs/v0.7-plan.md`: 90-day focus, three milestones, revision diff
+    design and non-goals; linked from sprint item 12.
+  - `scriptcraft-core/src/revision.rs`: `RevisionColor`, `RevisionSet`,
+    `RevisionHistory`, `RevisionMarks`; scene alignment by heading
+    `kit_uuid`/text, common prefix/suffix trimming, bounded LCS diff, newest
+    colour overrides older; 24-revision cap. Unit tests cover colour cycling,
+    edits, insertion/deletion, scene reordering, heading rename, override and
+    JSON round-trip.
+  - `kitsp.rs`: `load_revisions`, `save_file_with_revisions`,
+    `write_recovery_file_with_revisions`; JSON stored in
+    `scenario_data.scriptcraft_revisions` inside the atomic temp file. Normal
+    `save_file` preserves the row. Round-trip test covers save, normal save
+    and recovery copy.
+  - `app.rs` / `script_view.rs` / `theme.rs`: revision state and cached marks;
+    colored margin bars on changed blocks; Start Blue/Pink… and Clear Revision
+    History in the in-app and native Edit menus; status-bar colour chip;
+    baselines load on open and ride through Save/Save As/recovery.
+  - M2 core: `RevisionSet.pages` baseline; `latest_marks`; shared
+    `RevisionColor::rgb`/`ALL`; FDX `to_fdx_with_revisions` writes stable
+    revision IDs, colours and `Mark="*"` entries plus `Revision` attributes.
+  - M2 app: View the current revision only; Revision History window with
+    colour legend, names/dates/page counts; Start Revision reports the page
+    baseline/added pages; PDF export adds current-revision margin bars and a
+    "current revision pages only" mode; FDX export carries all revision marks.
+  - M2 layout: `PrintLine.revision`, `layout_pages_with_marks`,
+    `to_pdf_bytes_with_marks`, shared 3 mm bar geometry with the editor.
+  - Tests: revision unit tests (incl. `latest_marks_show_only_the_newest_revision`,
+    `page_counts_survive_json`), FDX `exports_revision_colors_and_star_marks`,
+    PDF layout/filter test, interaction
+    `revision_history_window_lists_sets_and_toggles_mode` plus extended
+    mark-override test; snapshot `13_revision_marks`.
+  - M3 layout/export: `PrintLine.margin` header/footer bands with
+    `{revision}`/`{date}`/`{page}` tokens; automatic colour/date header when
+    marked and no custom header; `REVISED` block on the title page; FDX title
+    page carries the same revision fields.
+  - M3 import: `kitsp::load_version_scripts` reads complete KIT
+    `script_versions` snapshots; `import_versions_as_revisions` parses them,
+    deduplicates by name/date and imports up to the 24-revision cap. Research
+    ▸ Script ▸ Versions exposes "Import Versions as Revisions".
+  - M3 performance: `five_hundred_page_diff_stays_under_eight_milliseconds`
+    builds ~500 pages of blocks and asserts the revision diff gate.
+  - M3 page locks: `PageLock` stores a content anchor per page start
+    (paragraph offset, optional `kit_uuid`, neighbouring lines), layout forces
+    those starts, and inserted pages print `42A`, `42B`, … in both editor and
+    PDF. Page labels are `Option<String>`; `{page}` headers use the printed
+    label. Research ▸ Script exposes Lock/Unlock Pages; saved as
+    `scenario_data.scriptcraft_locked_pages`. Explicit Unlock restores reflow.
+  - Verification: `cargo test --workspace` green (core 66 + A95 23,
+    interaction 29, ui_snapshots 12, layout place 4/pdf 22); interaction
+    `page_locks_capture_persist_and_unlock`; PDF/editor A/B tests;
+    `cargo fmt --all -- --check`; `cargo clippy --workspace --all-targets --
+    -D warnings`.
+  - Rebuilt, ad-hoc signed and installed `/Applications/ScriptCraft.app` from
+    this tree (version 0.6.1); launched successfully. Not committed yet.
+
+- **2026-10-26** — Revision-first positioning and v0.8 development prep.
+  - `README.md` rewritten around the free, open-source, revision-first
+    identity; added the revision workflow, interchange, and an explicit
+    "what this is / what it isn't yet" scope section.
+  - Added `docs/v0.8-plan.md`: M0 identity/schema, M1 diff, M2 compare, M3
+    restore, M4 omitted scenes, M5 dual dialogue, M6 title page, M7 revision
+    summary, M8 release engineering, M9 refactor; acceptance tests, fixture
+    policy, risks and release gate.
+  - Added `CONTRIBUTING.md`, `.github/pull_request_template.md` and issue
+    forms; documented build/test, architecture boundaries, fixture policy and
+    release expectations.
+  - Updated this roadmap: positioning, locked decisions, known issues, Phase 2
+    and the v0.8 sprint. No application code changed.
+  - Bumped `scriptcraft-app` to 0.7.0 (and `Cargo.lock`); the release tag is
+    still pending.
+  - Next: commit/tag v0.7.0, then start M0.
+
+- **2026-10-27** — v0.7.0 released to git.
+  - Committed the revision workflow as `9ce2e0e` and tagged `v0.7.0`:
+    revision sets/colours, marks, revision pages, page locks with `42A`/`42B`,
+    KIT version import, revision PDF/FDX metadata, and the v0.7 plan.
+  - Release gate: `cargo fmt --all -- --check`, `cargo clippy --workspace
+    --all-targets -- -D warnings`, `cargo test --workspace`, `cargo deny
+    check`, `cargo metadata --locked`, and `git diff --check` all pass.
+  - Packages and GitHub release notes are still pending; the current tree
+    continues with v0.8 M0.
+
+- **2026-10-26** — v0.8 M0: stable identity + sidecar schema (committed 2026-10-27).
+  - `scriptcraft-core/src/model.rs`: `Scene.id` is now the heading block's
+    stable UUID; added `SceneMeta`, `Project.scene_meta`,
+    `retain_scene_meta`, `get_scene_meta`, `set_scene_omitted`.
+  - `scriptcraft-core/src/kitsp.rs`: versioned
+    `scenario_data.scriptcraft_ids` and `scriptcraft_scene_meta` rows are
+    written in the normal atomic save. On load, `LoadReport` returns non-fatal
+    warnings; blocks are re-anchored by KIT scene UUID, exact element type +
+    text, then equal-length same-element runs between anchors. Unmatched blocks
+    get fresh UUIDs; ambiguous external edits warn. Future-schema rows are not
+    overwritten. A95 and unrelated KIT rows remain untouched.
+  - `scriptcraft-app/src/app.rs`: opening a project surfaces load warnings in
+    the status bar.
+  - Tests: new `scriptcraft-core/tests/test_identity.rs` (12 tests: reopen,
+    missing rows, scene reorder, duplicate headings, insert/delete, in-place
+    text edits, replacement warning, scene metadata, stale metadata, invalid
+    JSON, future schema, `retain_scene_meta`); `test_a95.rs` now verifies the
+    identity row and still compares every non-sidecar `scenario_data` row.
+  - Docs: `docs/kitsp-format.md` documents both rows and the external-edit
+    policy; `docs/v0.8-plan.md` marks M0 complete.
+  - Verification: `cargo test -p scriptcraft-core` (66 lib + 23 A95 + 12
+    identity, all green); `cargo test --workspace` green; `cargo fmt --all --
+    --check`; `cargo clippy --workspace --all-targets -- -D warnings`.
+  - Next: M1 `DraftDiff`.
+
 ---
 
 ## 7. Update protocol (for assistants)
 
 When a user prompt arrives:
 
-1. Read this file top to bottom; treat "Locked decisions" and "Non-negotiables"
-   as binding.
+1. Read this file top to bottom and `docs/v0.8-plan.md`; treat "Locked
+   decisions" and "Non-negotiables" as binding.
 2. Work on the highest-priority unchecked item unless the user says otherwise.
 3. Update in the same commit/session:
    - tick `[x]` / set `[-]` markers as work lands;
    - append a dated entry under "Session log" summarizing what changed
      (files touched, tests run, results);
-   - rewrite "Current sprint" checkboxes and "Next actions" if priorities moved;
+   - rewrite the current v0.8 milestone checkboxes and open questions if
+     priorities moved;
    - add any new verified bug to "Known issues" with `file:line` references.
 4. Never delete history. Never mark something done that was not verified by a
    command; note the exact verification command in the log.

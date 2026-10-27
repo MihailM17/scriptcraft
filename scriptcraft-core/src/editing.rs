@@ -509,6 +509,7 @@ mod tests {
         let mut p = Project {
             title: "T".into(),
             blocks: vec![],
+            ..Default::default()
         };
         for (t, text) in [
             (ElementType::SceneHeading, "EXT. PARK - DAY"),

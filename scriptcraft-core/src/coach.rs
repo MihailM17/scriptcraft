@@ -202,6 +202,7 @@ mod tests {
         let mut p = Project {
             title: "T".into(),
             blocks: vec![],
+            ..Default::default()
         };
         for (t, s) in parts {
             p.blocks.push(ScriptBlock::new(t, s.into()));

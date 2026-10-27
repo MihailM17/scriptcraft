@@ -1,10 +1,13 @@
-use crate::model::{ElementType, Project, ScriptBlock};
+use crate::model::{ElementType, Project, SceneMeta, ScriptBlock};
 use crate::revision::{RevisionHistory, STORAGE_KEY as REVISIONS_KEY};
 use quick_xml::events::Event;
 use quick_xml::{Reader, XmlVersion};
 use rusqlite::{params, Connection};
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
 use thiserror::Error;
+use uuid::Uuid;
 
 #[derive(Debug, Error)]
 pub enum KitspError {
@@ -51,8 +54,35 @@ pub const LOCKED_PAGES_KEY: &str = "scriptcraft_locked_pages";
 /// ScriptCraft extension: inside a recovery copy, the project path the
 /// session belongs to. KIT has no such key and ignores it.
 pub const RECOVERY_ORIGIN_KEY: &str = "scriptcraft_recovery_origin";
+/// ScriptCraft extension: versioned JSON identity map for screenplay blocks.
+/// KIT ignores this key.
+pub const IDENTITY_KEY: &str = "scriptcraft_ids";
+/// ScriptCraft extension: versioned JSON scene metadata (omitted state, future
+/// scene-level properties), keyed by the heading block's stable id. KIT
+/// ignores this key.
+pub const SCENE_META_KEY: &str = "scriptcraft_scene_meta";
+
+const IDENTITY_SCHEMA: u32 = 1;
+const SCENE_META_SCHEMA: u32 = 1;
+
+/// Result of opening a `.kitsp`: the project plus non-fatal compatibility
+/// warnings, for example an external KIT edit whose block identity could not
+/// be re-anchored.
+#[derive(Clone, Debug)]
+pub struct LoadReport {
+    pub project: Project,
+    pub warnings: Vec<String>,
+}
+
 /// Open a .kitsp file read-only and load scenario id=1 + title.
 pub fn load_file(path: impl AsRef<Path>) -> Result<Project, KitspError> {
+    Ok(load_file_report(path)?.project)
+}
+
+/// Like [`load_file`], but also returns warnings for identity or scene-metadata
+/// rows that could not be applied. Callers should show these to the user; the
+/// script itself is always preserved.
+pub fn load_file_report(path: impl AsRef<Path>) -> Result<LoadReport, KitspError> {
     let uri = format!("file:{}?mode=ro", path.as_ref().display());
     let conn = Connection::open_with_flags(
         uri,
@@ -62,7 +92,7 @@ pub fn load_file(path: impl AsRef<Path>) -> Result<Project, KitspError> {
     load_conn(&conn)
 }
 
-fn load_conn(conn: &Connection) -> Result<Project, KitspError> {
+fn load_conn(conn: &Connection) -> Result<LoadReport, KitspError> {
     let title: String = conn
         .query_row(
             "SELECT data_value FROM scenario_data WHERE data_name='name'",
@@ -77,7 +107,400 @@ fn load_conn(conn: &Connection) -> Result<Project, KitspError> {
         .map_err(|_| KitspError::MissingScenario)?;
     let mut project = parse_scenario(&text)?;
     project.title = title;
-    Ok(project)
+    let mut warnings = Vec::new();
+    let identity = apply_saved_identity(conn, &mut project, &mut warnings);
+    apply_saved_scene_meta(conn, &mut project, &identity, &mut warnings);
+    Ok(LoadReport { project, warnings })
+}
+
+/// Versioned JSON persisted in `scenario_data.scriptcraft_ids`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct IdentityRow {
+    #[serde(default = "identity_schema")]
+    schema: u32,
+    #[serde(default)]
+    blocks: Vec<BlockIdentity>,
+}
+
+/// One block's identity at save time. `text` is stored so an external KIT edit
+/// can be re-anchored without guessing from position alone; it is never used
+/// to overwrite the current script.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct BlockIdentity {
+    id: Uuid,
+    #[serde(default)]
+    element_type: String,
+    #[serde(default)]
+    text: String,
+    #[serde(default)]
+    kit_uuid: Option<String>,
+}
+
+/// Versioned JSON persisted in `scenario_data.scriptcraft_scene_meta`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct SceneMetaRow {
+    #[serde(default = "scene_meta_schema")]
+    schema: u32,
+    #[serde(default)]
+    scenes: Vec<SceneMeta>,
+}
+
+fn identity_schema() -> u32 {
+    IDENTITY_SCHEMA
+}
+
+fn scene_meta_schema() -> u32 {
+    SCENE_META_SCHEMA
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct IdentityLoad {
+    usable: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct ReanchorStats {
+    fresh: usize,
+    unmatched_old: usize,
+    ambiguous: bool,
+}
+
+/// Apply `scriptcraft_ids` to a freshly parsed project. Blocks are re-anchored
+/// by KIT scene UUID, then by exact element type + text, then by equal-length
+/// unchanged-shape runs between those anchors (in-place text edits). Anything
+/// left gets a fresh ID. An ID is never assigned to two blocks.
+fn apply_saved_identity(
+    conn: &Connection,
+    project: &mut Project,
+    warnings: &mut Vec<String>,
+) -> IdentityLoad {
+    let json = get_data(conn, IDENTITY_KEY);
+    if json.trim().is_empty() {
+        return IdentityLoad::default();
+    }
+    let row: IdentityRow = match serde_json::from_str(&json) {
+        Ok(row) => row,
+        Err(err) => {
+            warnings.push(format!(
+                "Project identity row could not be read ({err}); new block IDs were assigned."
+            ));
+            return IdentityLoad { usable: false };
+        }
+    };
+    if row.schema > IDENTITY_SCHEMA {
+        warnings.push(format!(
+            "Project identity row uses newer schema {}; block IDs were regenerated.",
+            row.schema
+        ));
+        return IdentityLoad { usable: false };
+    }
+    if row.blocks.is_empty() && !project.blocks.is_empty() {
+        warnings.push(
+            "Project identity row contains no blocks; new block IDs were assigned.".to_string(),
+        );
+        return IdentityLoad { usable: false };
+    }
+    if project.blocks.is_empty() {
+        if !row.blocks.is_empty() {
+            warnings.push(format!(
+                "The script is empty; {} saved block identity record(s) were dropped.",
+                row.blocks.len()
+            ));
+        }
+        return IdentityLoad { usable: true };
+    }
+
+    let stats = reanchor(project, &row.blocks);
+    if stats.ambiguous {
+        warnings.push(format!(
+            "External edits could not be fully re-anchored: {} block(s) got new IDs and {} old identity record(s) were dropped. Revision marks may be missing on those blocks.",
+            stats.fresh, stats.unmatched_old,
+        ));
+    }
+    IdentityLoad { usable: true }
+}
+
+fn reanchor(project: &mut Project, old: &[BlockIdentity]) -> ReanchorStats {
+    let n = project.blocks.len();
+    if n == 0 {
+        return ReanchorStats::default();
+    }
+
+    // Duplicate IDs in the sidecar are corruption; never apply either copy.
+    let mut seen_ids = HashSet::new();
+    let mut old_ok = vec![true; old.len()];
+    for (i, rec) in old.iter().enumerate() {
+        if !seen_ids.insert(rec.id) {
+            old_ok[i] = false;
+        }
+    }
+
+    let mut new_to_old: Vec<Option<usize>> = vec![None; n];
+    let mut old_used = vec![false; old.len()];
+
+    // 1. Scene headings carry KIT's own UUID. It is the strongest anchor when
+    //    blocks were inserted, deleted or moved.
+    let mut by_uuid: HashMap<String, VecDeque<usize>> = HashMap::new();
+    for (i, rec) in old.iter().enumerate() {
+        if !old_ok[i] || rec.element_type != ElementType::SceneHeading.tag() {
+            continue;
+        }
+        if let Some(uuid) = rec.kit_uuid.as_deref().filter(|u| !u.is_empty()) {
+            by_uuid.entry(uuid.to_string()).or_default().push_back(i);
+        }
+    }
+    for (new_i, slot) in new_to_old.iter_mut().enumerate() {
+        if slot.is_some() || project.blocks[new_i].element_type != ElementType::SceneHeading {
+            continue;
+        }
+        let Some(uuid) = project.blocks[new_i]
+            .kit_uuid
+            .as_deref()
+            .filter(|u| !u.is_empty())
+            .map(str::to_string)
+        else {
+            continue;
+        };
+        let Some(queue) = by_uuid.get_mut(&uuid) else {
+            continue;
+        };
+        while let Some(old_i) = queue.pop_front() {
+            if !old_used[old_i] {
+                old_used[old_i] = true;
+                *slot = Some(old_i);
+                project.blocks[new_i].id = old[old_i].id;
+                break;
+            }
+        }
+    }
+
+    // 2. Exact element type + text, in order. Duplicate text is paired with
+    //    the earliest unused occurrence, which is deterministic.
+    let mut by_content: HashMap<(String, String), VecDeque<usize>> = HashMap::new();
+    for (i, rec) in old.iter().enumerate() {
+        if old_ok[i] && !old_used[i] {
+            by_content
+                .entry((rec.element_type.clone(), rec.text.clone()))
+                .or_default()
+                .push_back(i);
+        }
+    }
+    for (new_i, slot) in new_to_old.iter_mut().enumerate() {
+        if slot.is_some() {
+            continue;
+        }
+        let key = (
+            project.blocks[new_i].element_type.tag().to_string(),
+            project.blocks[new_i].text.clone(),
+        );
+        if let Some(queue) = by_content.get_mut(&key) {
+            while let Some(old_i) = queue.pop_front() {
+                if !old_used[old_i] {
+                    old_used[old_i] = true;
+                    *slot = Some(old_i);
+                    project.blocks[new_i].id = old[old_i].id;
+                    break;
+                }
+            }
+        }
+    }
+
+    // 3. Between monotonic anchors, pair equal-length runs whose element types
+    //    still line up. This preserves identity for an edited block when other
+    //    blocks were added or removed elsewhere. Unequal runs are ambiguous and
+    //    are left for fresh IDs plus a warning.
+    let pairs: Vec<(usize, usize)> = new_to_old
+        .iter()
+        .enumerate()
+        .filter_map(|(new_i, old_i)| old_i.map(|old_i| (new_i, old_i)))
+        .collect();
+    if pairs.windows(2).all(|w| w[0].1 < w[1].1) {
+        let mut sentinels = pairs;
+        sentinels.push((n, old.len()));
+        let mut prev_new: isize = -1;
+        let mut prev_old: isize = -1;
+        for (cur_new, cur_old) in sentinels {
+            let ns = (prev_new + 1) as usize;
+            let ne = cur_new;
+            let os = (prev_old + 1) as usize;
+            let oe = cur_old;
+            pair_equal_run(project, old, ns, ne, os, oe, &mut new_to_old, &mut old_used);
+            prev_new = cur_new as isize;
+            prev_old = cur_old as isize;
+        }
+    }
+
+    let matched = new_to_old.iter().filter(|m| m.is_some()).count();
+    let unmatched_old = old_used.iter().filter(|used| !**used).count();
+    let fresh = n - matched;
+    ReanchorStats {
+        fresh,
+        unmatched_old,
+        ambiguous: unmatched_old > 0 && fresh > 0,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn pair_equal_run(
+    project: &mut Project,
+    old: &[BlockIdentity],
+    ns: usize,
+    ne: usize,
+    os: usize,
+    oe: usize,
+    new_to_old: &mut [Option<usize>],
+    old_used: &mut [bool],
+) {
+    let len = ne.saturating_sub(ns);
+    if len == 0 || len != oe.saturating_sub(os) {
+        return;
+    }
+    if !(ns..ne).all(|i| new_to_old[i].is_none()) || !(os..oe).all(|i| !old_used[i]) {
+        return;
+    }
+    if !(0..len).all(|k| project.blocks[ns + k].element_type.tag() == old[os + k].element_type) {
+        return;
+    }
+    for k in 0..len {
+        project.blocks[ns + k].id = old[os + k].id;
+        new_to_old[ns + k] = Some(os + k);
+        old_used[os + k] = true;
+    }
+}
+
+/// Apply `scriptcraft_scene_meta` after block identity is settled. Entries
+/// whose scene no longer exists are ignored; they are not allowed to leak onto
+/// an unrelated scene.
+fn apply_saved_scene_meta(
+    conn: &Connection,
+    project: &mut Project,
+    identity: &IdentityLoad,
+    warnings: &mut Vec<String>,
+) {
+    let json = get_data(conn, SCENE_META_KEY);
+    if json.trim().is_empty() {
+        return;
+    }
+    let row: SceneMetaRow = match serde_json::from_str(&json) {
+        Ok(row) => row,
+        Err(err) => {
+            warnings.push(format!(
+                "Scene metadata could not be read ({err}); it was ignored."
+            ));
+            return;
+        }
+    };
+    if row.schema > SCENE_META_SCHEMA {
+        warnings.push(format!(
+            "Scene metadata uses newer schema {}; it was ignored.",
+            row.schema
+        ));
+        return;
+    }
+    if !identity.usable && !row.scenes.is_empty() {
+        warnings
+            .push("Scene metadata was ignored because block identities are unavailable.".into());
+        return;
+    }
+
+    let heading_ids: HashSet<Uuid> = project
+        .blocks
+        .iter()
+        .filter(|b| b.element_type == ElementType::SceneHeading)
+        .map(|b| b.id)
+        .collect();
+    let before = row.scenes.len();
+    let mut seen = HashSet::new();
+    let mut kept = Vec::new();
+    for meta in row.scenes {
+        if heading_ids.contains(&meta.id) && seen.insert(meta.id) {
+            kept.push(meta);
+        }
+    }
+    let dropped = before - kept.len();
+    if dropped > 0 {
+        warnings.push(format!(
+            "{dropped} scene metadata record(s) referred to scenes that no longer exist and were ignored."
+        ));
+    }
+    project.scene_meta = kept;
+}
+
+/// Save `scriptcraft_ids`, aligned with `scenario` order.
+fn write_identity(conn: &Connection, project: &Project) -> Result<(), KitspError> {
+    if !row_writable(conn, IDENTITY_KEY, IDENTITY_SCHEMA)? {
+        return Ok(());
+    }
+    let row = IdentityRow {
+        schema: IDENTITY_SCHEMA,
+        blocks: project
+            .blocks
+            .iter()
+            .map(|b| BlockIdentity {
+                id: b.id,
+                element_type: b.element_type.tag().to_string(),
+                text: b.text.clone(),
+                kit_uuid: b.kit_uuid.clone(),
+            })
+            .collect(),
+    };
+    upsert_data(conn, IDENTITY_KEY, &serde_json::to_string(&row)?)
+}
+
+/// Save scene metadata, dropping entries for scenes that no longer exist.
+fn write_scene_meta(conn: &Connection, project: &Project) -> Result<(), KitspError> {
+    if !row_writable(conn, SCENE_META_KEY, SCENE_META_SCHEMA)? {
+        return Ok(());
+    }
+    let heading_ids: HashSet<Uuid> = project
+        .blocks
+        .iter()
+        .filter(|b| b.element_type == ElementType::SceneHeading)
+        .map(|b| b.id)
+        .collect();
+    let mut seen = HashSet::new();
+    let scenes: Vec<SceneMeta> = project
+        .scene_meta
+        .iter()
+        .filter(|m| heading_ids.contains(&m.id) && seen.insert(m.id))
+        .cloned()
+        .collect();
+    if scenes.is_empty() {
+        conn.execute(
+            "DELETE FROM scenario_data WHERE data_name=?1",
+            params![SCENE_META_KEY],
+        )?;
+        return Ok(());
+    }
+    let row = SceneMetaRow {
+        schema: SCENE_META_SCHEMA,
+        scenes,
+    };
+    upsert_data(conn, SCENE_META_KEY, &serde_json::to_string(&row)?)
+}
+
+/// A row written by a newer ScriptCraft must not be silently downgraded.
+fn row_writable(conn: &Connection, key: &str, current: u32) -> Result<bool, KitspError> {
+    let json = get_data(conn, key);
+    if json.trim().is_empty() {
+        return Ok(true);
+    }
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&json) else {
+        return Ok(true);
+    };
+    match value.get("schema").and_then(|schema| schema.as_u64()) {
+        Some(schema) => Ok(schema <= current as u64),
+        None => Ok(true),
+    }
+}
+
+fn upsert_data(conn: &Connection, key: &str, value: &str) -> Result<(), KitspError> {
+    conn.execute(
+        "INSERT INTO scenario_data (data_name, data_value) VALUES (?1, ?2)
+         ON CONFLICT(data_name) DO UPDATE SET data_value=excluded.data_value",
+        params![key, value],
+    )?;
+    Ok(())
 }
 
 /// Serialize a project back to `<scenario>` XML (KIT shape, CDATA bodies).
@@ -176,6 +599,8 @@ fn save_file_inner(
         let xml = project_to_scenario_xml(p);
         let conn = Connection::open(&tmp)?;
         conn.execute("UPDATE scenario SET text=?1 WHERE id=1", params![xml])?;
+        write_identity(&conn, p)?;
+        write_scene_meta(&conn, p)?;
         if let Some(revisions) = revisions {
             write_revisions(&conn, revisions)?;
         }
@@ -752,6 +1177,7 @@ pub fn create_file(path: impl AsRef<Path>, title: &str) -> Result<Project, Kitsp
     let seed = Project {
         title: title.to_string(),
         blocks: vec![first],
+        ..Default::default()
     };
     let text = project_to_scenario_xml(&seed);
     conn.execute(
@@ -1174,6 +1600,7 @@ pub fn parse_scenario(xml: &str) -> Result<Project, KitspError> {
     Ok(Project {
         title: String::new(),
         blocks,
+        ..Default::default()
     })
 }
 

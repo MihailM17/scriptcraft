@@ -78,10 +78,22 @@ impl ScriptBlock {
 /// A scene = heading + following blocks until the next heading.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Scene {
+    /// Stable identity: the `ScriptBlock::id` of the scene heading.
+    pub id: Uuid,
     pub heading: String,
     pub kit_uuid: Option<String>,
     /// Indices into Project::blocks (includes the heading at [0]).
     pub blocks: Vec<usize>,
+}
+
+/// ScriptCraft-only per-scene metadata, keyed by the heading block's stable id.
+/// Stored in the `.kitsp` `scenario_data.scriptcraft_scene_meta` row; KIT
+/// ignores it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SceneMeta {
+    pub id: Uuid,
+    #[serde(default)]
+    pub omitted: bool,
 }
 
 /// Whole screenplay project.
@@ -89,6 +101,10 @@ pub struct Scene {
 pub struct Project {
     pub title: String,
     pub blocks: Vec<ScriptBlock>,
+    /// Scene metadata keyed by `Scene::id`. Empty for imported projects until
+    /// the user changes a scene-level property.
+    #[serde(default)]
+    pub scene_meta: Vec<SceneMeta>,
 }
 
 impl Project {
@@ -101,6 +117,7 @@ impl Project {
                     scenes.push(s);
                 }
                 current = Some(Scene {
+                    id: b.id,
                     heading: b.text.clone(),
                     kit_uuid: b.kit_uuid.clone(),
                     blocks: vec![i],
@@ -113,6 +130,35 @@ impl Project {
             scenes.push(s);
         }
         scenes
+    }
+
+    /// Drop metadata for scenes that no longer exist and de-duplicate by id.
+    /// Call before saving or after a structural edit.
+    pub fn retain_scene_meta(&mut self) {
+        let ids: std::collections::HashSet<Uuid> = self
+            .blocks
+            .iter()
+            .filter(|b| b.element_type == ElementType::SceneHeading)
+            .map(|b| b.id)
+            .collect();
+        let mut seen = std::collections::HashSet::new();
+        self.scene_meta
+            .retain(|m| ids.contains(&m.id) && seen.insert(m.id));
+    }
+
+    pub fn scene_meta(&self, scene_id: Uuid) -> Option<&SceneMeta> {
+        self.scene_meta.iter().find(|m| m.id == scene_id)
+    }
+
+    pub fn set_scene_omitted(&mut self, scene_id: Uuid, omitted: bool) {
+        if let Some(meta) = self.scene_meta.iter_mut().find(|m| m.id == scene_id) {
+            meta.omitted = omitted;
+        } else if omitted {
+            self.scene_meta.push(SceneMeta {
+                id: scene_id,
+                omitted,
+            });
+        }
     }
 
     pub fn characters(&self) -> Vec<String> {

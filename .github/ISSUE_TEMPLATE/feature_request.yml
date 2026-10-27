@@ -1,0 +1,52 @@
+name: Feature request
+description: Propose a workflow, not just a feature.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ScriptCraft is revision-first and deliberately scoped. Explain the
+        workflow you are trying to complete, not only the control you want.
+        Check `docs/v0.8-plan.md` for current non-goals first.
+  - type: textarea
+    id: workflow
+    attributes:
+      label: What workflow are you trying to complete?
+      description: Describe the real task and where ScriptCraft currently stops you.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behaviour
+      description: What should happen? Include keyboard, import/export and PDF expectations if relevant.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Revision workflow
+        - Editor and pagination
+        - PDF export
+        - FDX / KIT / Fountain interchange
+        - Project safety and recovery
+        - Platform / installation
+        - Accessibility and localisation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: How do Final Draft, Fade In, KIT, Highland or your current workflow handle this?
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      options:
+        - label: This is not a request for collaboration, cloud sync, AI writing, DOCX/RTF or a plugin runtime.
+          required: false

@@ -1,0 +1,63 @@
+name: Bug report
+description: Report a crash, data-loss risk, layout error or other defect.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please do not attach a real production draft unless you have permission
+        to share it. A minimal synthetic project is usually enough.
+  - type: input
+    id: version
+    attributes:
+      label: ScriptCraft version
+      description: The version from the title bar, release page or `Cargo.toml`.
+      placeholder: v0.7.0
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS (Apple silicon)
+        - macOS (Intel)
+        - Windows 10/11
+        - Linux
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Exact steps, in order.
+      placeholder: |
+        1. Open ...
+        2. Start Blue revision ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+    validations:
+      required: true
+  - type: textarea
+    id: project
+    attributes:
+      label: Project details
+      description: Format (.kitsp/.fdx/Fountain), page count, script language, and whether the file opens in KIT/Final Draft.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Paste relevant terminal output or attach a screenshot. Do not include private script text.

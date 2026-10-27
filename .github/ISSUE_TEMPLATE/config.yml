@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: v0.8 development plan
+    url: https://github.com/MihailM17/scriptcraft/blob/main/docs/v0.8-plan.md
+    about: Check the current milestones, acceptance tests and non-goals.
+  - name: Contributing guide
+    url: https://github.com/MihailM17/scriptcraft/blob/main/CONTRIBUTING.md
+    about: Build, test and pull-request expectations.

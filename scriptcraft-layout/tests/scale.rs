@@ -166,6 +166,7 @@ fn project_scene_index_round_trips_at_scale() {
     let p = Project {
         title: "Perf".to_string(),
         blocks,
+        ..Default::default()
     };
     let t = Instant::now();
     let scenes = p.scenes();

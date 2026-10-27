@@ -497,7 +497,14 @@ pub fn from_fdx(xml: &str) -> Result<(Project, Metadata), FdxError> {
     } else {
         meta.title.clone()
     };
-    Ok((Project { title, blocks }, meta))
+    Ok((
+        Project {
+            title,
+            blocks,
+            ..Default::default()
+        },
+        meta,
+    ))
 }
 
 #[cfg(test)]
@@ -509,6 +516,7 @@ mod tests {
         let mut p = Project {
             title: "The Morning Ritual".into(),
             blocks: vec![],
+            ..Default::default()
         };
         for (t, text) in [
             (SceneHeading, "INT. COFFEE SHOP - MORNING"),

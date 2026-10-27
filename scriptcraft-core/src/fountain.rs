@@ -99,6 +99,7 @@ mod tests {
         let mut p = Project {
             title: "T".into(),
             blocks: vec![],
+            ..Default::default()
         };
         for (t, text) in [
             (ElementType::SceneHeading, "EXT. PARK - DAY"),
@@ -123,6 +124,7 @@ mod tests {
                 ElementType::Action,
                 "INT. something happened, he thought.".into(),
             )],
+            ..Default::default()
         };
         let f = to_fountain(&p, &meta(""));
         assert!(f.contains("!INT. something"));
@@ -175,6 +177,7 @@ mod tests {
         let mut p = Project {
             title: "RT".into(),
             blocks: vec![],
+            ..Default::default()
         };
         for (t, text) in [
             (ElementType::SceneHeading, "EXT. PARK - DAY"),
@@ -491,5 +494,12 @@ pub fn parse_fountain(text: &str) -> (Project, FountainMeta) {
     } else {
         meta.title.clone()
     };
-    (Project { title, blocks }, meta)
+    (
+        Project {
+            title,
+            blocks,
+            ..Default::default()
+        },
+        meta,
+    )
 }

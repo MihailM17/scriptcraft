@@ -1517,8 +1517,10 @@ impl ScriptCraftApp {
     }
 
     pub fn open_path(&mut self, path: &str) {
-        match kitsp::load_file(path) {
-            Ok(p) => {
+        match kitsp::load_file_report(path) {
+            Ok(report) => {
+                let warnings = report.warnings;
+                let p = report.project;
                 self.path = path.to_string();
                 self.project = Some(p);
                 self.selected_scene = 0;
@@ -1542,7 +1544,9 @@ impl ScriptCraftApp {
                 self.refresh_derived();
                 let s = &self.stats;
                 let pages = self.page_count();
-                self.status = if self.issues.is_empty() {
+                self.status = if !warnings.is_empty() {
+                    format!("Opened — {} warning(s): {}", warnings.len(), warnings[0])
+                } else if self.issues.is_empty() {
                     format!(
                         "{} scenes · {} pages · {} blocks · {} characters · {} words (~{:.1} pages) — format clean",
                         s.scenes, pages, s.blocks, s.characters, s.words, s.est_pages

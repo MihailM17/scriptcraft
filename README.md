@@ -8,12 +8,15 @@ production revisions. Open KIT projects, exchange Final Draft files, lock
 pages, issue coloured revisions, and export page-exact PDFs — offline, on
 macOS, Windows and Linux.
 
-> **Status — v0.7 revision workflow.** The current tree implements revision
-> sets, coloured margin marks, revision pages, page locks, `42A`/`42B`
+> **Status — v0.7 revision workflow, v0.8 M0.** The current tree implements
+> revision sets, coloured margin marks, revision pages, page locks, `42A`/`42B`
 > numbering, KIT saved-version import, and revision metadata in PDF and FDX.
+> v0.8 has started: block and scene identity now survive save/reopen and
+> external KIT edits.
 >
 > **Next — v0.8 revision-complete.** Draft comparison and restore, omitted
-> scenes, dual dialogue, a title-page editor, and a revision summary.
+> scenes, dual dialogue, a title-page editor, and a revision summary. See
+> [`docs/v0.8-plan.md`](docs/v0.8-plan.md).
 
 ![ScriptCraft editor](scriptcraft-app/tests/snapshots/01_script_top.png)
 
@@ -71,8 +74,8 @@ app on day one.
 
 - **KIT `.kitsp`** — read and write real KIT Scenarist projects, including
   metadata, research, cards and saved versions. ScriptCraft-only data
-  (revision baselines, page locks) lives in `scenario_data` rows that KIT
-  ignores.
+  (revision baselines, stable block/scene identity, page locks) lives in
+  `scenario_data` rows that KIT ignores.
 - **Final Draft `.fdx`** — import/export paragraphs, title page, scene numbers,
   revision colours and `*` marks, and revised title-page fields.
 - **Fountain** — import/export.
@@ -105,7 +108,7 @@ It is not yet:
   testing.
 
 The scope is deliberate. If a feature is not needed for the revision workflow
-or the writing core, it is not in v0.7.
+or the writing core, it is not in v0.8.
 
 ## Install
 
@@ -152,7 +155,7 @@ UPDATE_SNAPSHOTS=1 cargo test -p scriptcraft-app --test ui_snapshots
 
 The test suite includes A95 KIT round-trips, editor/PDF layout parity, FDX and
 Fountain conversion, 500-page performance gates, interaction tests and UI
-snapshots. See [`docs/v0.7-plan.md`](docs/v0.7-plan.md) for the acceptance
+snapshots. See [`docs/v0.8-plan.md`](docs/v0.8-plan.md) for the acceptance
 matrix.
 
 ## Project layout
@@ -165,12 +168,16 @@ matrix.
   modules.
 - `fixtures/A95.kitsp` — 21-scene Bulgarian test project used by the tests;
   `fixtures/example.fdx` — small Final Draft sample for the FDX tests.
-- `docs/` — KIT format notes and the v0.7 revision-workflow plan.
+- `fixtures/real/` — permission-cleared compatibility files; see
+  `fixtures/real/README.md` before adding one.
+- `docs/` — KIT format notes, revision plans, format spikes and the v0.8
+  development plan.
 
 ## Contributing
 
-Issues and pull requests are welcome. Read the current plan in
-[`docs/v0.7-plan.md`](docs/v0.7-plan.md).
+Issues and pull requests are welcome. Start with
+[`CONTRIBUTING.md`](CONTRIBUTING.md), then read the current plan in
+[`docs/v0.8-plan.md`](docs/v0.8-plan.md).
 
 The highest-value contributions right now are:
 

@@ -230,10 +230,16 @@ fn a95_save_reload_roundtrip() {
     let q = kitsp::load_file(&tmp).expect("reload");
     assert_eq!(p.blocks.len(), q.blocks.len());
     for (a, b) in p.blocks.iter().zip(q.blocks.iter()) {
+        assert_eq!(a.id, b.id, "block IDs survive save/reopen");
         assert_eq!(a.element_type, b.element_type);
         assert_eq!(a.text, b.text);
         assert_eq!(a.kit_uuid, b.kit_uuid);
     }
+    assert_eq!(
+        p.scenes().iter().map(|s| s.id).collect::<Vec<_>>(),
+        q.scenes().iter().map(|s| s.id).collect::<Vec<_>>(),
+        "scene IDs are derived from stable heading IDs"
+    );
     assert!(format::validate(&q).is_empty());
     let _ = std::fs::remove_file(&tmp);
     let _ = std::fs::remove_file(tmp.with_extension("kitsp.bak"));
@@ -291,6 +297,12 @@ fn dump_sql(conn: &rusqlite::Connection, sql: &str) -> Vec<String> {
 
 fn dump_table(conn: &rusqlite::Connection, table: &str) -> Vec<String> {
     dump_sql(conn, &format!("SELECT * FROM {table}"))
+}
+
+fn is_scriptcraft_sidecar_row(row: &str) -> bool {
+    let name = row.split('\u{1f}').nth(1).unwrap_or_default();
+    let name = name.strip_prefix("text:").unwrap_or(name);
+    name == kitsp::IDENTITY_KEY || name == kitsp::SCENE_META_KEY
 }
 
 fn scenario_data_value(conn: &rusqlite::Connection, key: &str) -> Option<String> {
@@ -517,19 +529,37 @@ fn a95_save_file_preserves_all_other_tables() {
         );
     }
     assert_eq!(
-        dump_table(&conn, "scenario_data"),
-        data_before,
-        "save_file modified scenario_data"
-    );
-    assert_eq!(
         dump_sql(&conn, "SELECT * FROM scenario WHERE id=2"),
         second_scenario,
         "save_file modified the second scenario row"
+    );
+    // ScriptCraft adds only its own versioned sidecar rows; every KIT row and
+    // every other scenario_data row must stay byte-identical.
+    let mut data_after = dump_table(&conn, "scenario_data");
+    data_after.retain(|row| !is_scriptcraft_sidecar_row(row));
+    assert_eq!(
+        data_after, data_before,
+        "save_file modified existing scenario_data rows"
+    );
+    let identity_json =
+        scenario_data_value(&conn, kitsp::IDENTITY_KEY).expect("save must write the identity row");
+    let identity: serde_json::Value =
+        serde_json::from_str(&identity_json).expect("identity row is JSON");
+    assert_eq!(identity["schema"], 1);
+    assert_eq!(
+        identity["blocks"].as_array().map(Vec::len),
+        Some(p.blocks.len()),
+        "one identity record per block"
     );
 
     let q = kitsp::load_file(&tmp).expect("reload");
     assert_eq!(q.blocks.len(), p.blocks.len());
     assert_eq!(q.blocks[0].text, p.blocks[0].text);
+    assert_eq!(
+        q.blocks.iter().map(|b| b.id).collect::<Vec<_>>(),
+        p.blocks.iter().map(|b| b.id).collect::<Vec<_>>(),
+        "block IDs survive save/reopen"
+    );
     let cards = kitsp::load_cards(&tmp).expect("cards");
     assert_eq!(cards.len(), q.scenes().len(), "one card per scene");
     assert_eq!(cards[0].title, p.blocks[0].text, "card title synced");

@@ -44,6 +44,13 @@ ignores unknown rows, and ScriptCraft's normal save path preserves them.
   unreadable JSON is treated as no revisions; it never blocks opening the
   script. Saved KIT `script_versions` rows can be imported as baselines;
   imports are idempotent and capped at 24 revisions.
+- `scriptcraft_ids` — schema-versioned JSON identity map, one record per
+  screenplay block in `scenario` order (`id`, `element_type`, save-time `text`,
+  optional scene-heading `kit_uuid`). This is what makes `ScriptBlock.id` and
+  scene identity survive save/reopen and external KIT edits. See below.
+- `scriptcraft_scene_meta` — schema-versioned JSON per-scene metadata keyed by
+  the heading block's stable id; currently `omitted` (reserved for v0.8 M4).
+  Entries for scenes that no longer exist are ignored with a warning.
 - `locked_scene_numbers` — comma-separated frozen scene numbers; a leading
   `*` also locks numbers for newly inserted scenes.
 - `scriptcraft_locked_pages` — JSON page lock: original page count plus one
@@ -52,3 +59,44 @@ ignores unknown rows, and ScriptCraft's normal save path preserves them.
   pages `42A`, `42B`, …. KIT ignores this row.
 - `scriptcraft_recovery_origin` — original project path inside a crash
   recovery copy.
+
+## Stable identity and external edits
+
+`scriptcraft_ids` and `scriptcraft_scene_meta` both carry a top-level
+`"schema": 1`. A row looks like:
+
+```json
+{
+  "schema": 1,
+  "blocks": [
+    {
+      "id": "5f3c3c1e-7f5f-4a1d-9f17-0f8b2f7a6d10",
+      "element_type": "scene_heading",
+      "text": "INT. ROOM - DAY",
+      "kit_uuid": "{b0e1...}"
+    }
+  ]
+}
+```
+
+Rules:
+
+- The normal save path rewrites both rows in the same atomic file replace as
+  `scenario`. Existing KIT tables and unrelated `scenario_data` rows are copied
+  through untouched.
+- On load, IDs are matched by KIT scene UUID first, then by exact element type
+  and text, then by equal-length same-element runs between those anchors. This
+  preserves identity for inserted, deleted, reordered and text-edited blocks.
+- A block ID is never assigned to two blocks. Blocks that cannot be matched get
+  a fresh UUID; the app shows a warning when an external edit was ambiguous
+  instead of silently reusing an ID for different content.
+- Scene identity is the scene heading's `ScriptBlock.id`. Renaming a scene
+  keeps its id; deleting the heading retires the id and drops its metadata with
+  a warning.
+- A project without these rows opens unchanged. It receives fresh IDs and they
+  are persisted on the next save.
+- A row with `"schema"` newer than the build is not interpreted and is **not
+  overwritten** on save. ScriptCraft warns and leaves it for the newer build.
+- The identity row stores a second copy of the script text, roughly doubling
+  the sidecar size. This is deliberate: re-anchoring needs the pre-edit text,
+  and KIT ignores the row.
