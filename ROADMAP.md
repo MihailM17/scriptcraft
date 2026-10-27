@@ -21,7 +21,7 @@ Status legend: `[ ]` to do `[-]` in progress `[x]` done `[!]` blocked
 | Date | 2026-10-27 |
 | Project | ScriptCraft — free, open-source, revision-first screenwriting studio |
 | Repo | `/Users/mihailmihaylov/Documents/Dev_work/scriptcraft` |
-| Branch / commit | `main`; tag `v0.7.0` at `9ce2e0e` (revision workflow); v0.8 M0 identity committed on top; v0.8 plan written 2026-10-26 |
+| Branch / commit | `main`; tag `v0.7.0` at `9ce2e0e` (revision workflow); v0.8 M0 at `9bd4839`, M1 at `1948c62`; v0.8 plan written 2026-10-26 |
 | Rust workspace | `scriptcraft-core`, `scriptcraft-app`, `scriptcraft-layout` (`Cargo.toml`, resolver 2) |
 | App crate version | `scriptcraft-app 0.7.0`, `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
 | Distribution | **v0.7.0 tagged** at `9ce2e0e`; v0.7 packages and GitHub release notes still pending. Last published release: v0.6.1. Installed `/Applications/ScriptCraft.app` is 0.6.1 + unreleased shortcuts/theme/folder + revision M1/M2/M3 |
@@ -1085,7 +1085,7 @@ Newest entries at the bottom. Each entry: date — what changed / what was found
     still pending.
   - Next: commit/tag v0.7.0, then start M0.
 
-- **2026-10-27** — v0.8 M1: draft diff engine.
+- **2026-10-27** — v0.8 M1: draft diff engine (committed as `1948c62`).
   - `scriptcraft-core/src/revision.rs`: public `DiffKind`, `DiffEntry` and
     `DraftDiff`, plus `RevisionSet`/`RevisionHistory` compare helpers.
     `RevisionBlock` now carries an optional stable `block_id`; old baselines
