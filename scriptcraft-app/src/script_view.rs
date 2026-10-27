@@ -23,12 +23,14 @@ use scriptcraft_core::editing::{
     TemplateMetrics,
 };
 use scriptcraft_core::model::{ElementType, ScriptBlock};
+use scriptcraft_core::revision::RevisionColor;
+use scriptcraft_layout::pdf::{REVISION_BAR_W_MM, REVISION_BAR_X_MM};
 use scriptcraft_layout::place::{
     self, DocLayout, LineRole, PageLayout, PlacedLine, MM_PER_CELL, ROW_MM, RUSSIAN_GEOMETRY,
 };
 
 use crate::app::{bold_mono, italic_mono, MONO};
-use crate::theme::{kit, paint_page, KitColors};
+use crate::theme::{kit, paint_page, revision_color, KitColors};
 
 /// Points per millimetre at zoom 1.0: 12 pt Courier prime metrics make the
 /// Russian template's text column exactly A4 width at 72 dpi.
@@ -69,6 +71,16 @@ pub fn document_layout(
     scene_labels: &[String],
 ) -> DocLayout {
     place::layout(blocks, m, &RUSSIAN_GEOMETRY, scene_labels)
+}
+
+/// [`document_layout`] with production page locks.
+pub fn document_layout_with_page_lock(
+    blocks: &[ScriptBlock],
+    m: &TemplateMetrics,
+    scene_labels: &[String],
+    page_lock: Option<&scriptcraft_core::page_lock::PageLock>,
+) -> DocLayout {
+    place::layout_with_page_lock(blocks, m, &RUSSIAN_GEOMETRY, scene_labels, page_lock)
 }
 
 /// A selection between two document positions. Anchor is the fixed end a
@@ -139,6 +151,12 @@ pub struct EditState {
     pub debug_autocomplete: Vec<(String, egui::Rect)>,
 }
 
+/// Per-frame display options that are not part of the document layout.
+pub struct ScriptViewStyle<'a> {
+    pub typewriter: bool,
+    pub revision_colors: &'a [Option<RevisionColor>],
+}
+
 /// What the widget wants the app to apply this frame.
 #[derive(Debug, Default)]
 pub struct ScriptViewOutput {
@@ -156,9 +174,13 @@ pub fn script_view(
     zoom_anchor: Option<egui::Pos2>,
     blocks: &[ScriptBlock],
     doc: &DocLayout,
-    typewriter: bool,
+    style: ScriptViewStyle<'_>,
     state: &mut EditState,
 ) -> ScriptViewOutput {
+    let ScriptViewStyle {
+        typewriter,
+        revision_colors,
+    } = style;
     let page = page_size_pt(zoom);
     let scale = PT_PER_MM * zoom;
     let body = 12.0 * zoom;
@@ -394,7 +416,21 @@ pub fn script_view(
                         painter.rect_filled(highlight, 0.0, sel_fill);
                     }
                 }
-                paint_line(painter, prect, blocks, line, body, scale, row_h);
+                let revision = line
+                    .span
+                    .and_then(|s| revision_colors.get(s.bi).copied().flatten());
+                paint_line(
+                    painter,
+                    prect,
+                    blocks,
+                    line,
+                    LinePaint {
+                        body,
+                        scale,
+                        row_h,
+                        revision,
+                    },
+                );
             }
             if focused {
                 if let Some((cpi, _, caret)) = caret_geo {
@@ -1443,7 +1479,9 @@ fn paint_page_number(
     row_h: f32,
     scale: f32,
 ) {
-    let Some(n) = page.number else { return };
+    let Some(n) = page.number.as_deref() else {
+        return;
+    };
     painter.text(
         egui::pos2(
             prect.right() - PAD_R_MM * scale,
@@ -1456,15 +1494,27 @@ fn paint_page_number(
     );
 }
 
+#[derive(Clone, Copy)]
+struct LinePaint {
+    body: f32,
+    scale: f32,
+    row_h: f32,
+    revision: Option<RevisionColor>,
+}
+
 fn paint_line(
     painter: &egui::Painter,
     prect: egui::Rect,
     blocks: &[ScriptBlock],
     line: &PlacedLine,
-    body: f32,
-    scale: f32,
-    row_h: f32,
+    paint: LinePaint,
 ) {
+    let LinePaint {
+        body,
+        scale,
+        row_h,
+        revision,
+    } = paint;
     let c = kit();
     let family = if line.bold {
         bold_mono()
@@ -1480,6 +1530,15 @@ fn paint_line(
     let size = galley.size();
     let x = prect.left() + PAD_L_MM * scale + line.x_mm * scale;
     let y = prect.top() + PAD_T_MM * scale + line.row as f32 * row_h;
+    if line.role == LineRole::Body {
+        if let Some(revision) = revision {
+            let mark = egui::Rect::from_min_size(
+                egui::pos2(prect.left() + REVISION_BAR_X_MM * scale, y),
+                egui::vec2(REVISION_BAR_W_MM * scale, row_h),
+            );
+            painter.rect_filled(mark, 0.0, revision_color(revision));
+        }
+    }
     let pos = match line.role {
         // Hanging scene number: right-aligned in the margin, centered on
         // its heading row like the old editor.

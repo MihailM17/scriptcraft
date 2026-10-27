@@ -5,6 +5,7 @@ use scriptcraft_core::{
     format::{validate, Issue},
     kitsp::{self, Card, Metadata},
     model::{ElementType, Project, Scene, ScriptBlock},
+    revision::{RevisionColor, RevisionHistory, RevisionMarks},
     Stats,
 };
 
@@ -157,19 +158,45 @@ pub fn install_fonts(ctx: &egui::Context) {
     ctx.set_fonts(fonts);
 }
 
-/// KIT FastFormat order for the numbered element list.
+/// Numbered FastFormat list; the number is also the Cmd/Ctrl shortcut digit
+/// (writer order: 1 scene heading, 2 action, 3 character, …).
 const FORMAT_ORDER: [(u8, ElementType, &str); 10] = [
-    (0, ElementType::SceneHeading, "Scene Heading"),
-    (1, ElementType::SceneCharacters, "Scene Characters"),
+    (1, ElementType::SceneHeading, "Scene Heading"),
     (2, ElementType::Action, "Action"),
     (3, ElementType::Character, "Character"),
-    (4, ElementType::Dialogue, "Dialogue"),
-    (5, ElementType::Parenthetical, "Parenthetical"),
-    (6, ElementType::Shot, "Shot"),
-    (7, ElementType::Transition, "Transition"),
-    (8, ElementType::NonPrintable, "Non-Printable Text"),
+    (4, ElementType::Parenthetical, "Parenthetical"),
+    (5, ElementType::Dialogue, "Dialogue"),
+    (6, ElementType::Transition, "Transition"),
+    (7, ElementType::Shot, "Shot"),
+    (8, ElementType::SceneCharacters, "Scene Characters"),
     (9, ElementType::Lyrics, "Lyrics"),
+    (0, ElementType::NonPrintable, "Non-Printable Text"),
 ];
+
+/// Keyboard key for a FastFormat digit.
+fn format_key(n: u8) -> egui::Key {
+    match n {
+        0 => egui::Key::Num0,
+        1 => egui::Key::Num1,
+        2 => egui::Key::Num2,
+        3 => egui::Key::Num3,
+        4 => egui::Key::Num4,
+        5 => egui::Key::Num5,
+        6 => egui::Key::Num6,
+        7 => egui::Key::Num7,
+        8 => egui::Key::Num8,
+        _ => egui::Key::Num9,
+    }
+}
+
+/// Platform shortcut prefix shown in menus and tooltips.
+fn shortcut_prefix() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "⌘"
+    } else {
+        "Ctrl+"
+    }
+}
 
 fn element_label(t: ElementType) -> &'static str {
     FORMAT_ORDER
@@ -230,8 +257,13 @@ fn fmt_button(ui: &mut egui::Ui, label: &str, active: bool) -> bool {
         egui::FontId::proportional(12.5),
         fg,
     );
-    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
-        .clicked()
+    let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+    if let Some(n) = num {
+        resp.on_hover_text(format!("{}{n} — {name}", shortcut_prefix()))
+            .clicked()
+    } else {
+        resp.clicked()
+    }
 }
 
 /// KIT QMenu-style row: full-width, accent fill on hover, painted check gutter.
@@ -359,7 +391,7 @@ impl ExportFormat {
     }
 }
 
-/// Persisted application settings (`~/Library/Application Support/ScriptCraft/settings.conf`).
+/// Persisted application settings (`settings.conf` in the per-user config dir).
 #[derive(Clone)]
 struct AppSettings {
     autosave: bool,
@@ -370,7 +402,7 @@ struct AppSettings {
     compact_mode: bool,
     two_panel: bool,
     hidpi: bool,
-    dark_mode: bool,
+    theme: Theme,
 }
 
 impl Default for AppSettings {
@@ -384,7 +416,7 @@ impl Default for AppSettings {
             compact_mode: false,
             two_panel: false,
             hidpi: false,
-            dark_mode: true,
+            theme: Theme::Midnight,
         }
     }
 }
@@ -510,6 +542,12 @@ pub struct ScriptCraftApp {
     typewriter: bool,
     /// Caret/selection and command-based undo history of the script editor.
     editor2: crate::script_view::EditState,
+    revisions: RevisionHistory,
+    revision_marks: RevisionMarks,
+    revision_marks_dirty: bool,
+    show_current_revision: bool,
+    show_clear_revisions: bool,
+    show_revisions: bool,
     show_find: bool,
     find_query: String,
     find_replace: String,
@@ -588,6 +626,12 @@ impl Default for ScriptCraftApp {
             last_viewport: egui::Vec2::ZERO,
             typewriter: false,
             editor2: Default::default(),
+            revisions: RevisionHistory::default(),
+            revision_marks: RevisionMarks::default(),
+            revision_marks_dirty: false,
+            show_current_revision: false,
+            show_clear_revisions: false,
+            show_revisions: false,
             show_find: false,
             find_query: String::new(),
             find_replace: String::new(),
@@ -781,12 +825,18 @@ impl ScriptCraftApp {
 
     /// Test hook: set the persisted theme choice.
     pub fn set_dark_mode(&mut self, dark: bool) {
-        self.settings.dark_mode = dark;
+        self.settings.theme = if dark { Theme::Midnight } else { Theme::Light };
     }
 
     /// Test hook: pin the Start-page recent projects list.
     pub fn pin_recent(&mut self, list: Vec<(String, String)>) {
         self.recent = list;
+    }
+
+    /// Test hook: path the Start page's folder button would reveal.
+    #[doc(hidden)]
+    pub fn projects_folder_for_test(&self) -> String {
+        self.projects_dir().to_string_lossy().into_owned()
     }
 
     /// Test hook: fixed backups folder, so UI snapshots don't depend on `$HOME`.
@@ -992,7 +1042,143 @@ impl ScriptCraftApp {
         self.editor2.debug_autocomplete.clone()
     }
 
+    fn ensure_revision_marks(&mut self) {
+        if !self.revision_marks_dirty {
+            return;
+        }
+        let marks = self
+            .project
+            .as_ref()
+            .map(|p| {
+                if self.show_current_revision {
+                    self.revisions.latest_marks(&p.blocks)
+                } else {
+                    self.revisions.marks(&p.blocks)
+                }
+            })
+            .unwrap_or_default();
+        self.revision_marks = marks;
+        self.revision_marks_dirty = false;
+    }
+
+    pub fn start_revision(&mut self) {
+        if self.project.is_none() {
+            self.status = "Open a project before starting a revision.".to_string();
+            return;
+        }
+        let color = self.revisions.next_color();
+        let name = format!("{} Revision", color.label());
+        let started = chrono::Local::now().format("%d.%m.%Y %H:%M").to_string();
+        let pages = self.page_count();
+        let previous = self.revisions.latest().map(|s| (s.color, s.pages));
+        let blocks = &self.project.as_ref().unwrap().blocks;
+        self.revisions.start(blocks, name, started, pages);
+        self.revision_marks_dirty = true;
+        self.dirty = true;
+        let mut status = format!("{} revision started ({} pages).", color.label(), pages);
+        if let Some((previous_color, previous_pages)) =
+            previous.filter(|(_, previous_pages)| *previous_pages > 0 && pages > 0)
+        {
+            let delta = pages as i64 - previous_pages as i64;
+            if delta != 0 {
+                status.push_str(&format!(
+                    " {:+} pages since {}.",
+                    delta,
+                    previous_color.label()
+                ));
+            }
+        }
+        self.status = status;
+    }
+
+    pub fn clear_revision_history(&mut self) {
+        if self.revisions.is_empty() {
+            self.status = "No revision history to clear.".to_string();
+            return;
+        }
+        self.revisions.clear();
+        self.revision_marks = RevisionMarks::default();
+        self.revision_marks_dirty = false;
+        self.dirty = true;
+        self.status = "Revision history cleared.".to_string();
+    }
+
+    /// Turn saved KIT draft versions into revision baselines. Version XML is
+    /// the same `<scenario>` shape as the live script, so every saved draft
+    /// is a complete, recoverable baseline.
+    pub fn import_versions_as_revisions(&mut self) -> usize {
+        if self.project.is_none() {
+            self.status = "Open a project before importing revisions.".to_string();
+            return 0;
+        }
+        if self.path.is_empty() {
+            self.status = "Save the project before importing revisions.".to_string();
+            return 0;
+        }
+        let imported = match kitsp::import_versions_as_revisions(&self.path, &mut self.revisions) {
+            Ok(n) => n,
+            Err(e) => {
+                self.status = format!("Could not read versions: {e}");
+                return 0;
+            }
+        };
+        if imported > 0 {
+            self.revision_marks_dirty = true;
+            self.dirty = true;
+            self.status = format!("Imported {imported} saved version(s) as revisions.");
+        } else {
+            self.status = "No recoverable saved versions found.".to_string();
+        }
+        imported
+    }
+
+    #[doc(hidden)]
+    pub fn lock_pages_for_test(&mut self) {
+        self.lock_pages();
+    }
+
+    pub fn unlock_pages_for_test(&mut self) {
+        self.unlock_pages();
+    }
+
+    pub fn page_lock_for_test(&self) -> Option<scriptcraft_core::page_lock::PageLock> {
+        scriptcraft_core::page_lock::PageLock::from_json(&self.meta.locked_pages)
+            .ok()
+            .filter(|l| !l.is_empty())
+    }
+
+    pub fn page_labels_for_test(&self) -> Vec<Option<String>> {
+        self.doc
+            .as_ref()
+            .map(|d| d.pages.iter().map(|p| p.number.clone()).collect())
+            .unwrap_or_default()
+    }
+
+    pub fn revision_marks_for_test(&self) -> &[Option<RevisionColor>] {
+        &self.revision_marks.colors
+    }
+
+    #[doc(hidden)]
+    pub fn latest_revision_color(&self) -> Option<RevisionColor> {
+        self.revisions.latest().map(|s| s.color)
+    }
+    #[doc(hidden)]
+    pub fn latest_revision_pages(&self) -> Option<usize> {
+        self.revisions.latest().map(|s| s.pages)
+    }
+    #[doc(hidden)]
+    pub fn set_current_revision_only(&mut self, on: bool) {
+        self.show_current_revision = on;
+        self.revision_marks_dirty = true;
+    }
+
+    #[doc(hidden)]
+    pub fn current_revision_only(&self) -> bool {
+        self.show_current_revision
+    }
+
     fn refresh_derived(&mut self) {
+        self.revision_marks_dirty = true;
         if let Some(p) = &self.project {
             self.issues = validate(p);
             self.stats = p.stats();
@@ -1025,21 +1211,34 @@ impl ScriptCraftApp {
             Some(p) => {
                 let labels: Vec<String> =
                     (0..p.scenes().len()).map(|i| self.scene_label(i)).collect();
-                let incremental = match (hint, old.as_ref()) {
-                    (Some((first, upto)), Some(prev)) => scriptcraft_layout::place::relayout_from(
-                        &p.blocks,
-                        &RUSSIAN,
-                        &scriptcraft_layout::place::RUSSIAN_GEOMETRY,
-                        &labels,
-                        prev,
-                        first,
-                        upto,
-                    ),
-                    _ => None,
+                let page_lock =
+                    scriptcraft_core::page_lock::PageLock::from_json(&self.meta.locked_pages)
+                        .ok()
+                        .filter(|l| !l.is_empty());
+                let incremental = if page_lock.is_some() {
+                    None
+                } else {
+                    match (hint, old.as_ref()) {
+                        (Some((first, upto)), Some(prev)) => {
+                            scriptcraft_layout::place::relayout_from(
+                                &p.blocks,
+                                &RUSSIAN,
+                                &scriptcraft_layout::place::RUSSIAN_GEOMETRY,
+                                &labels,
+                                prev,
+                                first,
+                                upto,
+                            )
+                        }
+                        _ => None,
+                    }
                 };
                 incremental.or_else(|| {
-                    Some(crate::script_view::document_layout(
-                        &p.blocks, &RUSSIAN, &labels,
+                    Some(crate::script_view::document_layout_with_page_lock(
+                        &p.blocks,
+                        &RUSSIAN,
+                        &labels,
+                        page_lock.as_ref(),
                     ))
                 })
             }
@@ -1110,6 +1309,50 @@ impl ScriptCraftApp {
         } else {
             Some(v)
         }
+    }
+
+    /// Capture every current page start as a production page lock.
+    fn lock_pages(&mut self) {
+        let starts = match &self.project {
+            Some(p) => scriptcraft_layout::paginate::page_starts(&p.blocks, &RUSSIAN),
+            None => Vec::new(),
+        };
+        if starts.is_empty() {
+            self.status = "Nothing to lock.".to_string();
+            return;
+        }
+        let blocks = self
+            .project
+            .as_ref()
+            .map(|p| p.blocks.as_slice())
+            .unwrap_or(&[]);
+        let lock = scriptcraft_core::page_lock::PageLock::capture(blocks, &starts);
+        match lock.to_json() {
+            Ok(json) => {
+                self.meta.locked_pages = json;
+                self.meta_dirty = true;
+                self.doc_hint = None;
+                self.refresh_derived();
+                self.status = format!(
+                    "Pages locked ({} page{}). Later edits keep these starts; inserted pages become 42A, 42B, …",
+                    lock.pages,
+                    if lock.pages == 1 { "" } else { "s" }
+                );
+            }
+            Err(e) => self.status = format!("Could not lock pages: {e}"),
+        }
+    }
+
+    fn unlock_pages(&mut self) {
+        if self.meta.locked_pages.trim().is_empty() {
+            self.status = "Pages are not locked.".to_string();
+            return;
+        }
+        self.meta.locked_pages.clear();
+        self.meta_dirty = true;
+        self.doc_hint = None;
+        self.refresh_derived();
+        self.status = "Page locks removed; pagination can reflow again.".to_string();
     }
 
     fn scene_number_start(&self) -> u32 {
@@ -1281,6 +1524,8 @@ impl ScriptCraftApp {
                 self.selected_scene = 0;
                 self.selected_block = None;
                 self.editor2 = Default::default();
+                self.revisions = kitsp::load_revisions(path).unwrap_or_default();
+                self.revision_marks_dirty = true;
                 self.dirty = false;
                 self.cards = kitsp::load_cards(path).unwrap_or_default();
                 self.meta = kitsp::load_metadata(path).unwrap_or_default();
@@ -1341,7 +1586,7 @@ impl ScriptCraftApp {
             return;
         }
         let script = match &self.project {
-            Some(p) => kitsp::save_file(&self.path, p),
+            Some(p) => kitsp::save_file_with_revisions(&self.path, p, &self.revisions),
             None => return,
         };
         match script {
@@ -1456,7 +1701,7 @@ impl ScriptCraftApp {
             None
         };
         let dst = dir.join(Self::recovery_key(&self.path));
-        if kitsp::write_recovery_file(&dst, origin, p).is_ok() {
+        if kitsp::write_recovery_file_with_revisions(&dst, origin, p, &self.revisions).is_ok() {
             // Carry the title page too, including unsaved field edits.
             let mut m = self.meta.clone();
             m.logline_html = kitsp::text_to_html(&self.title_logline);
@@ -1528,6 +1773,47 @@ impl ScriptCraftApp {
         }
     }
 
+    /// Folder that holds the writer's projects: the open file's folder, else
+    /// the most recent project's folder, else `~/Documents/ScriptCraft`.
+    fn projects_dir(&self) -> std::path::PathBuf {
+        let current = (!self.path.is_empty() && !Self::is_fixture_path(&self.path))
+            .then_some(self.path.as_str());
+        let candidate = current.or_else(|| {
+            self.recent
+                .iter()
+                .map(|(p, _)| p.as_str())
+                .find(|p| !p.is_empty() && !Self::is_fixture_path(p))
+        });
+        if let Some(parent) = candidate.and_then(|p| std::path::Path::new(p).parent()) {
+            if parent.is_dir() {
+                return parent.to_path_buf();
+            }
+        }
+        home_dir()
+            .map(|home| home.join("Documents").join("ScriptCraft"))
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+    }
+
+    /// Reveal the projects folder in Finder / Explorer / the desktop file manager.
+    fn open_projects_folder(&mut self) {
+        let dir = self.projects_dir();
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            self.status = format!("Could not create {}: {e}", dir.display());
+            return;
+        }
+        let opener = if cfg!(target_os = "macos") {
+            "open"
+        } else if cfg!(target_os = "windows") {
+            "explorer"
+        } else {
+            "xdg-open"
+        };
+        match std::process::Command::new(opener).arg(&dir).spawn() {
+            Ok(_) => self.status = format!("Opened {}.", dir.display()),
+            Err(e) => self.status = format!("Could not open {}: {e}", dir.display()),
+        }
+    }
+
     fn do_save_as(&mut self) {
         let Some(p) = self.project.clone() else {
             return;
@@ -1542,12 +1828,12 @@ impl ScriptCraftApp {
                     self.status = format!("Save As failed (copy): {e}");
                     return;
                 }
-                match kitsp::save_file(&dst, &p) {
+                match kitsp::save_file_with_revisions(&dst, &p, &self.revisions) {
                     Ok(()) => self.after_save_as(&dst),
                     Err(e) => self.status = format!("Save As failed: {e}"),
                 }
             } else if kitsp::create_file(&dst, &p.title).is_ok() {
-                match kitsp::save_file(&dst, &p) {
+                match kitsp::save_file_with_revisions(&dst, &p, &self.revisions) {
                     Ok(()) => self.after_save_as(&dst),
                     Err(e) => self.status = format!("Save As failed: {e}"),
                 }
@@ -1655,6 +1941,9 @@ impl ScriptCraftApp {
         self.selected_scene = 0;
         self.selected_block = None;
         self.editor2 = Default::default();
+        self.revisions = RevisionHistory::default();
+        self.revision_marks = RevisionMarks::default();
+        self.revision_marks_dirty = false;
         self.cards = Vec::new();
         self.research = Vec::new();
         self.dirty = true;
@@ -1667,6 +1956,10 @@ impl ScriptCraftApp {
     fn pdf_bytes(&mut self) -> Option<Vec<u8>> {
         let Some(p) = &self.project else { return None };
         let mut opts = self.export_options.clone();
+        if self.revisions.is_empty() {
+            opts.revision_marks = false;
+            opts.revision_pages_only = false;
+        }
         opts.watermark = if self.export_watermark_on {
             let text = self.export_watermark.trim();
             Some(if text.is_empty() {
@@ -1677,13 +1970,17 @@ impl ScriptCraftApp {
         } else {
             None
         };
+        let marks = self.revisions.latest_marks(&p.blocks).colors;
         let fonts = scriptcraft_layout::pdf::ExportFonts {
             regular: include_bytes!("../assets/fonts/CourierPrime-Regular.ttf"),
             bold: include_bytes!("../assets/fonts/CourierPrime-Bold.ttf"),
             fallback_regular: include_bytes!("../assets/fonts/IBMPlexMono-Regular.ttf"),
             fallback_bold: include_bytes!("../assets/fonts/IBMPlexMono-Bold.ttf"),
         };
-        match scriptcraft_layout::pdf::to_pdf_bytes(p, &self.meta, &opts, &fonts) {
+        let latest = self.revisions.latest();
+        match scriptcraft_layout::pdf::to_pdf_bytes_with_marks_and_latest(
+            p, &self.meta, &opts, &marks, latest, &fonts,
+        ) {
             Ok(b) => Some(b),
             Err(e) => {
                 self.status = format!("PDF failed: {e}");
@@ -1716,7 +2013,10 @@ impl ScriptCraftApp {
     /// Write Final Draft XML to `dst` (the path chosen in the Export dialog).
     fn save_fdx(&mut self, dst: &std::path::Path) {
         let Some(p) = &self.project else { return };
-        let xml = scriptcraft_core::fdx::to_fdx(p, &self.meta);
+        let marks = self.revisions.marks(&p.blocks).colors;
+        let latest = self.revisions.latest();
+        let xml =
+            scriptcraft_core::fdx::to_fdx_with_revisions_and_latest(p, &self.meta, &marks, latest);
         match std::fs::write(dst, xml) {
             Ok(()) => self.status = format!("Exported to {}", dst.to_string_lossy()),
             Err(e) => self.status = format!("Export failed: {e}"),
@@ -1966,28 +2266,54 @@ impl ScriptCraftApp {
         self.editor2.scroll_caret = true;
     }
 
-    /// Set the selected block's element type (Format bar / toolbar combo).
+    /// Set the element type of every selected block (Format bar, toolbar
+    /// combo and Cmd/Ctrl+digit shortcuts).
     fn set_selected_type(&mut self, t: ElementType) {
-        let Some(bi) = self.selected_block else {
+        let Some(p) = self.project.as_ref() else {
             return;
         };
-        let Some(b) = self.project.as_ref().and_then(|p| p.blocks.get(bi)) else {
+        let Some((start, end)) = self.selected_block_range() else {
             return;
         };
-        if b.element_type == t {
-            return;
+        let mut cmds = Vec::new();
+        for bi in start..=end {
+            let Some(b) = p.blocks.get(bi) else {
+                continue;
+            };
+            if b.element_type == t {
+                continue;
+            }
+            cmds.push(edit::EditCommand::SetType { bi, t });
+            if auto_upper(t) && b.text != b.text.to_uppercase() {
+                cmds.push(edit::EditCommand::SetText {
+                    bi,
+                    text: b.text.to_uppercase(),
+                });
+            }
         }
-        let mut cmds = vec![edit::EditCommand::SetType { bi, t }];
-        if auto_upper(t) && b.text != b.text.to_uppercase() {
-            cmds.push(edit::EditCommand::SetText {
-                bi,
-                text: b.text.to_uppercase(),
-            });
+        if cmds.is_empty() {
+            return;
         }
         self.apply_editor2_output(crate::script_view::ScriptViewOutput {
             commands: cmds,
             ..Default::default()
         });
+    }
+
+    /// Block range covered by the editor selection, or the active block.
+    fn selected_block_range(&self) -> Option<(usize, usize)> {
+        let n = self.project.as_ref()?.blocks.len();
+        if n == 0 {
+            return None;
+        }
+        let (a, b) = match self.editor2.selection {
+            Some(sel) => (sel.anchor.bi, sel.focus.bi),
+            None => {
+                let bi = self.selected_block?;
+                (bi, bi)
+            }
+        };
+        Some((a.min(b).min(n - 1), a.max(b).min(n - 1)))
     }
 
     /// Insert an empty block of `t` below the selection and select it.
@@ -2765,6 +3091,7 @@ fn kit_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
     );
     let w = (galley.size().x + 28.0).max(96.0);
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, 30.0), egui::Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, text));
     let fill = button_fill(&resp);
     ui.painter().rect_filled(rect, 7.0, fill);
     ui.painter().rect_stroke(
@@ -2786,6 +3113,7 @@ fn kit_icon_button(ui: &mut egui::Ui, icon: KitIcon, text: &str) -> egui::Respon
     );
     let w = (galley.size().x + 50.0).max(112.0);
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, 30.0), egui::Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, text));
     let fill = button_fill(&resp);
     let p = ui.painter();
     p.rect_filled(rect, 7.0, fill);
@@ -3001,6 +3329,7 @@ fn default_backups_dir() -> String {
 
 fn load_settings() -> AppSettings {
     let mut s = AppSettings::default();
+    let mut theme_seen = false;
     if let Ok(text) = std::fs::read_to_string(config_dir().join("settings.conf")) {
         for line in text.lines() {
             let Some((k, v)) = line.split_once('=') else {
@@ -3020,7 +3349,22 @@ fn load_settings() -> AppSettings {
                 "compact_mode" => s.compact_mode = v == "1",
                 "two_panel" => s.two_panel = v == "1",
                 "hidpi" => s.hidpi = v == "1",
-                "dark_mode" => s.dark_mode = v == "1",
+                "theme" => {
+                    s.theme = match v {
+                        "light" => Theme::Light,
+                        "midnight" => Theme::Midnight,
+                        _ => s.theme,
+                    };
+                    theme_seen = true;
+                }
+                // Pre-theme-picker setting: 1 = Midnight, 0 = Light.
+                "dark_mode" if !theme_seen => {
+                    s.theme = if v == "1" {
+                        Theme::Midnight
+                    } else {
+                        Theme::Light
+                    };
+                }
                 _ => {}
             }
         }
@@ -3031,7 +3375,7 @@ fn load_settings() -> AppSettings {
 fn save_settings(s: &AppSettings) {
     let _ = std::fs::create_dir_all(config_dir());
     let text = format!(
-        "autosave={}\nautosave_minutes={}\nbackups={}\nbackups_dir={}\nspell_check={}\ncompact_mode={}\ntwo_panel={}\nhidpi={}\ndark_mode={}\n",
+        "autosave={}\nautosave_minutes={}\nbackups={}\nbackups_dir={}\nspell_check={}\ncompact_mode={}\ntwo_panel={}\nhidpi={}\ntheme={}\n",
         s.autosave as u8,
         s.autosave_minutes.clamp(1, 60),
         s.backups as u8,
@@ -3040,7 +3384,7 @@ fn save_settings(s: &AppSettings) {
         s.compact_mode as u8,
         s.two_panel as u8,
         s.hidpi as u8,
-        s.dark_mode as u8,
+        s.theme.key(),
     );
     let _ = std::fs::write(config_dir().join("settings.conf"), text);
 }
@@ -3256,8 +3600,9 @@ fn scene_preview(p: &Project, s: &Scene) -> String {
 impl eframe::App for ScriptCraftApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Theme: keep the palette/Visuals in sync with the setting.
-        set_kit_theme(!self.settings.dark_mode);
-        if ctx.style().visuals.dark_mode != self.settings.dark_mode {
+        let want_dark = self.settings.theme == Theme::Midnight;
+        set_kit_theme(!want_dark);
+        if ctx.style().visuals.dark_mode != want_dark {
             apply_theme(ctx);
         }
         // Window close (red button, Alt+F4, File ▸ Quit) must not discard
@@ -3326,6 +3671,15 @@ impl eframe::App for ScriptCraftApp {
             if redo {
                 self.do_redo();
             }
+            // FastFormat: Cmd/Ctrl+1…0 retypes the selected blocks.
+            if self.side_tab == SideTab::Script && self.pending_save.is_none() && !self.show_find {
+                for (n, t, _) in FORMAT_ORDER {
+                    if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, format_key(n))) {
+                        self.set_selected_type(t);
+                        break;
+                    }
+                }
+            }
         }
         // KIT-style OS window title with dirty dot (the toolbar shows stats).
         let want_title = if self.title.is_empty() {
@@ -3359,6 +3713,12 @@ impl eframe::App for ScriptCraftApp {
         }
         if self.show_about {
             self.about_window(ctx);
+        }
+        if self.show_revisions {
+            self.revisions_window(ctx);
+        }
+        if self.show_clear_revisions {
+            self.clear_revisions_window(ctx);
         }
         if self.show_help {
             self.help_window(ctx);
@@ -3463,9 +3823,10 @@ impl ScriptCraftApp {
                     ui.add_enabled_ui(has, |ui| {
                         let label = current.map(element_label).unwrap_or("Element");
                         ui.menu_button(label, |ui| {
-                            ui.set_min_width(190.0);
-                            for (_, t, name) in FORMAT_ORDER {
-                                if ui.selectable_label(current == Some(t), name).clicked() {
+                            ui.set_min_width(220.0);
+                            for (n, t, name) in FORMAT_ORDER {
+                                let sc = format!("{}{n}", shortcut_prefix());
+                                if menu_check(ui, name, current == Some(t), Some(&sc), true) {
                                     pick = Some(t);
                                 }
                             }
@@ -3557,6 +3918,18 @@ impl ScriptCraftApp {
                         });
                     }
                     ui.label(egui::RichText::new(&self.status).small().weak());
+                    if let Some(latest) = self.revisions.latest() {
+                        ui.add_space(8.0);
+                        let (swatch, _) =
+                            ui.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::hover());
+                        ui.painter()
+                            .rect_filled(swatch, 2.0, revision_color(latest.color));
+                        ui.label(
+                            egui::RichText::new(format!("{} revision", latest.color.label()))
+                                .small()
+                                .weak(),
+                        );
+                    }
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if let Some(p) = &self.project {
                             let total = p.duration_secs();
@@ -3594,6 +3967,10 @@ impl ScriptCraftApp {
             Undo,
             Redo,
             Find,
+            StartRevision,
+            ClearRevisions,
+            Revisions,
+            CurrentRevision,
             Nav,
             Fmt,
             Typew,
@@ -3659,6 +4036,36 @@ impl ScriptCraftApp {
                 action = Some(M::Find);
             }
             ui.separator();
+            let next_color = self.revisions.next_color();
+            if menu_item(
+                ui,
+                &format!("Start {} Revision", next_color.label()),
+                None,
+                has,
+            ) {
+                action = Some(M::StartRevision);
+            }
+            if menu_item(
+                ui,
+                "Clear Revision History…",
+                None,
+                has && !self.revisions.is_empty(),
+            ) {
+                action = Some(M::ClearRevisions);
+            }
+            if menu_item(ui, "Revision History…", None, has) {
+                action = Some(M::Revisions);
+            }
+            if menu_check(
+                ui,
+                "Show Current Revision Only",
+                self.show_current_revision,
+                None,
+                has && !self.revisions.is_empty(),
+            ) {
+                action = Some(M::CurrentRevision);
+            }
+            ui.separator();
             if menu_check(ui, "Navigator", self.show_left_panel, None, true) {
                 action = Some(M::Nav);
             }
@@ -3714,6 +4121,13 @@ impl ScriptCraftApp {
                     self.show_find = true;
                 }
             }
+            Some(M::StartRevision) => self.start_revision(),
+            Some(M::ClearRevisions) => self.show_clear_revisions = true,
+            Some(M::Revisions) => self.show_revisions = true,
+            Some(M::CurrentRevision) => {
+                self.show_current_revision = !self.show_current_revision;
+                self.revision_marks_dirty = true;
+            }
             Some(M::Nav) => self.show_left_panel = !self.show_left_panel,
             Some(M::Fmt) => self.show_format_panel = !self.show_format_panel,
             Some(M::Typew) => self.typewriter = !self.typewriter,
@@ -3766,6 +4180,13 @@ impl ScriptCraftApp {
                         self.show_find = true;
                     }
                 }
+                menu::ID_START_REVISION => self.start_revision(),
+                menu::ID_CLEAR_REVISIONS => {
+                    if !self.revisions.is_empty() {
+                        self.show_clear_revisions = true;
+                    }
+                }
+                menu::ID_REVISIONS => self.show_revisions = true,
                 menu::ID_NAVIGATOR => self.show_left_panel = !self.show_left_panel,
                 menu::ID_FORMAT_PANEL => self.show_format_panel = !self.show_format_panel,
                 menu::ID_TYPEWRITER => self.typewriter = !self.typewriter,
@@ -3801,7 +4222,7 @@ impl ScriptCraftApp {
             .open(&mut self.show_about)
             .collapsible(false)
             .show(ctx, |ui| {
-                ui.heading("ScriptCraft 0.4.0");
+                ui.heading(format!("ScriptCraft {}", env!("CARGO_PKG_VERSION")));
                 ui.label("A 100% Rust screenwriting studio (egui + eframe).");
                 ui.separator();
                 ui.label("Design language after KIT Scenarist 0.7.2:");
@@ -3815,6 +4236,149 @@ impl ScriptCraftApp {
             });
     }
 
+    fn revisions_window(&mut self, ctx: &egui::Context) {
+        let mut open = self.show_revisions;
+        egui::Window::new("Revision History")
+            .open(&mut open)
+            .resizable(true)
+            .default_width(400.0)
+            .show(ctx, |ui| {
+                if self.revisions.is_empty() {
+                    ui.label("No revisions yet. Start one from the Menu.");
+                } else {
+                    if ui
+                        .checkbox(
+                            &mut self.show_current_revision,
+                            "Show current revision only",
+                        )
+                        .changed()
+                    {
+                        self.revision_marks_dirty = true;
+                    }
+                    ui.add_space(6.0);
+                    let current_pages = self.page_count();
+                    let sets = &self.revisions.sets;
+                    let last = sets.len().saturating_sub(1);
+                    egui::ScrollArea::vertical()
+                        .max_height(300.0)
+                        .show(ui, |ui| {
+                            for (i, set) in sets.iter().enumerate().rev() {
+                                let previous = i.checked_sub(1).and_then(|j| sets.get(j));
+                                ui.horizontal(|ui| {
+                                    let (swatch, _) = ui.allocate_exact_size(
+                                        egui::vec2(10.0, 10.0),
+                                        egui::Sense::hover(),
+                                    );
+                                    ui.painter().rect_filled(
+                                        swatch,
+                                        2.0,
+                                        revision_color(set.color),
+                                    );
+                                    ui.vertical(|ui| {
+                                        ui.horizontal(|ui| {
+                                            let name = if set.name.is_empty() {
+                                                format!("{} Revision", set.color.label())
+                                            } else {
+                                                set.name.clone()
+                                            };
+                                            ui.label(egui::RichText::new(name).strong());
+                                            if i == last {
+                                                ui.label(
+                                                    egui::RichText::new("current")
+                                                        .small()
+                                                        .color(kit().accent_text),
+                                                );
+                                            }
+                                        });
+                                        let mut meta = if set.started.is_empty() {
+                                            "Date not recorded".to_string()
+                                        } else {
+                                            set.started.clone()
+                                        };
+                                        if set.pages > 0 {
+                                            meta.push_str(&format!(
+                                                " · started at {} pages",
+                                                set.pages
+                                            ));
+                                        } else {
+                                            meta.push_str(" · pages not recorded");
+                                        }
+                                        if let Some(previous) = previous {
+                                            if previous.pages > 0 && set.pages > 0 {
+                                                let delta =
+                                                    set.pages as i64 - previous.pages as i64;
+                                                if delta != 0 {
+                                                    meta.push_str(&format!(
+                                                        " ({:+} since previous)",
+                                                        delta
+                                                    ));
+                                                }
+                                            }
+                                        }
+                                        if i == last
+                                            && set.pages > 0
+                                            && current_pages > 0
+                                            && current_pages != set.pages
+                                        {
+                                            let delta = current_pages as i64 - set.pages as i64;
+                                            meta.push_str(&format!(
+                                                " · now {} pages ({:+})",
+                                                current_pages, delta
+                                            ));
+                                        }
+                                        ui.label(egui::RichText::new(meta).small().weak());
+                                    });
+                                });
+                                if i != 0 {
+                                    ui.separator();
+                                }
+                            }
+                        });
+                    ui.add_space(4.0);
+                    ui.label(
+                        egui::RichText::new(
+                            "Marks live in the .kitsp and never change script text.",
+                        )
+                        .small()
+                        .weak(),
+                    );
+                }
+            });
+        self.show_revisions = open;
+    }
+
+    fn clear_revisions_window(&mut self, ctx: &egui::Context) {
+        let mut open = self.show_clear_revisions;
+        let mut clear = false;
+        let mut cancel = false;
+        egui::Window::new("Clear Revision History")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .show(ctx, |ui| {
+                ui.label("Remove all revision colours and baselines from this project?");
+                ui.label("The script text is not changed.");
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Cancel").clicked() {
+                        cancel = true;
+                    }
+                    if ui.button("Clear Revision History").clicked() {
+                        clear = true;
+                    }
+                });
+            });
+        if clear {
+            self.clear_revision_history();
+            self.show_clear_revisions = false;
+        } else if cancel {
+            self.show_clear_revisions = false;
+        } else {
+            self.show_clear_revisions = open;
+        }
+    }
+
     fn help_window(&mut self, ctx: &egui::Context) {
         egui::Window::new("Help")
             .open(&mut self.show_help)
@@ -3824,6 +4388,7 @@ impl ScriptCraftApp {
                 ui.heading("ScriptCraft");
                 ui.label("Menu ▸ New / Open / Save / Export (Fountain, PDF).");
                 ui.label("Ctrl+S save · Ctrl+Z / Ctrl+Y undo · Ctrl+F find.");
+                ui.label("Menu ▸ Start Blue Revision marks edits; save keeps them.");
                 ui.label("Research holds Title Page, Logline, Synopsis and notes.");
                 ui.label("Statistics reports counts, timings and speaking parts.");
                 ui.separator();
@@ -3945,6 +4510,16 @@ impl ScriptCraftApp {
                                     &mut self.export_options.scene_numbers,
                                     "Print scenes numbers",
                                 );
+                                if !self.revisions.is_empty() {
+                                    ui.checkbox(
+                                        &mut self.export_options.revision_marks,
+                                        "Print revision marks (current)",
+                                    );
+                                    ui.checkbox(
+                                        &mut self.export_options.revision_pages_only,
+                                        "Print current revision pages only",
+                                    );
+                                }
                                 ui.add_enabled(
                                     false,
                                     egui::Checkbox::new(&mut false, "Print dialogues numbers"),
@@ -4808,6 +5383,11 @@ impl ScriptCraftApp {
         dirty |= kit_field(ui, "Script Name", &mut self.meta.title);
         dirty |= kit_field(ui, "Header", &mut self.meta.header);
         dirty |= kit_field(ui, "Footer", &mut self.meta.footer);
+        ui.label(
+            egui::RichText::new("Header/footer tokens: {revision} {date} {page}")
+                .size(11.0)
+                .color(egui::Color32::from_gray(0xA1)),
+        );
         dirty |= kit_field(
             ui,
             "Scene Number Prefix",
@@ -4841,6 +5421,34 @@ impl ScriptCraftApp {
             if kit_icon_button(ui, KitIcon::LockOpen, "Unlock scenes numbers").clicked() {
                 self.meta.locked_scene_numbers.clear();
                 dirty = true;
+            }
+        });
+        ui.add_space(6.0);
+        kit_section(ui, "Page Locks");
+        let page_lock = scriptcraft_core::page_lock::PageLock::from_json(&self.meta.locked_pages)
+            .ok()
+            .filter(|l| !l.is_empty());
+        if let Some(lock) = page_lock {
+            ui.label(format!(
+                "Locked: {} page{} (inserted pages use A/B labels).",
+                lock.pages,
+                if lock.pages == 1 { "" } else { "s" }
+            ));
+        } else {
+            ui.label(
+                egui::RichText::new(
+                    "Lock page starts before revisions so page references stay valid.",
+                )
+                .size(11.0)
+                .color(egui::Color32::from_gray(0xA1)),
+            );
+        }
+        ui.horizontal_wrapped(|ui| {
+            if kit_icon_button(ui, KitIcon::LockClosed, "Lock pages").clicked() {
+                self.lock_pages();
+            }
+            if kit_icon_button(ui, KitIcon::LockOpen, "Unlock pages").clicked() {
+                self.unlock_pages();
             }
         });
         if dirty {
@@ -4919,6 +5527,15 @@ impl ScriptCraftApp {
             );
             ui.add_space(6.0);
         }
+        ui.add_space(4.0);
+        if kit_button(ui, "Import Versions as Revisions").clicked() {
+            self.import_versions_as_revisions();
+        }
+        ui.label(
+            egui::RichText::new("Each saved KIT version becomes a revision baseline.")
+                .size(11.0)
+                .color(egui::Color32::from_gray(0xA1)),
+        );
     }
 
     fn research_entry_pane(&mut self, ui: &mut egui::Ui, id: i64) {
@@ -5696,6 +6313,14 @@ impl ScriptCraftApp {
                                     if start_button(ui, Some(KitIcon::Folder), "Open Project") {
                                         self.open_dialog(ui.ctx());
                                     }
+                                    ui.add_space(8.0);
+                                    if start_button(
+                                        ui,
+                                        Some(KitIcon::Folder),
+                                        "Open Projects Folder",
+                                    ) {
+                                        self.open_projects_folder();
+                                    }
                                     ui.add_space(36.0);
                                     egui::Frame::new()
                                         .fill(c.surface)
@@ -5944,9 +6569,18 @@ impl ScriptCraftApp {
         ui.add_space(12.0);
         ui.horizontal(|ui| {
             ui.add_space(16.0);
-            changed |= ui
-                .checkbox(&mut self.settings.dark_mode, "Use Dark Theme")
-                .changed();
+            ui.label("Theme:");
+            ui.add_space(6.0);
+            egui::ComboBox::from_id_salt("theme")
+                .selected_text(self.settings.theme.label())
+                .width(140.0)
+                .show_ui(ui, |ui| {
+                    for theme in [Theme::Light, Theme::Midnight] {
+                        changed |= ui
+                            .selectable_value(&mut self.settings.theme, theme, theme.label())
+                            .changed();
+                    }
+                });
         });
         ui.add_space(12.0);
         ui.horizontal(|ui| {
@@ -6077,6 +6711,8 @@ impl ScriptCraftApp {
                 };
                 self.last_viewport = avail;
                 self.last_render_zoom = zoom;
+                self.ensure_revision_marks();
+                let revision_colors = &self.revision_marks.colors;
                 let out = match (&self.project, &self.doc) {
                     (Some(p), Some(doc)) => crate::script_view::script_view(
                         ui,
@@ -6084,7 +6720,10 @@ impl ScriptCraftApp {
                         zoom_anchor,
                         &p.blocks,
                         doc,
-                        self.typewriter,
+                        crate::script_view::ScriptViewStyle {
+                            typewriter: self.typewriter,
+                            revision_colors,
+                        },
                         &mut self.editor2,
                     ),
                     _ => crate::script_view::ScriptViewOutput::default(),

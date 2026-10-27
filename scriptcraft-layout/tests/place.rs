@@ -8,7 +8,8 @@
 use scriptcraft_core::editing::RUSSIAN;
 use scriptcraft_core::kitsp;
 use scriptcraft_core::model::{ElementType, ScriptBlock};
-use scriptcraft_layout::{layout, LineRole, RUSSIAN_GEOMETRY, TEXT_W_MM};
+use scriptcraft_core::page_lock::PageLock;
+use scriptcraft_layout::{layout, layout_with_page_lock, LineRole, RUSSIAN_GEOMETRY, TEXT_W_MM};
 use std::collections::HashMap;
 
 const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../fixtures/A95.kitsp");
@@ -28,7 +29,14 @@ fn a95_scene_numbers_align_with_headings() {
     let doc = layout(&p.blocks, &RUSSIAN, &RUSSIAN_GEOMETRY, &labels);
     assert_eq!(doc.pages[0].number, None, "KIT leaves page one unnumbered");
     for (pi, page) in doc.pages.iter().enumerate() {
-        assert_eq!(page.number, if pi > 0 { Some(pi as u32 + 1) } else { None });
+        assert_eq!(
+            page.number,
+            if pi > 0 {
+                Some((pi + 1).to_string())
+            } else {
+                None
+            }
+        );
     }
 
     let numbers: Vec<_> = doc
@@ -161,4 +169,30 @@ fn split_dialogue_places_cues_and_more_rows() {
             );
         }
     }
+}
+
+#[test]
+fn page_lock_labels_editor_pages_with_a_suffix() {
+    let mut p = kitsp::load_file(FIXTURE).expect("fixture must load");
+    for i in 0..30 {
+        p.blocks.push(ScriptBlock::new(
+            ElementType::Action,
+            format!("Original action {i}."),
+        ));
+    }
+    let starts = scriptcraft_layout::paginate::page_starts(&p.blocks, &RUSSIAN);
+    assert!(starts.len() >= 2, "fixture needs multiple pages");
+    let lock = PageLock::capture(&p.blocks, &starts);
+    let at = starts[1].0;
+    for i in 0..40 {
+        p.blocks.insert(
+            at,
+            ScriptBlock::new(ElementType::Action, format!("Inserted action {i}.")),
+        );
+    }
+    let labels = scene_labels(&p.blocks);
+    let doc = layout_with_page_lock(&p.blocks, &RUSSIAN, &RUSSIAN_GEOMETRY, &labels, Some(&lock));
+    assert_eq!(doc.pages[0].number, None);
+    assert_eq!(doc.pages[1].number.as_deref(), Some("1A"));
+    assert!(doc.pages.iter().any(|p| p.number.as_deref() == Some("2")));
 }

@@ -22,6 +22,9 @@ pub const ID_TWO_PANEL: &str = "kit.two_panel";
 pub const ID_UNDO: &str = "kit.undo";
 pub const ID_REDO: &str = "kit.redo";
 pub const ID_FIND: &str = "kit.find";
+pub const ID_START_REVISION: &str = "kit.start_revision";
+pub const ID_CLEAR_REVISIONS: &str = "kit.clear_revisions";
+pub const ID_REVISIONS: &str = "kit.revisions";
 pub const ID_NAVIGATOR: &str = "kit.navigator";
 pub const ID_FORMAT_PANEL: &str = "kit.format_panel";
 pub const ID_TYPEWRITER: &str = "kit.typewriter";
@@ -111,7 +114,25 @@ impl NativeMenu {
         let redo = MenuItem::with_id(ID_REDO, "Redo", true, acc("Shift+CmdOrCtrl+Z"));
         let find = MenuItem::with_id(ID_FIND, "Find...", true, acc("CmdOrCtrl+F"));
         let sep_c = PredefinedMenuItem::separator();
-        let edit = Submenu::with_items("Edit", true, &[&undo, &redo, &sep_c, &find])?;
+        let start_revision = MenuItem::with_id(ID_START_REVISION, "Start Revision", true, None);
+        let clear_revisions =
+            MenuItem::with_id(ID_CLEAR_REVISIONS, "Clear Revision History...", true, None);
+        let revisions = MenuItem::with_id(ID_REVISIONS, "Revision History...", true, None);
+        let sep_rev = PredefinedMenuItem::separator();
+        let edit = Submenu::with_items(
+            "Edit",
+            true,
+            &[
+                &undo,
+                &redo,
+                &sep_c,
+                &find,
+                &sep_rev,
+                &start_revision,
+                &clear_revisions,
+                &revisions,
+            ],
+        )?;
 
         let navigator_item =
             CheckMenuItem::with_id(ID_NAVIGATOR, "Navigator", true, navigator, None);

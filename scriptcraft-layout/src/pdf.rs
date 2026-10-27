@@ -1,13 +1,15 @@
-use crate::paginate::paginate;
+use crate::paginate::{page_labels, paginate, paginate_with_breaks};
 use crate::place::{ROW_MM, RUSSIAN_GEOMETRY, TEXT_W_MM};
 use crate::wrap::wrap_lines;
 use printpdf::{
     Color, Greyscale, Line, LinePoint, Mm, Op, ParsedFont, PdfDocument, PdfFontHandle, PdfPage,
-    PdfSaveOptions, Point, Pt, TextItem, TextMatrix,
+    PdfSaveOptions, Point, Pt, Rect as PdfRect, Rgb, TextItem, TextMatrix,
 };
 use scriptcraft_core::editing::{cue_name_for, RUSSIAN};
 use scriptcraft_core::kitsp::Metadata;
 use scriptcraft_core::model::{ElementType, Project};
+use scriptcraft_core::page_lock::PageLock;
+use scriptcraft_core::revision::{RevisionColor, RevisionSet};
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -17,6 +19,8 @@ pub enum PdfError {
     Font,
     #[error("no printable content")]
     Empty,
+    #[error("no pages in the current revision")]
+    NoRevisionPages,
 }
 
 /// A4 page geometry (mm) for KIT's Russian editor/export template:
@@ -49,6 +53,11 @@ const X_DLG: f32 = MARGIN_L + RUSSIAN_GEOMETRY.dialog_mm;
 const PAGE_NUM_BASELINE: f32 = MARGIN_T - 0.4 * PITCH_MM - DESCENT_MM;
 /// Scene numbers sit 4mm left of the text margin (measured from KIT).
 const SCENE_NUM_GAP: f32 = RUSSIAN_GEOMETRY.scene_num_gap_mm;
+/// Footer baseline, inside the 25 mm bottom margin.
+const FOOTER_BASELINE_MM: f32 = 12.0;
+/// Revision margin bars shared with the editor (mm from the page edge).
+pub const REVISION_BAR_X_MM: f32 = 10.0;
+pub const REVISION_BAR_W_MM: f32 = 3.0;
 /// Title-page nudges measured from KIT's export (mm below the slot row).
 const TITLE_DY: f32 = 1.4;
 const TITLE_VALUE_DY: f32 = 1.5;
@@ -62,6 +71,8 @@ pub struct ExportOptions {
     pub page_numbers: bool,
     pub scene_numbers: bool,
     pub speaking_parts_count: bool,
+    pub revision_marks: bool,
+    pub revision_pages_only: bool,
     pub watermark: Option<String>,
 }
 
@@ -72,9 +83,18 @@ impl Default for ExportOptions {
             page_numbers: true,
             scene_numbers: true,
             speaking_parts_count: false,
+            revision_marks: false,
+            revision_pages_only: false,
             watermark: None,
         }
     }
+}
+
+/// Text that sits in a page margin instead of the body flow.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MarginBand {
+    Header,
+    Footer,
 }
 
 /// One printable text line on a page.
@@ -91,6 +111,11 @@ pub struct PrintLine {
     pub dy_mm: f32,
     /// Draw on the previous line's row instead of advancing (scene numbers).
     pub share_row: bool,
+    /// Revision colour for the margin bar, when this line belongs to a
+    /// changed block.
+    pub revision: Option<RevisionColor>,
+    /// Header/footer text: drawn in the page margin, never advances the body.
+    pub margin: Option<MarginBand>,
 }
 
 impl PrintLine {
@@ -104,6 +129,8 @@ impl PrintLine {
             underline: false,
             dy_mm: 0.0,
             share_row: false,
+            revision: None,
+            margin: None,
         }
     }
 
@@ -156,17 +183,141 @@ fn speech_counts(blocks: &[scriptcraft_core::model::ScriptBlock]) -> HashMap<Str
     counts
 }
 
+/// `dd.mm.yyyy` (or the date half of a KIT timestamp) for headers and the
+/// title page. Keeps imported/foreign timestamps readable instead of
+/// rejecting them.
+fn revision_date(set: &RevisionSet) -> String {
+    let raw = set.started.trim();
+    let date = raw.split_whitespace().next().unwrap_or(raw);
+    date.to_string()
+}
+
+fn expand_margin_text(text: &str, latest: Option<&RevisionSet>, page: &str) -> String {
+    let revision = latest
+        .map(|s| s.color.label().to_uppercase())
+        .unwrap_or_default();
+    let date = latest.map(revision_date).unwrap_or_default();
+    text.replace("{revision}", &revision)
+        .replace("{date}", &date)
+        .replace("{page}", page)
+}
+
+fn fit_margin_text(text: String, reserved: usize) -> Option<String> {
+    let max = ((TEXT_W_MM / CHAR_MM) as usize).saturating_sub(reserved);
+    let text = text.trim().to_string();
+    if text.is_empty() {
+        return None;
+    }
+    if text.chars().count() <= max {
+        return Some(text);
+    }
+    let mut out: String = text.chars().take(max.saturating_sub(1)).collect();
+    out.push('…');
+    Some(out)
+}
+
+fn margin_line(text: String, band: MarginBand) -> PrintLine {
+    PrintLine {
+        margin: Some(band),
+        ..PrintLine::text_line(MARGIN_L, text, false)
+    }
+}
+
+/// User header with `{revision}`, `{date}`, `{page}` tokens. When it is empty
+/// and revision colouring is on, a production-style colour/date header is
+/// supplied automatically; page numbers stay right-aligned in the same band.
+fn page_header(
+    meta: &Metadata,
+    latest: Option<&RevisionSet>,
+    show_revision: bool,
+    page: &str,
+) -> Option<String> {
+    let raw = meta.header.trim();
+    let text = if raw.is_empty() {
+        if !show_revision {
+            return None;
+        }
+        let set = latest?;
+        let name = set.name.trim();
+        if name.is_empty() {
+            format!(
+                "{} REVISION — {}",
+                set.color.label().to_uppercase(),
+                revision_date(set)
+            )
+        } else {
+            format!("{} — {}", name, revision_date(set))
+        }
+    } else {
+        expand_margin_text(raw, latest, page)
+    };
+    fit_margin_text(text, 8)
+}
+
+fn page_footer(meta: &Metadata, latest: Option<&RevisionSet>, page: &str) -> Option<String> {
+    let raw = meta.footer.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    fit_margin_text(expand_margin_text(raw, latest, page), 0)
+}
+
 /// Typeset a project into positioned lines per page (pure function of the
 /// document — unit-testable without fonts). Non-printable blocks are
 /// excluded, matching KIT's print behavior. Geometry follows the editor's
 /// Russian-locale KIT template so screen and PDF paginate identically.
 pub fn layout_pages(p: &Project, meta: &Metadata, opts: &ExportOptions) -> Vec<Vec<PrintLine>> {
+    layout_pages_with_marks_and_latest(p, meta, opts, &[], None)
+}
+
+pub fn layout_pages_with_marks(
+    p: &Project,
+    meta: &Metadata,
+    opts: &ExportOptions,
+    marks: &[Option<RevisionColor>],
+) -> Vec<Vec<PrintLine>> {
+    layout_pages_with_marks_and_latest(p, meta, opts, marks, None)
+}
+
+pub fn layout_pages_with_marks_and_latest(
+    p: &Project,
+    meta: &Metadata,
+    opts: &ExportOptions,
+    marks: &[Option<RevisionColor>],
+    latest: Option<&RevisionSet>,
+) -> Vec<Vec<PrintLine>> {
     let blocks: Vec<usize> = (0..p.blocks.len())
         .filter(|&i| p.blocks[i].element_type.is_printable())
         .collect();
     let renum: Vec<scriptcraft_core::model::ScriptBlock> =
         blocks.iter().map(|&i| p.blocks[i].clone()).collect();
-    let pages = paginate(&renum, &RUSSIAN);
+    let show_marks = opts.revision_marks || opts.revision_pages_only;
+    let revisions: Vec<Option<RevisionColor>> = if show_marks {
+        blocks
+            .iter()
+            .map(|&i| marks.get(i).copied().flatten())
+            .collect()
+    } else {
+        vec![None; blocks.len()]
+    };
+    let page_lock = PageLock::from_json(&meta.locked_pages)
+        .ok()
+        .filter(|l| !l.is_empty());
+    let page_anchors = page_lock
+        .as_ref()
+        .map(|l| l.resolve(&renum))
+        .unwrap_or_default();
+    let breaks: Vec<(usize, usize)> = page_anchors.iter().map(|a| (a.bi, a.para)).collect();
+    let pages = if page_lock.is_some() {
+        paginate_with_breaks(&renum, &RUSSIAN, &breaks)
+    } else {
+        paginate(&renum, &RUSSIAN)
+    };
+    let page_labels = if page_lock.is_some() {
+        page_labels(&pages, &page_anchors)
+    } else {
+        (1..=pages.len()).map(|n| n.to_string()).collect()
+    };
     let locked = locked_scene_labels(meta);
     let prefix = meta.scene_number_prefix.trim().to_string();
     let start: u32 = meta.scene_number_start.trim().parse().unwrap_or(1);
@@ -179,10 +330,11 @@ pub fn layout_pages(p: &Project, meta: &Metadata, opts: &ExportOptions) -> Vec<V
     let mut out = Vec::new();
     for (pi, page) in pages.iter().enumerate() {
         let mut lines: Vec<PrintLine> = Vec::new();
+        let label = page_labels.get(pi).map(String::as_str).unwrap_or("1");
         // KIT numbers script pages starting from the second one ("2."…),
         // since the title page and first script page stay unnumbered.
         if opts.page_numbers && pi + 1 >= 2 {
-            let pg = format!("{}.", pi + 1);
+            let pg = format!("{label}.");
             lines.push(PrintLine {
                 text: pg,
                 is_page_number: true,
@@ -191,8 +343,16 @@ pub fn layout_pages(p: &Project, meta: &Metadata, opts: &ExportOptions) -> Vec<V
                 ..PrintLine::blank()
             });
         }
+        let show_revision = opts.revision_marks || opts.revision_pages_only;
+        if let Some(header) = page_header(meta, latest, show_revision, label) {
+            lines.push(margin_line(header, MarginBand::Header));
+        }
+        if let Some(footer) = page_footer(meta, latest, label) {
+            lines.push(margin_line(footer, MarginBand::Footer));
+        }
         for chunk in &page.chunks {
             let b = &renum[chunk.bi];
+            let revision = revisions[chunk.bi];
             for _ in 0..chunk.top {
                 lines.push(PrintLine::blank());
             }
@@ -209,7 +369,9 @@ pub fn layout_pages(p: &Project, meta: &Metadata, opts: &ExportOptions) -> Vec<V
             };
             if chunk.contd {
                 if let Some(cue) = cue_name_for(&renum, chunk.bi) {
-                    lines.push(PrintLine::text_line(X_CUE, format!("{cue} (CONT'D)"), true));
+                    let mut line = PrintLine::text_line(X_CUE, format!("{cue} (CONT'D)"), true);
+                    line.revision = revision;
+                    lines.push(line);
                 }
             }
             // Scene number, right-aligned in the left margin so that a
@@ -245,13 +407,16 @@ pub fn layout_pages(p: &Project, meta: &Metadata, opts: &ExportOptions) -> Vec<V
             for (li, line) in wrapped.into_iter().enumerate() {
                 let mut l = PrintLine::text_line(x, line, bold);
                 l.share_row = li == 0 && number_pushed;
+                l.revision = revision;
                 lines.push(l);
             }
             if chunk.more {
-                lines.push(PrintLine {
+                let mut line = PrintLine {
                     right_aligned: true,
                     ..PrintLine::text_line(0.0, "(MORE)".to_string(), false)
-                });
+                };
+                line.revision = revision;
+                lines.push(line);
             }
         }
         out.push(lines);
@@ -264,6 +429,13 @@ pub fn layout_pages(p: &Project, meta: &Metadata, opts: &ExportOptions) -> Vec<V
 /// 20 (every other slot, empties skipped), contacts on slot 39, year on
 /// slot 57 (measured nudges below used for the last two).
 pub fn layout_title_page(meta: &Metadata) -> Vec<PrintLine> {
+    layout_title_page_with_latest(meta, None)
+}
+
+pub fn layout_title_page_with_latest(
+    meta: &Metadata,
+    latest: Option<&RevisionSet>,
+) -> Vec<PrintLine> {
     fn centered(text: String, bold: bool, underline: bool, dy_mm: f32) -> PrintLine {
         let w = text.chars().count() as f32 * CHAR_MM;
         PrintLine {
@@ -275,6 +447,8 @@ pub fn layout_title_page(meta: &Metadata) -> Vec<PrintLine> {
             underline,
             dy_mm,
             share_row: false,
+            revision: None,
+            margin: None,
         }
     }
     let mut lines: Vec<PrintLine> = Vec::new();
@@ -316,6 +490,20 @@ pub fn layout_title_page(meta: &Metadata) -> Vec<PrintLine> {
         false,
         TITLE_YEAR_DY,
     ));
+    if let Some(set) = latest {
+        while lines.len() < 60 {
+            lines.push(PrintLine::blank());
+        }
+        lines.push(centered("REVISED".to_string(), true, false, TITLE_DY));
+        let name = set.name.trim();
+        if !name.is_empty() {
+            lines.push(centered(name.to_string(), false, false, TITLE_VALUE_DY));
+        }
+        let date = revision_date(set);
+        if !date.is_empty() {
+            lines.push(centered(date, false, false, TITLE_VALUE_DY));
+        }
+    }
     lines
 }
 
@@ -374,6 +562,27 @@ pub fn to_pdf_bytes(
     opts: &ExportOptions,
     fonts: &ExportFonts<'_>,
 ) -> Result<Vec<u8>, PdfError> {
+    to_pdf_bytes_with_marks_and_latest(p, meta, opts, &[], None, fonts)
+}
+
+pub fn to_pdf_bytes_with_marks(
+    p: &Project,
+    meta: &Metadata,
+    opts: &ExportOptions,
+    marks: &[Option<RevisionColor>],
+    fonts: &ExportFonts<'_>,
+) -> Result<Vec<u8>, PdfError> {
+    to_pdf_bytes_with_marks_and_latest(p, meta, opts, marks, None, fonts)
+}
+
+pub fn to_pdf_bytes_with_marks_and_latest(
+    p: &Project,
+    meta: &Metadata,
+    opts: &ExportOptions,
+    marks: &[Option<RevisionColor>],
+    latest: Option<&RevisionSet>,
+    fonts: &ExportFonts<'_>,
+) -> Result<Vec<u8>, PdfError> {
     if p.blocks.is_empty() {
         return Err(PdfError::Empty);
     }
@@ -407,9 +616,22 @@ pub fn to_pdf_bytes(
     };
     let mut pages: Vec<Vec<PrintLine>> = Vec::new();
     if opts.title_page {
-        pages.push(layout_title_page(meta));
+        pages.push(layout_title_page_with_latest(meta, latest));
     }
-    pages.extend(layout_pages(p, meta, opts));
+    pages.extend(layout_pages_with_marks_and_latest(
+        p, meta, opts, marks, latest,
+    ));
+    if opts.revision_pages_only {
+        let skip_title = usize::from(opts.title_page);
+        pages = pages
+            .into_iter()
+            .skip(skip_title)
+            .filter(|lines| lines.iter().any(|l| l.revision.is_some()))
+            .collect();
+        if pages.is_empty() {
+            return Err(PdfError::NoRevisionPages);
+        }
+    }
     let watermark = opts
         .watermark
         .as_deref()
@@ -460,6 +682,24 @@ pub fn to_pdf_bytes(
                 y += PITCH_MM;
             }
             ops.push(Op::SetFillColor { col: black.clone() });
+            if let Some(band) = line.margin {
+                let yy = match band {
+                    MarginBand::Header => PAGE_H - PAGE_NUM_BASELINE,
+                    MarginBand::Footer => FOOTER_BASELINE_MM,
+                };
+                let (face, fb_face) = if line.bold {
+                    (&bold, &fallback_bold)
+                } else {
+                    (&regular, &fallback_regular)
+                };
+                let mut cx = line.x_mm;
+                for (use_fb, run) in split_runs(&line.text, &face.font, &fb_face.font) {
+                    let id = if use_fb { &fb_face.id } else { &face.id };
+                    show(&mut ops, id, FONT_PT, cx, yy, run);
+                    cx += run.chars().count() as f32 * CHAR_MM;
+                }
+                continue;
+            }
             if line.is_page_number {
                 let w = line.text.chars().count() as f32 * CHAR_MM;
                 let mut cx = TEXT_RIGHT - w;
@@ -476,6 +716,25 @@ pub fn to_pdf_bytes(
                 continue;
             }
             let yy = y - line.dy_mm;
+            if let Some(revision) = line.revision {
+                let (r, g, b) = revision.rgb();
+                ops.push(Op::SetFillColor {
+                    col: Color::Rgb(Rgb::new(
+                        r as f32 / 255.0,
+                        g as f32 / 255.0,
+                        b as f32 / 255.0,
+                        None,
+                    )),
+                });
+                let mut bar =
+                    PdfRect::from_wh(Pt(REVISION_BAR_W_MM * MM_TO_PT), Pt(PITCH_MM * MM_TO_PT));
+                bar.x = Pt(REVISION_BAR_X_MM * MM_TO_PT);
+                bar.y = Pt((yy + BASELINE_OFF) * MM_TO_PT);
+                ops.push(Op::DrawPolygon {
+                    polygon: bar.to_polygon(),
+                });
+                ops.push(Op::SetFillColor { col: black.clone() });
+            }
             if !line.text.is_empty() {
                 let w = line.text.chars().count() as f32 * CHAR_MM;
                 let x = if line.right_aligned {
@@ -586,7 +845,10 @@ mod tests {
             }
             assert!(rows <= RUSSIAN.lines_per_page, "page {pi} overflow");
             let share = lines.iter().filter(|l| l.share_row).count();
-            let banded = lines.iter().filter(|l| l.is_page_number).count();
+            let banded = lines
+                .iter()
+                .filter(|l| l.is_page_number || l.margin.is_some())
+                .count();
             assert_eq!(
                 rows + share + banded,
                 lines.len(),
@@ -623,6 +885,37 @@ mod tests {
         // Transition keeps the editor's left-aligned bold style.
         let tr = page.iter().find(|l| l.text == "FADE OUT:").unwrap();
         assert!(!tr.right_aligned && tr.bold);
+    }
+
+    #[test]
+    fn revision_marks_color_the_changed_blocks() {
+        let p = sample();
+        let mut marks = vec![None; p.blocks.len()];
+        marks[1] = Some(RevisionColor::Blue);
+        marks[3] = Some(RevisionColor::Pink);
+        let opts = ExportOptions {
+            revision_marks: true,
+            ..default_opts()
+        };
+        let laid = layout_pages_with_marks(&p, &Default::default(), &opts, &marks);
+        let action = laid[0]
+            .iter()
+            .find(|l| l.text == "A man walks in.")
+            .unwrap();
+        assert_eq!(action.revision, Some(RevisionColor::Blue));
+        let dialogue = laid[0]
+            .iter()
+            .find(|l| l.text.starts_with("Hello"))
+            .unwrap();
+        assert_eq!(dialogue.revision, Some(RevisionColor::Pink));
+        let heading = laid[0]
+            .iter()
+            .find(|l| l.text == "EXT. PARK - DAY")
+            .unwrap();
+        assert_eq!(heading.revision, None);
+
+        let plain = layout_pages_with_marks(&p, &Default::default(), &default_opts(), &marks);
+        assert!(plain.iter().flatten().all(|l| l.revision.is_none()));
     }
 
     #[test]
@@ -708,6 +1001,121 @@ mod tests {
         assert_eq!(lines[39].x_mm, MARGIN_L);
         assert_eq!(lines[57].text, "2026");
         assert!(lines[57].x_mm > MARGIN_L);
+    }
+
+    #[test]
+    fn header_footer_expand_revision_tokens() {
+        let p = sample();
+        let set = RevisionSet {
+            color: RevisionColor::Blue,
+            name: "Blue Revision".into(),
+            started: "21.10.2026 16:03".into(),
+            pages: 1,
+            baseline: vec![],
+        };
+        let meta = Metadata {
+            header: "{revision} DRAFT — {date}".into(),
+            footer: "Page {page} · {revision}".into(),
+            ..Default::default()
+        };
+        let opts = ExportOptions {
+            revision_marks: true,
+            ..default_opts()
+        };
+        let laid = layout_pages_with_marks_and_latest(&p, &meta, &opts, &[], Some(&set));
+        let header = laid[0]
+            .iter()
+            .find(|l| l.margin == Some(MarginBand::Header))
+            .unwrap();
+        assert_eq!(header.text, "BLUE DRAFT — 21.10.2026");
+        let footer = laid[0]
+            .iter()
+            .find(|l| l.margin == Some(MarginBand::Footer))
+            .unwrap();
+        assert_eq!(footer.text, "Page 1 · BLUE");
+        assert!(!footer.is_page_number && footer.revision.is_none());
+    }
+
+    #[test]
+    fn empty_header_gets_revision_label_only_when_marking() {
+        let p = sample();
+        let set = RevisionSet {
+            color: RevisionColor::Pink,
+            name: "Pink Revision".into(),
+            started: "22.10.2026 09:00".into(),
+            pages: 1,
+            baseline: vec![],
+        };
+        let marked = ExportOptions {
+            revision_marks: true,
+            ..default_opts()
+        };
+        let laid =
+            layout_pages_with_marks_and_latest(&p, &Default::default(), &marked, &[], Some(&set));
+        assert!(laid[0]
+            .iter()
+            .any(|l| l.text == "Pink Revision — 22.10.2026"));
+        let plain = layout_pages_with_marks_and_latest(
+            &p,
+            &Default::default(),
+            &default_opts(),
+            &[],
+            Some(&set),
+        );
+        assert!(!plain.iter().flatten().any(|l| l.margin.is_some()));
+    }
+
+    #[test]
+    fn title_page_adds_revised_fields() {
+        let set = RevisionSet {
+            color: RevisionColor::Blue,
+            name: "Blue Revision".into(),
+            started: "21.10.2026 16:03".into(),
+            pages: 342,
+            baseline: vec![],
+        };
+        let lines = layout_title_page_with_latest(&sample_meta(), Some(&set));
+        assert!(lines.len() > 60);
+        assert_eq!(lines[60].text, "REVISED");
+        assert_eq!(lines[61].text, "Blue Revision");
+        assert_eq!(lines[62].text, "21.10.2026");
+        assert!(lines[60].bold);
+    }
+
+    #[test]
+    fn page_lock_inserts_a_labels() {
+        let mut p = sample();
+        for i in 0..30 {
+            p.blocks.push(ScriptBlock::new(
+                ElementType::Action,
+                format!("Original action {i}."),
+            ));
+        }
+        let starts = crate::paginate::page_starts(&p.blocks, &RUSSIAN);
+        assert!(starts.len() >= 2, "need at least two pages");
+        let lock = PageLock::capture(&p.blocks, &starts);
+        let meta = Metadata {
+            locked_pages: lock.to_json().unwrap(),
+            ..Default::default()
+        };
+        let at = starts[1].0;
+        for i in 0..40 {
+            p.blocks.insert(
+                at,
+                ScriptBlock::new(ElementType::Action, format!("Inserted action {i}.")),
+            );
+        }
+        let laid = layout_pages(&p, &meta, &default_opts());
+        let numbers: Vec<String> = laid
+            .iter()
+            .filter_map(|page| {
+                page.iter()
+                    .find(|l| l.is_page_number)
+                    .map(|l| l.text.clone())
+            })
+            .collect();
+        assert_eq!(numbers.first().map(String::as_str), Some("1A."));
+        assert!(numbers.iter().any(|n| n == "2."), "{numbers:?}");
     }
 
     #[test]

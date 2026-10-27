@@ -1,4 +1,5 @@
 use crate::model::{ElementType, Project, ScriptBlock};
+use crate::revision::{RevisionHistory, STORAGE_KEY as REVISIONS_KEY};
 use quick_xml::events::Event;
 use quick_xml::{Reader, XmlVersion};
 use rusqlite::{params, Connection};
@@ -15,6 +16,8 @@ pub enum KitspError {
     MissingScenario,
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
+    #[error("json: {0}")]
+    Json(#[from] serde_json::Error),
 }
 
 const BLOCK_TAGS: &[&str] = &[
@@ -42,10 +45,12 @@ const LEGACY_SCENE_START_NUMBER_KEY: &str = "scene_number_start";
 /// leading `*` for "lock new scenes numbers". KIT has no such key and
 /// ignores it.
 pub const LOCKED_SCENE_NUMBERS_KEY: &str = "locked_scene_numbers";
+/// ScriptCraft extension: JSON production page lock (original page starts
+/// and A/B label anchors). KIT ignores this key.
+pub const LOCKED_PAGES_KEY: &str = "scriptcraft_locked_pages";
 /// ScriptCraft extension: inside a recovery copy, the project path the
 /// session belongs to. KIT has no such key and ignores it.
 pub const RECOVERY_ORIGIN_KEY: &str = "scriptcraft_recovery_origin";
-
 /// Open a .kitsp file read-only and load scenario id=1 + title.
 pub fn load_file(path: impl AsRef<Path>) -> Result<Project, KitspError> {
     let uri = format!("file:{}?mode=ro", path.as_ref().display());
@@ -145,6 +150,22 @@ fn replace_file(from: &std::path::Path, to: &std::path::Path) -> std::io::Result
 /// over the target, so a crash mid-save can never leave a half-written
 /// project behind.
 pub fn save_file(path: impl AsRef<Path>, p: &Project) -> Result<(), KitspError> {
+    save_file_inner(path, p, None)
+}
+
+pub fn save_file_with_revisions(
+    path: impl AsRef<Path>,
+    p: &Project,
+    revisions: &RevisionHistory,
+) -> Result<(), KitspError> {
+    save_file_inner(path, p, Some(revisions))
+}
+
+fn save_file_inner(
+    path: impl AsRef<Path>,
+    p: &Project,
+    revisions: Option<&RevisionHistory>,
+) -> Result<(), KitspError> {
     let path = path.as_ref();
     let bak = path.with_extension("kitsp.bak");
     std::fs::copy(path, &bak)?;
@@ -155,6 +176,9 @@ pub fn save_file(path: impl AsRef<Path>, p: &Project) -> Result<(), KitspError> 
         let xml = project_to_scenario_xml(p);
         let conn = Connection::open(&tmp)?;
         conn.execute("UPDATE scenario SET text=?1 WHERE id=1", params![xml])?;
+        if let Some(revisions) = revisions {
+            write_revisions(&conn, revisions)?;
+        }
         // Corkboard sync must never break the save itself.
         if let Ok(scheme) =
             conn.query_row("SELECT scheme FROM scenario WHERE id=1", params![], |r| {
@@ -199,6 +223,24 @@ pub fn write_recovery_file(
     origin: Option<&str>,
     p: &Project,
 ) -> Result<(), KitspError> {
+    write_recovery_file_inner(dst, origin, p, None)
+}
+
+pub fn write_recovery_file_with_revisions(
+    dst: impl AsRef<Path>,
+    origin: Option<&str>,
+    p: &Project,
+    revisions: &RevisionHistory,
+) -> Result<(), KitspError> {
+    write_recovery_file_inner(dst, origin, p, Some(revisions))
+}
+
+fn write_recovery_file_inner(
+    dst: impl AsRef<Path>,
+    origin: Option<&str>,
+    p: &Project,
+    revisions: Option<&RevisionHistory>,
+) -> Result<(), KitspError> {
     let dst = dst.as_ref();
     let title = if p.title.trim().is_empty() {
         "Recovered script"
@@ -214,7 +256,37 @@ pub fn write_recovery_file(
             params![RECOVERY_ORIGIN_KEY, origin],
         )?;
     }
-    save_file(dst, p)
+    save_file_inner(dst, p, revisions)
+}
+
+pub fn load_revisions(path: impl AsRef<Path>) -> Result<RevisionHistory, KitspError> {
+    let uri = format!("file:{}?mode=ro", path.as_ref().display());
+    let conn = Connection::open_with_flags(
+        uri,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+    )
+    .or_else(|_| Connection::open(path.as_ref()))?;
+    let json = get_data(&conn, REVISIONS_KEY);
+    if json.trim().is_empty() {
+        return Ok(RevisionHistory::default());
+    }
+    Ok(RevisionHistory::from_json(&json)?)
+}
+
+fn write_revisions(conn: &Connection, revisions: &RevisionHistory) -> Result<(), KitspError> {
+    if revisions.is_empty() {
+        conn.execute(
+            "DELETE FROM scenario_data WHERE data_name=?1",
+            params![REVISIONS_KEY],
+        )?;
+    } else {
+        conn.execute(
+            "INSERT INTO scenario_data (data_name, data_value) VALUES (?1, ?2)
+             ON CONFLICT(data_name) DO UPDATE SET data_value=excluded.data_value",
+            params![REVISIONS_KEY, revisions.to_json()?],
+        )?;
+    }
+    Ok(())
 }
 
 /// The original project path recorded in a recovery file, if any.
@@ -466,23 +538,84 @@ pub fn load_research(path: impl AsRef<Path>) -> Result<Vec<ResearchEntry>, Kitsp
         .map_err(KitspError::from)
 }
 
-/// Load draft versions stored inside the .kitsp (name, datetime), oldest first.
-pub fn load_versions(path: impl AsRef<Path>) -> Result<Vec<(String, String)>, KitspError> {
+/// One saved draft stored in KIT's `script_versions` table.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct KitspVersion {
+    pub name: String,
+    pub datetime: String,
+    pub script_text: String,
+}
+
+/// Load draft versions stored inside the .kitsp, oldest first.
+pub fn load_version_scripts(path: impl AsRef<Path>) -> Result<Vec<KitspVersion>, KitspError> {
     let uri = format!("file:{}?mode=ro", path.as_ref().display());
     let conn = Connection::open_with_flags(
         uri,
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,
     )
     .or_else(|_| Connection::open(path.as_ref()))?;
-    let mut stmt = match conn
-        .prepare("SELECT COALESCE(name,''), COALESCE(datetime,'') FROM script_versions ORDER BY id")
-    {
+    let mut stmt = match conn.prepare(
+        "SELECT COALESCE(name,''), COALESCE(datetime,''), COALESCE(script_text,'')
+         FROM script_versions ORDER BY id",
+    ) {
         Ok(s) => s,
         Err(_) => return Ok(Vec::new()),
     };
-    let rows = stmt.query_map(params![], |r| Ok((r.get(0)?, r.get(1)?)))?;
+    let rows = stmt.query_map(params![], |r| {
+        Ok(KitspVersion {
+            name: r.get(0)?,
+            datetime: r.get(1)?,
+            script_text: r.get(2)?,
+        })
+    })?;
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(KitspError::from)
+}
+
+/// Load draft versions stored inside the .kitsp (name, datetime), oldest first.
+pub fn load_versions(path: impl AsRef<Path>) -> Result<Vec<(String, String)>, KitspError> {
+    Ok(load_version_scripts(path)?
+        .into_iter()
+        .map(|v| (v.name, v.datetime))
+        .collect())
+}
+
+/// Import saved KIT draft versions as revision baselines. KIT stores each
+/// version as the same `<scenario>` XML used by the live script, so these are
+/// complete, recoverable snapshots. Empty/malformed versions are skipped;
+/// repeated imports are no-ops. Returns the number added.
+pub fn import_versions_as_revisions(
+    path: impl AsRef<Path>,
+    history: &mut RevisionHistory,
+) -> Result<usize, KitspError> {
+    let versions = load_version_scripts(path)?;
+    let mut imported = 0usize;
+    for version in versions {
+        if version.script_text.trim().is_empty() {
+            continue;
+        }
+        let Ok(saved) = parse_scenario(&version.script_text) else {
+            continue;
+        };
+        if saved.blocks.is_empty() {
+            continue;
+        }
+        let name = if version.name.trim().is_empty() {
+            "Imported Version".to_string()
+        } else {
+            version.name.trim().to_string()
+        };
+        if history
+            .sets
+            .iter()
+            .any(|s| s.name == name && s.started == version.datetime)
+        {
+            continue;
+        }
+        history.start(&saved.blocks, name, version.datetime, 0);
+        imported += 1;
+    }
+    Ok(imported)
 }
 
 /// Update a research entry's editable fields.
@@ -640,6 +773,7 @@ pub fn create_file(path: impl AsRef<Path>, title: &str) -> Result<Project, Kitsp
         (SCENE_NUMBERS_PREFIX_KEY, ""),
         (SCENE_START_NUMBER_KEY, "1"),
         (LOCKED_SCENE_NUMBERS_KEY, ""),
+        (LOCKED_PAGES_KEY, ""),
     ] {
         conn.execute(
             "INSERT INTO scenario_data (data_name, data_value) VALUES (?1, ?2)",
@@ -654,7 +788,7 @@ pub fn create_file(path: impl AsRef<Path>, title: &str) -> Result<Project, Kitsp
 /// extension (plain TEXT key, ignored by KIT); everything else mirrors
 /// KIT's own title page data. Scene numbering maps to KIT's
 /// `scene_numbers_prefix` / `scene_start_number` keys; `locked_scene_numbers`
-/// is a ScriptCraft extension KIT ignores.
+/// and `locked_pages` are ScriptCraft extensions KIT ignores.
 #[derive(Debug, Clone, Default)]
 pub struct Metadata {
     pub title: String,
@@ -675,6 +809,8 @@ pub struct Metadata {
     /// Comma-separated frozen scene numbers; a leading `*` marks
     /// "lock new scenes numbers" (future scenes keep their number).
     pub locked_scene_numbers: String,
+    /// JSON [`crate::page_lock::PageLock`] extension; empty when unlocked.
+    pub locked_pages: String,
 }
 
 fn get_data(conn: &Connection, key: &str) -> String {
@@ -726,6 +862,7 @@ pub fn load_metadata(path: impl AsRef<Path>) -> Result<Metadata, KitspError> {
             &[SCENE_START_NUMBER_KEY, LEGACY_SCENE_START_NUMBER_KEY],
         ),
         locked_scene_numbers: get_data(&conn, LOCKED_SCENE_NUMBERS_KEY),
+        locked_pages: get_data(&conn, LOCKED_PAGES_KEY),
     })
 }
 
@@ -757,6 +894,7 @@ pub fn save_metadata(path: impl AsRef<Path>, m: &Metadata) -> Result<(), KitspEr
         (SCENE_NUMBERS_PREFIX_KEY, &m.scene_number_prefix),
         (SCENE_START_NUMBER_KEY, &m.scene_number_start),
         (LOCKED_SCENE_NUMBERS_KEY, &m.locked_scene_numbers),
+        (LOCKED_PAGES_KEY, &m.locked_pages),
     ] {
         upsert(k, v)?;
     }

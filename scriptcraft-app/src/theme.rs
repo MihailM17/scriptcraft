@@ -10,6 +10,7 @@ use egui::{
     Align2, Color32, CornerRadius, FontId, Margin, Painter, Pos2, Rect, Response, Sense, Shadow,
     Stroke, StrokeKind, Ui,
 };
+use scriptcraft_core::revision::RevisionColor;
 use std::sync::Arc;
 
 const fn hex(c: u32) -> Color32 {
@@ -116,12 +117,47 @@ pub const KIT_LIGHT: KitColors = KitColors {
     accent_text: hex(0x1B64C4),
 };
 
+/// User-selectable theme. Persisted by name (`light` / `midnight`); the old
+/// `dark_mode` setting is still honoured as a fallback.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Theme {
+    Light,
+    #[default]
+    Midnight,
+}
+
+impl Theme {
+    pub fn label(self) -> &'static str {
+        match self {
+            Theme::Light => "Light",
+            Theme::Midnight => "Midnight",
+        }
+    }
+
+    /// Stable key used in `settings.conf`.
+    pub fn key(self) -> &'static str {
+        match self {
+            Theme::Light => "light",
+            Theme::Midnight => "midnight",
+        }
+    }
+
+    pub fn is_light(self) -> bool {
+        matches!(self, Theme::Light)
+    }
+}
+
 thread_local! {
     static KIT_PAL: std::cell::Cell<KitColors> = const { std::cell::Cell::new(KIT_DARK) };
     static KIT_LIGHT_ON: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// Active theme palette.
+pub fn revision_color(color: RevisionColor) -> Color32 {
+    let (r, g, b) = color.rgb();
+    Color32::from_rgb(r, g, b)
+}
+
 pub fn kit() -> KitColors {
     KIT_PAL.with(|p| p.get())
 }

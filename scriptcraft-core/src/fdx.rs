@@ -2,12 +2,13 @@
 //!
 //! Emits the widely supported FDX 1 shape (`FinalDraft` → `Content` →
 //! `Paragraph`/`Text`), scene numbers as the `Number` attribute on scene
-//! headings, a positional title page and a default revision set. Notes ride
-//! as `General` paragraphs (FD's unformatted element); revisions are not
-//! modeled yet — only the scaffold both sides understand is written/read.
+//! headings, a positional title page and revision colours/marks. Notes ride
+//! as `General` paragraphs (FD's unformatted element). Revision metadata is
+//! written for other tools; importing it is deferred.
 
 use crate::kitsp::Metadata;
 use crate::model::{ElementType, Project, ScriptBlock};
+use crate::revision::{RevisionColor, RevisionSet};
 use quick_xml::events::Event;
 use quick_xml::{Reader, XmlVersion};
 use thiserror::Error;
@@ -100,7 +101,13 @@ fn esc_text(s: &str) -> String {
         .replace(['\r', '\n'], " ")
 }
 
-fn push_paragraph(out: &mut String, kind: &str, number: Option<&str>, text: &str) {
+fn push_paragraph(
+    out: &mut String,
+    kind: &str,
+    number: Option<&str>,
+    revision: Option<RevisionColor>,
+    text: &str,
+) {
     out.push_str("<Paragraph Type=\"");
     out.push_str(kind);
     out.push('"');
@@ -109,9 +116,43 @@ fn push_paragraph(out: &mut String, kind: &str, number: Option<&str>, text: &str
         out.push_str(&esc_attr(n));
         out.push('"');
     }
+    if let Some(color) = revision {
+        out.push_str(" Revision=\"");
+        out.push_str(&revision_id(color).to_string());
+        out.push('"');
+    }
     out.push_str(">\n<Text>");
     out.push_str(&esc_text(text));
     out.push_str("</Text>\n</Paragraph>\n");
+}
+
+/// Stable FDX revision IDs; White (0) is Final Draft's base revision.
+fn revision_id(color: RevisionColor) -> u8 {
+    match color {
+        RevisionColor::Blue => 1,
+        RevisionColor::Pink => 2,
+        RevisionColor::Yellow => 3,
+        RevisionColor::Green => 4,
+        RevisionColor::Goldenrod => 5,
+        RevisionColor::Buff => 6,
+        RevisionColor::Salmon => 7,
+        RevisionColor::Cherry => 8,
+    }
+}
+
+fn push_revision(out: &mut String, color: RevisionColor) {
+    let name = color.label();
+    out.push_str("<Revision Color=\"");
+    out.push_str(name);
+    out.push_str("\" FullRevision=\"No\" ID=\"");
+    out.push_str(&revision_id(color).to_string());
+    out.push_str("\" Mark=\"*\" Name=\"");
+    out.push_str(name);
+    out.push_str("\" PageColor=\"");
+    out.push_str(name);
+    out.push_str("\" TextColor=\"");
+    out.push_str(name);
+    out.push_str("\" Visible=\"Yes\"/>\n");
 }
 
 fn push_title_para(out: &mut String, align: &str, text: &str) {
@@ -127,13 +168,30 @@ fn push_title_para(out: &mut String, align: &str, text: &str) {
 /// author, then one left paragraph per contact line. The draft year is not
 /// carried — FD has no single standard title-page slot for it.
 pub fn to_fdx(p: &Project, meta: &Metadata) -> String {
+    to_fdx_with_revisions(p, meta, &[])
+}
+
+pub fn to_fdx_with_revisions(
+    p: &Project,
+    meta: &Metadata,
+    marks: &[Option<RevisionColor>],
+) -> String {
+    to_fdx_with_revisions_and_latest(p, meta, marks, None)
+}
+
+pub fn to_fdx_with_revisions_and_latest(
+    p: &Project,
+    meta: &Metadata,
+    marks: &[Option<RevisionColor>],
+    latest: Option<&RevisionSet>,
+) -> String {
     let mut out = String::from(
         "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\" ?>\n\
          <FinalDraft DocumentType=\"Script\" Template=\"No\" Version=\"1\">\n\
          <Content>\n",
     );
     let mut scene_i = 0usize;
-    for b in &p.blocks {
+    for (i, b) in p.blocks.iter().enumerate() {
         let mut number = None;
         if b.element_type == ElementType::SceneHeading {
             number = Some(scene_number(meta, scene_i));
@@ -143,6 +201,7 @@ pub fn to_fdx(p: &Project, meta: &Metadata) -> String {
             &mut out,
             fdx_type(b.element_type),
             number.as_deref(),
+            marks.get(i).copied().flatten(),
             &b.text,
         );
     }
@@ -166,11 +225,26 @@ pub fn to_fdx(p: &Project, meta: &Metadata) -> String {
     {
         push_title_para(&mut out, "Left", line);
     }
+    if let Some(set) = latest {
+        push_title_para(&mut out, "Center", "Revised");
+        if !set.name.trim().is_empty() {
+            push_title_para(&mut out, "Center", set.name.trim());
+        }
+        let date = set.started.split_whitespace().next().unwrap_or("");
+        if !date.is_empty() {
+            push_title_para(&mut out, "Center", date);
+        }
+    }
+    out.push_str("</Content>\n</TitlePage>\n<Revisions>\n");
     out.push_str(
-        "</Content>\n</TitlePage>\n<Revisions>\n\
-         <Revision Color=\"White\" FullRevision=\"No\" ID=\"0\" Mark=\"\" Name=\"White\" PageColor=\"White\" TextColor=\"White\" Visible=\"Yes\"/>\n\
-         </Revisions>\n</FinalDraft>\n",
+        "<Revision Color=\"White\" FullRevision=\"No\" ID=\"0\" Mark=\"\" Name=\"White\" PageColor=\"White\" TextColor=\"White\" Visible=\"Yes\"/>\n",
     );
+    for color in RevisionColor::ALL {
+        if marks.iter().flatten().any(|c| *c == color) {
+            push_revision(&mut out, color);
+        }
+    }
+    out.push_str("</Revisions>\n</FinalDraft>\n");
     out
 }
 
@@ -483,6 +557,55 @@ mod tests {
         assert!(xml.contains("<Paragraph Alignment=\"Left\">\n<Text>mihail@example.com</Text>"));
         assert!(xml.contains("<Revisions>"));
         assert!(xml.ends_with("</FinalDraft>\n"));
+    }
+
+    #[test]
+    fn exports_revision_colors_and_star_marks() {
+        let p = sample_project();
+        let mut marks = vec![None; p.blocks.len()];
+        marks[2] = Some(RevisionColor::Blue);
+        marks[5] = Some(RevisionColor::Pink);
+        let xml = to_fdx_with_revisions(&p, &sample_meta(), &marks);
+
+        assert!(xml.contains(
+            "<Revision Color=\"Blue\" FullRevision=\"No\" ID=\"1\" Mark=\"*\" Name=\"Blue\""
+        ));
+        assert!(xml.contains(
+            "<Revision Color=\"Pink\" FullRevision=\"No\" ID=\"2\" Mark=\"*\" Name=\"Pink\""
+        ));
+        assert!(xml.contains("<Paragraph Type=\"Action\" Revision=\"1\">"));
+        assert!(xml.contains("<Paragraph Type=\"Dialogue\" Revision=\"2\">"));
+        assert!(!xml.contains("Type=\"Scene Heading\" Revision="));
+        assert!(!xml.contains("<Paragraph Type=\"Shot\" Revision="));
+
+        let (back, _) = from_fdx(&xml).expect("revisioned FDX still imports");
+        let bodies: Vec<_> = back
+            .blocks
+            .iter()
+            .map(|b| (b.element_type, b.text.as_str()))
+            .collect();
+        let want: Vec<_> = p
+            .blocks
+            .iter()
+            .map(|b| (b.element_type, b.text.as_str()))
+            .collect();
+        assert_eq!(bodies, want);
+    }
+
+    #[test]
+    fn title_page_records_latest_revision() {
+        let p = sample_project();
+        let set = RevisionSet {
+            color: RevisionColor::Blue,
+            name: "Blue Revision".into(),
+            started: "21.10.2026 16:03".into(),
+            pages: 1,
+            baseline: vec![],
+        };
+        let xml = to_fdx_with_revisions_and_latest(&p, &sample_meta(), &[], Some(&set));
+        assert!(xml.contains("<Text>Revised</Text>"));
+        assert!(xml.contains("<Text>Blue Revision</Text>"));
+        assert!(xml.contains("<Text>21.10.2026</Text>"));
     }
 
     #[test]

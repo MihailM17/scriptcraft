@@ -2,6 +2,7 @@
 //! `scriptcraft-core`, now that the exporter shares the layout engine).
 
 use scriptcraft_core::kitsp;
+use scriptcraft_core::revision::RevisionHistory;
 
 const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../fixtures/A95.kitsp");
 
@@ -50,6 +51,36 @@ fn a95_exports_valid_pdf() {
         all.contains("ПАРКИНГ"),
         "Cyrillic heading text missing from PDF (font fallback broken)"
     );
+
+    let mut revised = p.clone();
+    let mut history = RevisionHistory::default();
+    history.start(&revised.blocks, "Blue".into(), "today".into(), 0);
+    revised.blocks.last_mut().unwrap().text.push_str(" REVISED");
+    let marks = history.latest_marks(&revised.blocks).colors;
+    let full_script_pages = expected - 1;
+    let marked_opts = pdf::ExportOptions {
+        revision_marks: true,
+        ..pdf::ExportOptions::default()
+    };
+    let bytes = pdf::to_pdf_bytes_with_marks(&revised, &meta, &marked_opts, &marks, &fonts)
+        .expect("marked full script renders");
+    let marked_doc = lopdf::Document::load_mem(&bytes).expect("marked PDF must parse");
+    assert_eq!(marked_doc.get_pages().len(), expected);
+
+    let opts = pdf::ExportOptions {
+        revision_pages_only: true,
+        ..pdf::ExportOptions::default()
+    };
+    let bytes = pdf::to_pdf_bytes_with_marks(&revised, &meta, &opts, &marks, &fonts)
+        .expect("revision pages render");
+    let doc = lopdf::Document::load_mem(&bytes).expect("revision PDF must parse");
+    let marked_pages = pdf::layout_pages_with_marks(&revised, &meta, &opts, &marks)
+        .iter()
+        .filter(|page| page.iter().any(|line| line.revision.is_some()))
+        .count();
+    assert!(marked_pages > 0 && marked_pages < full_script_pages);
+    assert_eq!(doc.get_pages().len(), marked_pages);
+    assert!(!doc.extract_text(&[1]).unwrap_or_default().contains("A95"));
 }
 
 /// The editor and the PDF share one engine: for the A95 fixture, every page's

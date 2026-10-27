@@ -1,3 +1,4 @@
+use scriptcraft_core::revision::{RevisionColor, RevisionHistory};
 use scriptcraft_core::{format, kitsp};
 
 const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../fixtures/A95.kitsp");
@@ -537,6 +538,57 @@ fn a95_save_file_preserves_all_other_tables() {
     let _ = std::fs::remove_file(tmp.with_extension("kitsp.bak"));
 }
 
+/// KIT stores complete `<scenario>` snapshots in `script_versions`; those
+/// are recoverable as revision baselines. Import must be idempotent.
+#[test]
+fn kit_versions_import_as_revision_baselines() {
+    let tmp = std::env::temp_dir().join(format!(
+        "scriptcraft_test_version_import_{}.kitsp",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&tmp);
+    std::fs::copy(FIXTURE, &tmp).expect("copy fixture");
+    let saved = r#"<?xml version="1.0"?>
+<scenario version="1.0">
+<scene_heading uuid="{old-first}"><v><![CDATA[EXT. PARK - DAY]]></v></scene_heading>
+<action><v><![CDATA[A man walks.]]></v></action>
+</scenario>"#;
+    {
+        let conn = rusqlite::Connection::open(&tmp).unwrap();
+        conn.execute(
+            "INSERT INTO script_versions
+             (fk_script_id, username, datetime, color, name, description, script_text)
+             VALUES (1, 'test', '2026-10-04 20:22:31:796', '', 'Imported Draft', '', ?1)",
+            rusqlite::params![saved],
+        )
+        .unwrap();
+    }
+    let mut history = RevisionHistory::default();
+    let imported =
+        kitsp::import_versions_as_revisions(&tmp, &mut history).expect("import versions");
+    assert_eq!(imported, 1);
+    let set = history.latest().expect("one revision");
+    assert_eq!(set.name, "Imported Draft");
+    assert_eq!(set.started, "2026-10-04 20:22:31:796");
+    assert_eq!(set.baseline.len(), 2);
+    assert_eq!(set.baseline[0].kit_uuid.as_deref(), Some("{old-first}"));
+    assert_eq!(
+        kitsp::import_versions_as_revisions(&tmp, &mut history).unwrap(),
+        0,
+        "re-import must not duplicate a version"
+    );
+
+    let p = kitsp::load_file(&tmp).expect("current script");
+    let marks = history.marks(&p.blocks);
+    assert!(
+        marks.changed > 0,
+        "the saved draft differs from the fixture"
+    );
+
+    let _ = std::fs::remove_file(&tmp);
+    let _ = std::fs::remove_file(tmp.with_extension("kitsp.bak"));
+}
+
 #[test]
 fn a95_fdx_round_trip() {
     let p = kitsp::load_file(FIXTURE).expect("fixture must load");
@@ -562,4 +614,50 @@ fn a95_fdx_round_trip() {
     assert_eq!(qm.contacts, meta.contacts.trim());
     // Exporting the imported project reproduces the same XML byte-for-byte.
     assert_eq!(scriptcraft_core::fdx::to_fdx(&q, &qm), xml);
+}
+
+#[test]
+fn revisions_round_trip_and_survive_normal_save() {
+    let tmp = std::env::temp_dir().join(format!(
+        "scriptcraft_test_revisions_{}.kitsp",
+        std::process::id()
+    ));
+    let p = kitsp::create_file(&tmp, "Revision test").expect("create");
+    let mut history = RevisionHistory::default();
+    assert_eq!(
+        history.start(
+            &p.blocks,
+            "Blue Revision".into(),
+            "21.10.2026 10:00".into(),
+            0,
+        ),
+        RevisionColor::Blue
+    );
+    kitsp::save_file_with_revisions(&tmp, &p, &history).expect("save revisions");
+
+    let loaded = kitsp::load_revisions(&tmp).expect("load revisions");
+    assert_eq!(loaded, history);
+    assert_eq!(loaded.latest().unwrap().name, "Blue Revision");
+
+    let reloaded = kitsp::load_file(&tmp).expect("reload project");
+    kitsp::save_file(&tmp, &reloaded).expect("normal save");
+    assert_eq!(
+        kitsp::load_revisions(&tmp).expect("revisions survive save"),
+        history
+    );
+
+    let rec = std::env::temp_dir().join(format!(
+        "scriptcraft_test_revisions_recovery_{}.kitsp",
+        std::process::id()
+    ));
+    kitsp::write_recovery_file_with_revisions(&rec, None, &p, &history)
+        .expect("write recovery with revisions");
+    assert_eq!(
+        kitsp::load_revisions(&rec).expect("recovery revisions"),
+        history
+    );
+
+    let _ = std::fs::remove_file(&tmp);
+    let _ = std::fs::remove_file(tmp.with_extension("kitsp.bak"));
+    let _ = std::fs::remove_file(&rec);
 }

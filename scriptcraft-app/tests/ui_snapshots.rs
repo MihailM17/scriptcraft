@@ -178,3 +178,40 @@ fn snap_12_script_selection() {
     h.run();
     h.snapshot("12_script_selection");
 }
+
+#[test]
+fn snap_13_revision_marks() {
+    let mut h = harness(SideTab::Script, None);
+    h.run();
+    let page = h.state().editor2_page_rects()[0];
+    let pos = egui::pos2(page.left() + 120.0, page.top() + 80.0);
+    h.input_mut().events.push(egui::Event::PointerMoved(pos));
+    h.input_mut().events.push(egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: egui::Modifiers::NONE,
+    });
+    h.run();
+    h.input_mut().events.push(egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: egui::Modifiers::NONE,
+    });
+    h.run();
+
+    let bi = h.state().find_first_heading_block().expect("heading");
+    h.state_mut().start_revision();
+    h.state_mut().focus_block_at(bi, 0);
+    h.run_steps(2);
+    h.input_mut().events.push(egui::Event::Text("REV ".into()));
+    h.run();
+
+    h.state_mut().start_revision();
+    h.state_mut().focus_block_at(bi + 1, 0);
+    h.run_steps(2);
+    h.input_mut().events.push(egui::Event::Text("REV ".into()));
+    h.run();
+    h.snapshot("13_revision_marks");
+}

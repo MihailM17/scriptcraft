@@ -19,6 +19,7 @@
 use crate::wrap;
 use scriptcraft_core::editing::TemplateMetrics;
 use scriptcraft_core::model::{ElementType, ScriptBlock};
+use scriptcraft_core::page_lock::ResolvedAnchor;
 
 /// One rendered slice of a block: paragraphs `[start..end]`.
 /// `more` marks a non-final chunk ((MORE) follows it);
@@ -116,9 +117,91 @@ pub fn paginate_lines(blocks: &[ScriptBlock], lines_per_page: usize) -> Vec<Page
 /// Dialogue/Lyrics blocks at paragraph boundaries with (MORE)/(CONT'D)
 /// markers. Anchors never strand at page bottoms.
 pub fn paginate(blocks: &[ScriptBlock], m: &TemplateMetrics) -> Vec<Page> {
+    paginate_with_breaks(blocks, m, &[])
+}
+
+/// Like [`paginate`], but force a fresh page before each
+/// `(block index, paragraph offset)` in `breaks`. Breaks already at a page
+/// start are no-ops (they never create blank pages).
+pub fn paginate_with_breaks(
+    blocks: &[ScriptBlock],
+    m: &TemplateMetrics,
+    breaks: &[(usize, usize)],
+) -> Vec<Page> {
     let mut pager = Pager::new(blocks, m);
+    pager.breaks = breaks.to_vec();
     while pager.step() {}
     pager.finish()
+}
+
+/// Page starts as `(block index, paragraph offset)`; used to capture locks.
+pub fn page_starts(blocks: &[ScriptBlock], m: &TemplateMetrics) -> Vec<(usize, usize)> {
+    paginate(blocks, m)
+        .iter()
+        .filter_map(|p| p.chunks.first().map(|c| (c.bi, c.start)))
+        .collect()
+}
+
+/// Labels for physical pages under a page lock. Anchors that fell on a page
+/// keep their original number; pages inserted before one get suffixes
+/// (`42A`, `42B`, …); pages after the last anchor continue numbering.
+pub fn page_labels(pages: &[Page], anchors: &[ResolvedAnchor]) -> Vec<String> {
+    let mut labels = vec![String::new(); pages.len()];
+    let mut assigned: Vec<(usize, u32)> = Vec::new();
+    for a in anchors {
+        let Some(pi) = page_of(pages, a.bi, a.para) else {
+            continue;
+        };
+        if labels[pi].is_empty() {
+            labels[pi] = a.page.to_string();
+            assigned.push((pi, a.page));
+        }
+    }
+    if assigned.is_empty() {
+        return (1..=pages.len()).map(|n| n.to_string()).collect();
+    }
+    let (first_pi, first_base) = assigned[0];
+    for (pi, label) in labels.iter_mut().enumerate().take(first_pi) {
+        *label = format!("{first_base}{}", suffix(pi));
+    }
+    let mut prev_pi = first_pi;
+    let mut prev_base = first_base;
+    for &(pi, base) in assigned.iter().skip(1) {
+        if pi <= prev_pi {
+            continue;
+        }
+        for k in 0..(pi - prev_pi - 1) {
+            labels[prev_pi + 1 + k] = format!("{prev_base}{}", suffix(k));
+        }
+        labels[pi] = base.to_string();
+        prev_pi = pi;
+        prev_base = base;
+    }
+    for k in 1..(pages.len() - prev_pi) {
+        labels[prev_pi + k] = (prev_base as usize + k).to_string();
+    }
+    labels
+}
+
+fn page_of(pages: &[Page], bi: usize, para: usize) -> Option<usize> {
+    pages.iter().position(|p| {
+        p.chunks
+            .iter()
+            .any(|c| c.bi == bi && c.start <= para && para < c.end)
+    })
+}
+
+/// A, B, … Z, AA, AB, …
+fn suffix(mut n: usize) -> String {
+    let mut s = String::new();
+    loop {
+        s.insert(0, (b'A' + (n % 26) as u8) as char);
+        if n < 26 {
+            break;
+        }
+        n = n / 26 - 1;
+    }
+    s
 }
 
 /// Stepwise pagination: `step` places one chunk (possibly after starting a
@@ -135,6 +218,9 @@ pub(crate) struct Pager<'a> {
     first_chunk: bool,
     /// Cached paragraph row counts for `blocks[bi]`.
     rows: Vec<usize>,
+    /// Forced page starts `(block index, paragraph offset)`.
+    breaks: Vec<(usize, usize)>,
+    break_i: usize,
 }
 
 impl<'a> Pager<'a> {
@@ -148,6 +234,8 @@ impl<'a> Pager<'a> {
             start: 0,
             first_chunk: true,
             rows: Vec::new(),
+            breaks: Vec::new(),
+            break_i: 0,
         }
     }
 
@@ -192,6 +280,17 @@ impl<'a> Pager<'a> {
         let Some(b) = self.blocks.get(self.bi) else {
             return false;
         };
+        while self.break_i < self.breaks.len() && self.breaks[self.break_i] < (self.bi, self.start)
+        {
+            self.break_i += 1;
+        }
+        if self.break_i < self.breaks.len() && self.breaks[self.break_i] == (self.bi, self.start) {
+            self.break_i += 1;
+            if !self.page_empty() {
+                self.pages.push(Page::default());
+                self.used = 0;
+            }
+        }
         let t = b.element_type;
         if self.rows.is_empty() || self.start == 0 && self.first_chunk {
             let cpl = self.m.col_chars(t);
@@ -337,5 +436,104 @@ impl<'a> Pager<'a> {
         } else {
             self.first_chunk = false;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use scriptcraft_core::model::ScriptBlock;
+
+    fn blocks(n: usize) -> Vec<ScriptBlock> {
+        (0..n)
+            .map(|i| ScriptBlock::new(ElementType::Action, format!("Paragraph {i}.")))
+            .collect()
+    }
+
+    #[test]
+    fn forced_break_starts_page_at_anchor() {
+        let b = blocks(12);
+        let m = TemplateMetrics {
+            lines_per_page: 100,
+            ..scriptcraft_core::editing::RUSSIAN
+        };
+        let plain = paginate(&b, &m);
+        assert_eq!(plain.len(), 1);
+        let pages = paginate_with_breaks(&b, &m, &[(6, 0)]);
+        assert_eq!(pages.len(), 2);
+        assert_eq!(pages[1].chunks[0].bi, 6);
+    }
+
+    #[test]
+    fn break_at_existing_page_start_adds_no_blank_page() {
+        let b = blocks(20);
+        let m = TemplateMetrics {
+            lines_per_page: 8,
+            ..scriptcraft_core::editing::RUSSIAN
+        };
+        let plain = paginate(&b, &m);
+        let second = plain[1].chunks[0].bi;
+        let locked = paginate_with_breaks(&b, &m, &[(second, 0)]);
+        assert_eq!(locked, plain);
+    }
+
+    #[test]
+    fn page_starts_match_captured_chunks() {
+        let b = blocks(30);
+        let m = TemplateMetrics {
+            lines_per_page: 6,
+            ..scriptcraft_core::editing::RUSSIAN
+        };
+        let pages = paginate(&b, &m);
+        let starts = page_starts(&b, &m);
+        assert_eq!(starts.len(), pages.len());
+        for (start, page) in starts.iter().zip(&pages) {
+            assert_eq!(page.chunks[0].bi, start.0);
+        }
+    }
+
+    #[test]
+    fn labels_insert_a_b_after_locked_pages() {
+        let b = blocks(30);
+        let m = TemplateMetrics {
+            lines_per_page: 4,
+            ..scriptcraft_core::editing::RUSSIAN
+        };
+        let pages = paginate(&b, &m);
+        assert!(pages.len() >= 4);
+        let anchors = vec![
+            ResolvedAnchor {
+                bi: 0,
+                para: 0,
+                page: 1,
+            },
+            ResolvedAnchor {
+                bi: pages[1].chunks[0].bi,
+                para: 0,
+                page: 2,
+            },
+            ResolvedAnchor {
+                bi: pages[3].chunks[0].bi,
+                para: 0,
+                page: 3,
+            },
+        ];
+        let labels = page_labels(&pages, &anchors);
+        assert_eq!(labels[0], "1");
+        assert_eq!(labels[1], "2");
+        assert_eq!(labels[2], "2A");
+        assert_eq!(labels[3], "3");
+        if pages.len() > 4 {
+            assert_eq!(labels[4], "4");
+        }
+    }
+
+    #[test]
+    fn suffix_rolls_over() {
+        assert_eq!(suffix(0), "A");
+        assert_eq!(suffix(1), "B");
+        assert_eq!(suffix(25), "Z");
+        assert_eq!(suffix(26), "AA");
+        assert_eq!(suffix(27), "AB");
     }
 }

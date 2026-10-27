@@ -15,6 +15,7 @@ use crate::paginate;
 use crate::wrap;
 use scriptcraft_core::editing::{cue_name_for, TemplateMetrics};
 use scriptcraft_core::model::{ElementType, ScriptBlock};
+use scriptcraft_core::page_lock::PageLock;
 
 /// Millimetres per character cell (0.6 em at 12 pt).
 pub const MM_PER_CELL: f32 = 2.54;
@@ -96,7 +97,8 @@ pub struct PlacedLine {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PageLayout {
     pub lines: Vec<PlacedLine>,
-    pub number: Option<u32>,
+    /// Printed page label (`42`, `42A`); `None` on the unnumbered first page.
+    pub number: Option<String>,
 }
 
 /// A whole document, pages in order.
@@ -114,13 +116,42 @@ pub fn layout(
     geometry: &TemplateGeometry,
     scene_labels: &[String],
 ) -> DocLayout {
-    let pages = paginate::paginate(blocks, m);
+    layout_with_page_lock(blocks, m, geometry, scene_labels, None)
+}
+
+/// [`layout`] with production page locks. Anchors force the original page
+/// starts; pages inserted after a locked page are labelled `42A`, `42B`, ….
+pub fn layout_with_page_lock(
+    blocks: &[ScriptBlock],
+    m: &TemplateMetrics,
+    geometry: &TemplateGeometry,
+    scene_labels: &[String],
+    page_lock: Option<&PageLock>,
+) -> DocLayout {
+    let lock = page_lock.filter(|l| !l.is_empty());
+    let anchors = lock.map(|l| l.resolve(blocks)).unwrap_or_default();
+    let breaks: Vec<(usize, usize)> = anchors.iter().map(|a| (a.bi, a.para)).collect();
+    let pages = if lock.is_some() {
+        paginate::paginate_with_breaks(blocks, m, &breaks)
+    } else {
+        paginate::paginate(blocks, m)
+    };
+    let labels = if lock.is_some() {
+        paginate::page_labels(&pages, &anchors)
+    } else {
+        (1..=pages.len()).map(|n| n.to_string()).collect()
+    };
     let heading_ordinals = heading_ordinals(blocks);
     let mut out: Vec<PageLayout> = Vec::with_capacity(pages.len());
     for (pi, page) in pages.iter().enumerate() {
+        let label = if pi > 0 {
+            labels.get(pi).map(String::as_str)
+        } else {
+            None
+        };
         out.push(layout_page(
             page,
-            pi,
+            label,
             blocks,
             m,
             geometry,
@@ -207,9 +238,14 @@ pub fn relayout_from(
         for c in &mut page.chunks {
             c.bi += bi0;
         }
+        let label = if p0 + i > 0 {
+            Some((p0 + i + 1).to_string())
+        } else {
+            None
+        };
         let placed = layout_page(
             &page,
-            p0 + i,
+            label.as_deref(),
             blocks,
             m,
             geometry,
@@ -257,7 +293,7 @@ pub fn relayout_from(
 
 fn layout_page(
     page: &paginate::Page,
-    pi: usize,
+    label: Option<&str>,
     blocks: &[ScriptBlock],
     m: &TemplateMetrics,
     geometry: &TemplateGeometry,
@@ -346,7 +382,7 @@ fn layout_page(
     }
     PageLayout {
         lines,
-        number: if pi > 0 { Some(pi as u32 + 1) } else { None },
+        number: label.map(str::to_string),
     }
 }
 

@@ -1,6 +1,6 @@
 //! End-to-end interaction tests (kittest): simulated clicks and keystrokes.
 
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
 use scriptcraft_app::app::{self, ScriptCraftApp, SideTab};
 
@@ -283,27 +283,85 @@ fn recovery_bar_restores_and_discards() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// Settings ▸ Use Dark Theme switches the whole palette to the light theme.
+/// Settings ▸ Theme switches the whole palette between Midnight and Light.
 #[test]
-fn theme_toggle_switches_palette() {
+fn theme_dropdown_switches_palette() {
     let mut h = harness(SideTab::Settings);
     h.run();
-    assert!(h.ctx.style().visuals.dark_mode, "app starts in dark theme");
+    assert!(
+        h.ctx.style().visuals.dark_mode,
+        "app starts in the Midnight theme"
+    );
 
-    h.get_by_label("Use Dark Theme").click();
+    let theme_combo = h
+        .get_all_by_role(egui::accesskit::Role::ComboBox)
+        .find(|n| !n.accesskit_node().is_disabled())
+        .expect("theme chooser should be an enabled combo box");
+    theme_combo.click();
     h.run();
-    h.run();
+    h.get_by_label("Light").click();
+    h.run_steps(2);
 
     let v = &h.ctx.style().visuals;
     assert!(
         !v.dark_mode,
-        "unchecking Use Dark Theme should switch egui Visuals to light"
+        "choosing Light should switch egui Visuals to light"
     );
     assert_eq!(
         v.panel_fill,
         egui::Color32::from_rgb(0xF8, 0xF9, 0xFB),
         "panel fill must come from the KIT light palette"
     );
+
+    h.get_all_by_role(egui::accesskit::Role::ComboBox)
+        .find(|n| !n.accesskit_node().is_disabled())
+        .expect("theme chooser should still be enabled")
+        .click();
+    h.run();
+    h.get_by_label("Midnight").click();
+    h.run_steps(2);
+    assert!(
+        h.ctx.style().visuals.dark_mode,
+        "choosing Midnight should restore the dark palette"
+    );
+}
+
+/// Cmd/Ctrl+1…0 retypes every block covered by the editor selection.
+#[test]
+fn format_shortcuts_apply_to_selection() {
+    use scriptcraft_core::model::ElementType;
+
+    let mut h = focused_harness();
+    let first = h
+        .state()
+        .find_first_cue_block()
+        .expect("A95 should contain at least one character cue");
+    let second = first + 1;
+    assert!(
+        second < h.state().block_count(),
+        "cue must have a next block"
+    );
+
+    h.state_mut()
+        .editor2_set_selection((first, 0, 0), (second, 0, 0));
+    h.run();
+
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Num1);
+    h.run();
+
+    for bi in [first, second] {
+        assert_eq!(
+            h.state().block_element_type(bi),
+            Some(ElementType::SceneHeading),
+            "Cmd+1 should turn block {bi} into a scene heading"
+        );
+        let text = h.state().block_text(bi).unwrap_or_default();
+        assert_eq!(
+            text,
+            text.to_uppercase(),
+            "scene headings are uppercased on conversion"
+        );
+    }
 }
 
 /// The KIT-style popup rows are painted, but carry accesskit labels: opening
@@ -601,6 +659,26 @@ fn start_view_removes_recent_projects() {
     );
 }
 
+/// Start ▸ Open Projects Folder reveals the folder of the latest project.
+#[test]
+fn projects_folder_follows_latest_project() {
+    let mut h = harness(SideTab::Start);
+    let dir = std::env::temp_dir().join(format!("scriptcraft-projects-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("Sample.kitsp");
+    std::fs::write(&path, b"").unwrap();
+    h.state_mut()
+        .pin_recent(vec![(path.to_string_lossy().into_owned(), String::new())]);
+
+    assert_eq!(
+        h.state().projects_folder_for_test(),
+        dir.to_string_lossy().as_ref()
+    );
+
+    std::fs::remove_file(&path).unwrap();
+    std::fs::remove_dir(&dir).unwrap();
+}
+
 /// Typing into a scene heading forces caps, and once the " - " separator is
 /// typed the dropdown offers the standard times of day.
 #[test]
@@ -761,4 +839,213 @@ fn quit_prompts_when_dirty() {
     h.run();
     assert!(!h.state().save_prompt_open());
     assert!(h.state().is_dirty());
+}
+
+/// Revision marks follow edits; starting a new colour re-baselines so only
+/// later edits take the new colour.
+#[test]
+fn revision_marks_track_edits_and_override_colors() {
+    use scriptcraft_core::revision::RevisionColor;
+
+    let mut h = focused_harness();
+    let bi = h
+        .state()
+        .find_first_heading_block()
+        .expect("A95 should contain a scene heading");
+
+    h.state_mut().start_revision();
+    h.run();
+    assert_eq!(h.state().latest_revision_color(), Some(RevisionColor::Blue));
+    assert!(h.state().latest_revision_pages().unwrap_or(0) > 0);
+
+    h.state_mut().focus_block_at(bi, 0);
+    h.run_steps(2);
+    h.input_mut().events.push(egui::Event::Text("REV ".into()));
+    h.run();
+    assert_eq!(
+        h.state().revision_marks_for_test().get(bi),
+        Some(&Some(RevisionColor::Blue))
+    );
+
+    h.state_mut().start_revision();
+    h.run();
+    assert_eq!(h.state().latest_revision_color(), Some(RevisionColor::Pink));
+
+    let bj = bi + 1;
+    h.state_mut().focus_block_at(bj, 0);
+    h.run_steps(2);
+    h.input_mut().events.push(egui::Event::Text("X".into()));
+    h.run();
+    assert_eq!(
+        h.state().revision_marks_for_test().get(bi),
+        Some(&Some(RevisionColor::Blue))
+    );
+    assert_eq!(
+        h.state().revision_marks_for_test().get(bj),
+        Some(&Some(RevisionColor::Pink))
+    );
+
+    h.state_mut().set_current_revision_only(true);
+    h.run();
+    assert!(h.state().current_revision_only());
+    assert_eq!(h.state().revision_marks_for_test().get(bi), Some(&None));
+    assert_eq!(
+        h.state().revision_marks_for_test().get(bj),
+        Some(&Some(RevisionColor::Pink))
+    );
+
+    h.state_mut().set_current_revision_only(false);
+    h.run();
+    assert_eq!(
+        h.state().revision_marks_for_test().get(bi),
+        Some(&Some(RevisionColor::Blue))
+    );
+}
+
+/// The Menu popup offers the next revision colour and starts it.
+#[test]
+fn revision_menu_starts_next_color() {
+    use scriptcraft_core::revision::RevisionColor;
+
+    let mut h = harness(SideTab::Script);
+    h.run();
+    h.get_by_label("Menu").click();
+    h.run();
+    assert!(
+        h.query_by_label("Start Blue Revision").is_some(),
+        "first revision must be offered as Blue"
+    );
+    h.get_by_label("Start Blue Revision").click();
+    h.run();
+    assert_eq!(h.state().latest_revision_color(), Some(RevisionColor::Blue));
+
+    h.get_by_label("Menu").click();
+    h.run();
+    assert!(
+        h.query_by_label("Start Pink Revision").is_some(),
+        "the next revision must advance to Pink"
+    );
+}
+
+/// The revision-history window lists saved sets and controls the filter.
+#[test]
+fn revision_history_window_lists_sets_and_toggles_mode() {
+    let mut h = harness(SideTab::Script);
+    h.run();
+    h.state_mut().start_revision();
+    h.run();
+
+    h.get_by_label("Menu").click();
+    h.run();
+    h.get_by_label("Revision History…").click();
+    h.run();
+    assert!(h.query_by_label("Revision History").is_some());
+    assert!(h.query_by_label("Blue Revision").is_some());
+    assert!(h.query_by_label("current").is_some());
+
+    h.get_by_label("Show current revision only").click();
+    h.run();
+    assert!(h.state().current_revision_only());
+}
+
+/// Page locks capture the current starts, survive Save/reopen, and unlock.
+#[test]
+fn page_locks_capture_persist_and_unlock() {
+    let fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/../fixtures/A95.kitsp");
+    let dir = std::env::temp_dir().join(format!("scriptcraft-pagelock-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("PageLock.kitsp");
+    std::fs::copy(fixture, &path).unwrap();
+    let path_str = path.to_string_lossy().into_owned();
+
+    let mut h = harness(SideTab::Script);
+    h.run();
+    h.state_mut().open_path(&path_str);
+    h.run();
+    h.state_mut().lock_pages_for_test();
+    h.run();
+    let lock = h.state().page_lock_for_test().expect("pages locked");
+    assert!(lock.pages >= 2, "A95 spans at least two pages");
+    let page_count = lock.pages;
+    let labels = h.state().page_labels_for_test();
+    assert_eq!(labels.first(), Some(&None));
+    assert_eq!(labels.get(1), Some(&Some("2".to_string())));
+
+    h.get_by_label("Menu").click();
+    h.run();
+    h.get_by_label("Save").click();
+    h.run();
+    assert!(!h.state().is_dirty());
+
+    let mut reopened = harness(SideTab::Script);
+    reopened.run();
+    reopened.state_mut().open_path(&path_str);
+    reopened.run();
+    let lock = reopened
+        .state()
+        .page_lock_for_test()
+        .expect("lock persisted");
+    assert_eq!(lock.pages, page_count);
+    assert!(!lock.anchors.is_empty());
+    assert_eq!(
+        reopened.state().page_labels_for_test().get(1),
+        Some(&Some("2".to_string()))
+    );
+
+    reopened.state_mut().unlock_pages_for_test();
+    assert!(reopened.state().page_lock_for_test().is_none());
+    assert_eq!(
+        reopened.state().page_labels_for_test().get(1),
+        Some(&Some("2".to_string()))
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Revision baselines and colours survive Save and reopening the .kitsp.
+#[test]
+fn revisions_persist_across_save_and_reopen() {
+    use scriptcraft_core::revision::RevisionColor;
+
+    let fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/../fixtures/A95.kitsp");
+    let dir = std::env::temp_dir().join(format!("scriptcraft-revisions-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("Revisions.kitsp");
+    std::fs::copy(fixture, &path).unwrap();
+    let path_str = path.to_string_lossy().into_owned();
+
+    let mut h = harness(SideTab::Script);
+    h.run();
+    h.state_mut().open_path(&path_str);
+    h.run();
+    click_editor2_page(&mut h);
+
+    let bi = h.state().find_first_heading_block().expect("heading");
+    h.state_mut().start_revision();
+    h.state_mut().focus_block_at(bi, 0);
+    h.run_steps(2);
+    h.input_mut().events.push(egui::Event::Text("REV ".into()));
+    h.run();
+    assert!(h.state().is_dirty());
+
+    h.get_by_label("Menu").click();
+    h.run();
+    h.get_by_label("Save").click();
+    h.run();
+    assert!(!h.state().is_dirty(), "menu Save must write the project");
+
+    let mut reopened = harness(SideTab::Script);
+    reopened.run();
+    reopened.state_mut().open_path(&path_str);
+    reopened.run();
+    assert_eq!(
+        reopened.state().latest_revision_color(),
+        Some(RevisionColor::Blue)
+    );
+    assert_eq!(
+        reopened.state().revision_marks_for_test().get(bi),
+        Some(&Some(RevisionColor::Blue))
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
 }
