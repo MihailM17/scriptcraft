@@ -8,18 +8,24 @@ production revisions. Open KIT projects, exchange Final Draft files, lock
 pages, issue coloured revisions, and export page-exact PDFs — offline, on
 macOS, Windows and Linux.
 
-> **Status — v0.7 revision workflow, v0.8 M1.** The current tree implements
+> **Status — v0.7 revision workflow, v0.8 M2.** The current tree implements
 > revision sets, coloured margin marks, revision pages, page locks, `42A`/`42B`
 > numbering, KIT saved-version import, and revision metadata in PDF and FDX.
 > v0.8 has started: block and scene identity survive save/reopen and external
-> KIT edits, and the core now has a deterministic draft-diff engine.
+> KIT edits, the core has a deterministic draft-diff engine, and a read-only
+> compare workspace shows any revision against the current draft (or another
+> revision) with unified/side-by-side rows, filters and jump-to-change.
 >
-> **Next — v0.8 revision-complete.** The compare workspace and restore are the
-> next milestones, followed by omitted scenes, dual dialogue, a title-page
-> editor, and a revision summary. See
-> [`docs/v0.8-plan.md`](docs/v0.8-plan.md).
+> **Next — v0.8 revision-complete.** Restore-as-copy is next, followed by
+> omitted scenes, dual dialogue, a title-page editor, and a revision summary.
+> See [`docs/v0.8-plan.md`](docs/v0.8-plan.md).
 
 ![ScriptCraft editor](scriptcraft-app/tests/snapshots/01_script_top.png)
+
+*Compare a revision baseline with the live draft, filter the changes and jump
+straight to the block that needs work.*
+
+![ScriptCraft compare workspace](scriptcraft-app/tests/snapshots/14_compare_drafts.png)
 
 ## Why revision-first
 

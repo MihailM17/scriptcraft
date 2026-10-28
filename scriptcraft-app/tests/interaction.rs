@@ -1049,3 +1049,244 @@ fn revisions_persist_across_save_and_reopen() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The compare workspace opens from the menu, lists changes, filters them,
+/// navigates with keyboard, jumps to the editor, and closes without mutating
+/// the project.
+#[test]
+fn compare_workspace_open_filter_navigate_jump_close() {
+    use scriptcraft_app::app::{ChangeFilter, CompareView};
+
+    let mut h = harness(SideTab::Script);
+    h.run();
+
+    // Start a revision so there's something to compare against.
+    h.state_mut().start_revision();
+    h.run();
+
+    // Make an edit to the current draft so the diff has changes.
+    let bi = h
+        .state()
+        .find_first_heading_block()
+        .expect("A95 should contain a scene heading");
+    let original = h.state().block_text(bi).unwrap();
+    let edited = format!("{original} REV");
+    h.state_mut().set_block_text_for_test(bi, &edited);
+    let second = bi + 1;
+    assert!(
+        second < h.state().block_count(),
+        "heading must have a following block"
+    );
+    let original_second = h.state().block_text(second).unwrap();
+    h.state_mut()
+        .set_block_text_for_test(second, &format!("{original_second} REV"));
+    h.run();
+    // Verify the edit was applied.
+    let after_edit = h.state().block_text(bi).unwrap();
+    assert_ne!(after_edit, original, "edit must change the block text");
+    assert!(after_edit.ends_with("REV"), "edit must append REV");
+    assert!(h.state().is_dirty());
+
+    // Open compare workspace via Menu ▸ Compare Drafts…
+    h.get_by_label("Menu").click();
+    h.run();
+    h.get_by_label("Compare Drafts…").click();
+    h.run();
+    // Extra frame to ensure compare workspace renders and computes diff.
+    h.run();
+
+    // Verify the compare workspace is open.
+    assert!(h.state().compare_open_for_test());
+    assert!(h.query_by_label("Compare Drafts").is_some());
+    assert!(h.query_by_label("Close").is_some());
+
+    // Verify the change list shows changes.
+    let counts = h
+        .state()
+        .compare_counts_for_test()
+        .expect("diff must have counts");
+    // The edit to a scene heading should appear as a Changed block.
+    assert!(
+        counts.2 > 0,
+        "at least one changed block expected, got {:?}",
+        counts
+    ); // changed > 0
+
+    // Verify default filter is "All" and view is "Unified".
+    assert_eq!(h.state().compare_filter_for_test(), Some(ChangeFilter::All));
+    assert_eq!(
+        h.state().compare_view_for_test(),
+        Some(CompareView::Unified)
+    );
+
+    // Test filter cycling: click Added, Removed, Changed, All. Labels carry
+    // counts, so build them from the live diff.
+    let (added, removed, changed) = counts;
+    for (name, count) in [
+        ("Added", added),
+        ("Removed", removed),
+        ("Changed", changed),
+        ("All", added + removed + changed),
+    ] {
+        let label = format!("{name} {count}");
+        h.get_by_label(&label).click();
+        h.run();
+    }
+    assert_eq!(h.state().compare_filter_for_test(), Some(ChangeFilter::All));
+
+    // Test keyboard navigation: J/ArrowDown for next, K/ArrowUp for previous.
+    let before_step = h.state().compare_selected_for_test();
+    h.key_press(egui::Key::J);
+    h.run();
+    let after_j = h.state().compare_selected_for_test();
+    assert_ne!(before_step, after_j, "J must advance selection");
+
+    h.key_press(egui::Key::K);
+    h.run();
+    let after_k = h.state().compare_selected_for_test();
+    assert_eq!(after_k, before_step, "K must go back to previous");
+
+    // Test arrow keys also work.
+    h.key_press(egui::Key::ArrowDown);
+    h.run();
+    let after_arrow = h.state().compare_selected_for_test();
+    assert_ne!(after_arrow, after_k, "ArrowDown must advance selection");
+
+    h.key_press(egui::Key::ArrowUp);
+    h.run();
+    let after_arrow_up = h.state().compare_selected_for_test();
+    assert_eq!(after_arrow_up, after_k, "ArrowUp must go back");
+
+    // Test V toggles view.
+    assert_eq!(
+        h.state().compare_view_for_test(),
+        Some(CompareView::Unified)
+    );
+    h.key_press(egui::Key::V);
+    h.run();
+    assert_eq!(
+        h.state().compare_view_for_test(),
+        Some(CompareView::SideBySide)
+    );
+    h.key_press(egui::Key::V);
+    h.run();
+    assert_eq!(
+        h.state().compare_view_for_test(),
+        Some(CompareView::Unified)
+    );
+
+    // Test Enter jumps to editor and closes compare.
+    // First, ensure there's a valid jump target.
+    let jump_target = h
+        .state()
+        .compare_jump_target_for_test()
+        .expect("selection must have a jump target");
+    h.key_press(egui::Key::Enter);
+    h.run();
+
+    // Compare should be closed, editor should be active at the jumped block.
+    assert!(
+        !h.state().compare_open_for_test(),
+        "compare must close on jump"
+    );
+    assert_eq!(h.state().side_tab_for_test(), SideTab::Script);
+    assert_eq!(h.state().selected_block_for_test(), Some(jump_target));
+
+    // Verify the project was NOT mutated by the compare workspace.
+    let after = h.state().block_text(bi).unwrap();
+    assert_eq!(after, edited, "project text unchanged by compare");
+    assert_eq!(
+        h.state().block_text(second).unwrap(),
+        format!("{original_second} REV"),
+        "second edited block unchanged by compare"
+    );
+}
+
+/// Compare workspace does not mutate the project or revision history.
+#[test]
+fn compare_workspace_is_read_only() {
+    use scriptcraft_app::app::ChangeFilter;
+
+    let mut h = harness(SideTab::Script);
+    h.run();
+    h.state_mut().start_revision();
+    h.run();
+
+    let revision_count_before = h.state().revision_count_for_test();
+    let revision_color_before = h.state().latest_revision_color_for_test();
+    let dirty_before = h.state().is_dirty();
+
+    // Open compare.
+    h.get_by_label("Menu").click();
+    h.run();
+    h.get_by_label("Compare Drafts…").click();
+    h.run();
+
+    // Navigate around, toggle view, filter.
+    h.key_press(egui::Key::J);
+    h.run();
+    h.key_press(egui::Key::V);
+    h.run();
+    // Test filter via test helper (avoids broad button query).
+    h.state_mut()
+        .set_compare_filter_for_test(ChangeFilter::Added);
+    h.run();
+    h.state_mut().set_compare_filter_for_test(ChangeFilter::All);
+    h.run();
+
+    // Close via Escape.
+    h.key_press(egui::Key::Escape);
+    h.run();
+
+    // Verify nothing was mutated.
+    assert!(!h.state().compare_open_for_test());
+    assert_eq!(h.state().revision_count_for_test(), revision_count_before);
+    assert_eq!(
+        h.state().latest_revision_color_for_test(),
+        revision_color_before
+    );
+    assert_eq!(
+        h.state().is_dirty(),
+        dirty_before,
+        "compare must not dirty the project"
+    );
+}
+
+/// Opening a new project or starting a revision closes the compare workspace.
+#[test]
+fn compare_workspace_closes_on_project_change() {
+    let mut h = harness(SideTab::Script);
+    h.run();
+    h.state_mut().start_revision();
+    h.run();
+
+    // Open compare.
+    h.get_by_label("Menu").click();
+    h.run();
+    h.get_by_label("Compare Drafts…").click();
+    h.run();
+    assert!(h.state().compare_open_for_test());
+
+    // Start a new revision → compare should close.
+    h.state_mut().start_revision();
+    h.run();
+    assert!(
+        !h.state().compare_open_for_test(),
+        "new revision must close compare"
+    );
+
+    // Re-open compare.
+    h.get_by_label("Menu").click();
+    h.run();
+    h.get_by_label("Compare Drafts…").click();
+    h.run();
+    assert!(h.state().compare_open_for_test());
+
+    // Open another project → compare should close.
+    h.state_mut().open_fixture();
+    h.run();
+    assert!(
+        !h.state().compare_open_for_test(),
+        "open_path must close compare"
+    );
+}

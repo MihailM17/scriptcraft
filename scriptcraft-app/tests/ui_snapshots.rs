@@ -215,3 +215,47 @@ fn snap_13_revision_marks() {
     h.run();
     h.snapshot("13_revision_marks");
 }
+
+/// Compare workspace: latest revision against the current draft.
+#[test]
+fn snap_14_compare_drafts() {
+    let mut h = harness(SideTab::Script, None);
+    h.run();
+    h.state_mut()
+        .start_revision_at_for_test("Blue Revision", "28.10.2026 11:58");
+    h.run();
+
+    let bi = h.state().find_first_heading_block().expect("heading");
+    let heading = h.state().block_text(bi).unwrap();
+    let action = h.state().block_text(bi + 1).unwrap();
+    h.state_mut()
+        .set_block_text_for_test(bi, &format!("{heading} — REVISED"));
+    h.state_mut()
+        .set_block_text_for_test(bi + 1, &format!("{action} (revised action)"));
+    h.state_mut().open_compare();
+    h.run();
+    h.snapshot("14_compare_drafts");
+}
+
+/// Compare workspace side-by-side mode.
+#[test]
+fn snap_15_compare_side_by_side() {
+    let mut h = harness(SideTab::Script, None);
+    h.run();
+    h.state_mut()
+        .start_revision_at_for_test("Blue Revision", "28.10.2026 11:58");
+    h.run();
+
+    let bi = h.state().find_first_heading_block().expect("heading");
+    let heading = h.state().block_text(bi).unwrap();
+    let action = h.state().block_text(bi + 1).unwrap();
+    h.state_mut()
+        .set_block_text_for_test(bi, &format!("{heading} — REVISED"));
+    h.state_mut()
+        .set_block_text_for_test(bi + 1, &format!("{action} (revised action)"));
+    h.state_mut().open_compare();
+    h.run();
+    h.key_press(egui::Key::V);
+    h.run();
+    h.snapshot("15_compare_side_by_side");
+}

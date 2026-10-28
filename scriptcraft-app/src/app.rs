@@ -10,6 +10,8 @@ use scriptcraft_core::{
 };
 
 // Palette, global style and the painted widgets live in `theme.rs`.
+pub use crate::compare_view::{ChangeFilter, CompareView};
+use crate::compare_view::{CompareAction, CompareState};
 use crate::theme::*;
 pub use crate::theme::{apply_theme, kit_visuals, set_kit_theme};
 /// Statistics report bar palette (sampled from KIT's summary report).
@@ -339,7 +341,7 @@ fn menu_check(
     menu_row(ui, label, shortcut, enabled, Some(checked))
 }
 
-#[derive(Default, PartialEq, Eq, Clone, Copy)]
+#[derive(Default, PartialEq, Eq, Clone, Copy, Debug)]
 pub enum SideTab {
     #[default]
     Start,
@@ -548,6 +550,8 @@ pub struct ScriptCraftApp {
     show_current_revision: bool,
     show_clear_revisions: bool,
     show_revisions: bool,
+    /// Read-only compare workspace. Takes over the module area when open.
+    compare: Option<CompareState>,
     show_find: bool,
     find_query: String,
     find_replace: String,
@@ -632,6 +636,7 @@ impl Default for ScriptCraftApp {
             show_current_revision: false,
             show_clear_revisions: false,
             show_revisions: false,
+            compare: None,
             show_find: false,
             find_query: String::new(),
             find_replace: String::new(),
@@ -1004,6 +1009,18 @@ impl ScriptCraftApp {
         });
     }
 
+    /// Replace a block's text through the normal edit pipeline (tests).
+    #[doc(hidden)]
+    pub fn set_block_text_for_test(&mut self, bi: usize, text: &str) {
+        self.apply_editor2_output(crate::script_view::ScriptViewOutput {
+            commands: vec![edit::EditCommand::SetText {
+                bi,
+                text: text.to_string(),
+            }],
+            ..Default::default()
+        });
+    }
+
     /// Page rectangles from the last Editor 2.0 frame (interaction tests).
     #[doc(hidden)]
     pub fn editor2_page_rects(&self) -> Vec<egui::Rect> {
@@ -1042,6 +1059,39 @@ impl ScriptCraftApp {
         self.editor2.debug_autocomplete.clone()
     }
 
+    /// Open the read-only compare workspace with the latest revision as the
+    /// base and the live draft as the target.
+    #[doc(hidden)]
+    pub fn open_compare(&mut self) -> bool {
+        if self.project.is_none() {
+            self.status = "Open a project before comparing drafts.".to_string();
+            return false;
+        }
+        let state = self
+            .project
+            .as_ref()
+            .and_then(|p| CompareState::open_latest(&self.revisions, &p.blocks));
+        let Some(state) = state else {
+            self.status = "Start a revision before comparing drafts.".to_string();
+            return false;
+        };
+        self.show_find = false;
+        self.compare = Some(state);
+        self.status = "Comparing the latest revision with the current draft.".to_string();
+        true
+    }
+
+    fn close_compare(&mut self) {
+        self.compare = None;
+    }
+
+    /// Keep an open comparison in sync after an edit or history change.
+    fn invalidate_compare(&mut self) {
+        if let Some(compare) = &mut self.compare {
+            compare.invalidate();
+        }
+    }
+
     fn ensure_revision_marks(&mut self) {
         if !self.revision_marks_dirty {
             return;
@@ -1075,6 +1125,7 @@ impl ScriptCraftApp {
         self.revisions.start(blocks, name, started, pages);
         self.revision_marks_dirty = true;
         self.dirty = true;
+        self.close_compare();
         let mut status = format!("{} revision started ({} pages).", color.label(), pages);
         if let Some((previous_color, previous_pages)) =
             previous.filter(|(_, previous_pages)| *previous_pages > 0 && pages > 0)
@@ -1091,6 +1142,20 @@ impl ScriptCraftApp {
         self.status = status;
     }
 
+    /// Start a revision with a fixed name and timestamp (snapshot tests).
+    #[doc(hidden)]
+    pub fn start_revision_at_for_test(&mut self, name: &str, started: &str) {
+        let Some(blocks) = self.project.as_ref().map(|p| p.blocks.clone()) else {
+            return;
+        };
+        let pages = self.page_count();
+        self.revisions
+            .start(&blocks, name.to_string(), started.to_string(), pages);
+        self.revision_marks_dirty = true;
+        self.dirty = true;
+        self.close_compare();
+    }
+
     pub fn clear_revision_history(&mut self) {
         if self.revisions.is_empty() {
             self.status = "No revision history to clear.".to_string();
@@ -1099,6 +1164,7 @@ impl ScriptCraftApp {
         self.revisions.clear();
         self.revision_marks = RevisionMarks::default();
         self.revision_marks_dirty = false;
+        self.close_compare();
         self.dirty = true;
         self.status = "Revision history cleared.".to_string();
     }
@@ -1125,6 +1191,7 @@ impl ScriptCraftApp {
         if imported > 0 {
             self.revision_marks_dirty = true;
             self.dirty = true;
+            self.close_compare();
             self.status = format!("Imported {imported} saved version(s) as revisions.");
         } else {
             self.status = "No recoverable saved versions found.".to_string();
@@ -1177,8 +1244,101 @@ impl ScriptCraftApp {
         self.show_current_revision
     }
 
+    /// Whether the compare workspace currently owns the module area.
+    #[doc(hidden)]
+    pub fn compare_open_for_test(&self) -> bool {
+        self.compare.is_some()
+    }
+
+    /// Selected entry index in the compare workspace.
+    #[doc(hidden)]
+    pub fn compare_selected_for_test(&self) -> Option<usize> {
+        self.compare.as_ref().and_then(CompareState::selected)
+    }
+
+    /// Active change-list filter.
+    #[doc(hidden)]
+    pub fn compare_filter_for_test(&self) -> Option<ChangeFilter> {
+        self.compare.as_ref().map(CompareState::filter)
+    }
+
+    #[doc(hidden)]
+    pub fn set_compare_filter_for_test(&mut self, filter: ChangeFilter) {
+        if let Some(compare) = &mut self.compare {
+            compare.set_filter(filter);
+        }
+    }
+
+    /// Active unified/side-by-side mode.
+    #[doc(hidden)]
+    pub fn compare_view_for_test(&self) -> Option<CompareView> {
+        self.compare.as_ref().map(CompareState::view)
+    }
+
+    /// `(added, removed, changed)` from the live comparison.
+    #[doc(hidden)]
+    pub fn compare_counts_for_test(&self) -> Option<(usize, usize, usize)> {
+        self.compare
+            .as_ref()
+            .and_then(CompareState::diff)
+            .map(|diff| (diff.added, diff.removed, diff.changed))
+    }
+
+    #[doc(hidden)]
+    pub fn compare_change_indices_for_test(&self) -> Vec<usize> {
+        self.compare
+            .as_ref()
+            .map(CompareState::change_indices)
+            .unwrap_or_default()
+    }
+
+    #[doc(hidden)]
+    pub fn compare_step_for_test(&mut self, forward: bool) -> bool {
+        self.compare
+            .as_mut()
+            .is_some_and(|compare| compare.step_change(forward))
+    }
+
+    /// Editor block the current selection would jump to.
+    #[doc(hidden)]
+    pub fn compare_jump_target_for_test(&self) -> Option<usize> {
+        self.compare
+            .as_ref()
+            .and_then(|compare| compare.jump_block(self.project.as_ref()))
+    }
+
+    #[doc(hidden)]
+    pub fn close_compare_for_test(&mut self) {
+        self.close_compare();
+    }
+
+    /// Current side tab (tests).
+    #[doc(hidden)]
+    pub fn side_tab_for_test(&self) -> SideTab {
+        self.side_tab
+    }
+
+    /// Selected editor block (tests).
+    #[doc(hidden)]
+    pub fn selected_block_for_test(&self) -> Option<usize> {
+        self.selected_block
+    }
+
+    /// Number of revision sets (tests).
+    #[doc(hidden)]
+    pub fn revision_count_for_test(&self) -> usize {
+        self.revisions.sets.len()
+    }
+
+    /// Latest revision color (tests).
+    #[doc(hidden)]
+    pub fn latest_revision_color_for_test(&self) -> Option<RevisionColor> {
+        self.revisions.latest().map(|s| s.color)
+    }
+
     fn refresh_derived(&mut self) {
         self.revision_marks_dirty = true;
+        self.invalidate_compare();
         if let Some(p) = &self.project {
             self.issues = validate(p);
             self.stats = p.stats();
@@ -1523,6 +1683,7 @@ impl ScriptCraftApp {
                 let p = report.project;
                 self.path = path.to_string();
                 self.project = Some(p);
+                self.close_compare();
                 self.selected_scene = 0;
                 self.selected_block = None;
                 self.editor2 = Default::default();
@@ -1948,6 +2109,7 @@ impl ScriptCraftApp {
         self.revisions = RevisionHistory::default();
         self.revision_marks = RevisionMarks::default();
         self.revision_marks_dirty = false;
+        self.close_compare();
         self.cards = Vec::new();
         self.research = Vec::new();
         self.dirty = true;
@@ -3650,37 +3812,44 @@ impl eframe::App for ScriptCraftApp {
             self.write_recovery();
         }
         // Global shortcuts, consumed so focused editors don't double-handle.
+        let comparing = self.compare.is_some();
         if self.project.is_some() {
             if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::S)) {
                 self.do_save();
             }
-            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::F)) {
-                self.show_find = !self.show_find;
-            }
-            if self.show_find
-                && self.pending_save.is_none()
-                && ctx.input(|i| i.key_pressed(egui::Key::Escape))
-            {
-                self.show_find = false;
-            }
-            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Z)) {
-                self.do_undo();
-            }
-            let redo = ctx.input_mut(|i| {
-                i.consume_key(
-                    egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
-                    egui::Key::Z,
-                ) || i.consume_key(egui::Modifiers::COMMAND, egui::Key::Y)
-            });
-            if redo {
-                self.do_redo();
-            }
-            // FastFormat: Cmd/Ctrl+1…0 retypes the selected blocks.
-            if self.side_tab == SideTab::Script && self.pending_save.is_none() && !self.show_find {
-                for (n, t, _) in FORMAT_ORDER {
-                    if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, format_key(n))) {
-                        self.set_selected_type(t);
-                        break;
+            if !comparing {
+                if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::F)) {
+                    self.show_find = !self.show_find;
+                }
+                if self.show_find
+                    && self.pending_save.is_none()
+                    && ctx.input(|i| i.key_pressed(egui::Key::Escape))
+                {
+                    self.show_find = false;
+                }
+                if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Z)) {
+                    self.do_undo();
+                }
+                let redo = ctx.input_mut(|i| {
+                    i.consume_key(
+                        egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
+                        egui::Key::Z,
+                    ) || i.consume_key(egui::Modifiers::COMMAND, egui::Key::Y)
+                });
+                if redo {
+                    self.do_redo();
+                }
+                // FastFormat: Cmd/Ctrl+1…0 retypes the selected blocks.
+                if self.side_tab == SideTab::Script
+                    && self.pending_save.is_none()
+                    && !self.show_find
+                {
+                    for (n, t, _) in FORMAT_ORDER {
+                        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, format_key(n)))
+                        {
+                            self.set_selected_type(t);
+                            break;
+                        }
                     }
                 }
             }
@@ -3708,11 +3877,12 @@ impl eframe::App for ScriptCraftApp {
         // Far-left rail always visible; navigator + format bar belong to
         // the Script view only — every other tab gets the full center.
         self.module_rail(ctx);
+        let comparing = self.compare.is_some();
         let is_script = self.side_tab == SideTab::Script;
-        if is_script && self.show_left_panel {
+        if is_script && self.show_left_panel && !comparing {
             self.left_panel(ctx);
         }
-        if is_script && self.show_format_panel {
+        if is_script && self.show_format_panel && !comparing {
             self.format_panel(ctx);
         }
         if self.show_about {
@@ -3730,13 +3900,17 @@ impl eframe::App for ScriptCraftApp {
         if self.show_export {
             self.export_dialog(ctx);
         }
-        match self.side_tab {
-            SideTab::Start => self.start_view(ctx),
-            SideTab::Script => self.editor_view(ctx),
-            SideTab::Cards => self.cards_view(ctx),
-            SideTab::Research => self.research_view(ctx),
-            SideTab::Statistics => self.statistics_view(ctx),
-            SideTab::Settings => self.settings_view(ctx),
+        if self.compare.is_some() {
+            self.compare_workspace(ctx);
+        } else {
+            match self.side_tab {
+                SideTab::Start => self.start_view(ctx),
+                SideTab::Script => self.editor_view(ctx),
+                SideTab::Cards => self.cards_view(ctx),
+                SideTab::Research => self.research_view(ctx),
+                SideTab::Statistics => self.statistics_view(ctx),
+                SideTab::Settings => self.settings_view(ctx),
+            }
         }
         // Above every module so it can block the app while open.
         self.save_prompt(ctx);
@@ -3744,6 +3918,34 @@ impl eframe::App for ScriptCraftApp {
 }
 
 impl ScriptCraftApp {
+    /// Draw the full compare workspace in place of the active module.
+    fn compare_workspace(&mut self, ctx: &egui::Context) {
+        let Some(mut compare) = self.compare.take() else {
+            return;
+        };
+        let Some(project) = self.project.as_ref() else {
+            return;
+        };
+        let action = crate::compare_view::show(
+            ctx,
+            &mut compare,
+            &self.revisions,
+            &project.blocks,
+            Some(project),
+        );
+        match action {
+            CompareAction::Close => {
+                self.status = "Compare closed.".to_string();
+            }
+            CompareAction::None => self.compare = Some(compare),
+            CompareAction::Jump(block) => {
+                self.side_tab = SideTab::Script;
+                self.goto_block(block);
+                self.status = "Opened the selected change in the editor.".to_string();
+            }
+        }
+    }
+
     /// Single full-width toolbar, KIT-style: Menu, scene add/remove,
     /// undo/redo (painted icons — no glyph fallbacks), element menu.
     /// Status + duration live in the bottom status bar.
@@ -3792,23 +3994,25 @@ impl ScriptCraftApp {
                     });
                     toolbar_sep(ui);
                     let has = self.project.is_some();
+                    let editable = self.compare.is_none();
+                    let editing = has && editable;
                     let n_scenes = self.project.as_ref().map(|p| p.scenes().len()).unwrap_or(0);
                     ui.label(
                         egui::RichText::new(format!("Scenes: {n_scenes}"))
                             .small()
                             .weak(),
                     );
-                    if toolbar_icon_button(ui, has, "Add scene", draw_plus).clicked() {
+                    if toolbar_icon_button(ui, editing, "Add scene", draw_plus).clicked() {
                         self.insert_scene_below();
                     }
-                    if toolbar_icon_button(ui, has && n_scenes > 1, "Delete scene", draw_minus)
+                    if toolbar_icon_button(ui, editing && n_scenes > 1, "Delete scene", draw_minus)
                         .clicked()
                     {
                         self.delete_scene();
                     }
                     toolbar_sep(ui);
-                    let can_undo = has && self.editor2.history.can_undo();
-                    let can_redo = has && self.editor2.history.can_redo();
+                    let can_undo = editing && self.editor2.history.can_undo();
+                    let can_redo = editing && self.editor2.history.can_redo();
                     if toolbar_icon_button(ui, can_undo, "Undo (⌘Z)", draw_undo_arrow).clicked() {
                         self.do_undo();
                     }
@@ -3824,7 +4028,7 @@ impl ScriptCraftApp {
                             .map(|b| b.element_type)
                     });
                     let mut pick: Option<ElementType> = None;
-                    ui.add_enabled_ui(has, |ui| {
+                    ui.add_enabled_ui(editing, |ui| {
                         let label = current.map(element_label).unwrap_or("Element");
                         ui.menu_button(label, |ui| {
                             ui.set_min_width(220.0);
@@ -3974,6 +4178,7 @@ impl ScriptCraftApp {
             StartRevision,
             ClearRevisions,
             Revisions,
+            Compare,
             CurrentRevision,
             Nav,
             Fmt,
@@ -4060,6 +4265,14 @@ impl ScriptCraftApp {
             if menu_item(ui, "Revision History…", None, has) {
                 action = Some(M::Revisions);
             }
+            if menu_item(
+                ui,
+                "Compare Drafts…",
+                None,
+                has && !self.revisions.is_empty(),
+            ) {
+                action = Some(M::Compare);
+            }
             if menu_check(
                 ui,
                 "Show Current Revision Only",
@@ -4110,8 +4323,14 @@ impl ScriptCraftApp {
             Some(M::SaveAs) => self.do_save_as(),
             Some(M::Import) => self.do_import_fountain(),
             Some(M::ImportFdx) => self.do_import_fdx(),
-            Some(M::Export) => self.show_export = true,
-            Some(M::Preview) => self.preview_pdf(),
+            Some(M::Export) => {
+                self.close_compare();
+                self.show_export = true;
+            }
+            Some(M::Preview) => {
+                self.close_compare();
+                self.preview_pdf();
+            }
             Some(M::TwoPanel) => {
                 self.settings.two_panel = !self.settings.two_panel;
                 if self.persist {
@@ -4122,12 +4341,22 @@ impl ScriptCraftApp {
             Some(M::Redo) => self.do_redo(),
             Some(M::Find) => {
                 if self.project.is_some() {
+                    self.close_compare();
                     self.show_find = true;
                 }
             }
             Some(M::StartRevision) => self.start_revision(),
-            Some(M::ClearRevisions) => self.show_clear_revisions = true,
-            Some(M::Revisions) => self.show_revisions = true,
+            Some(M::ClearRevisions) => {
+                self.close_compare();
+                self.show_clear_revisions = true;
+            }
+            Some(M::Revisions) => {
+                self.close_compare();
+                self.show_revisions = true;
+            }
+            Some(M::Compare) => {
+                self.open_compare();
+            }
             Some(M::CurrentRevision) => {
                 self.show_current_revision = !self.show_current_revision;
                 self.revision_marks_dirty = true;
@@ -4149,8 +4378,14 @@ impl ScriptCraftApp {
             }
             Some(M::ZoomFitPage) => self.fit = FitMode::Page,
             Some(M::ZoomFitWidth) => self.fit = FitMode::Width,
-            Some(M::About) => self.show_about = true,
-            Some(M::Help) => self.show_help = true,
+            Some(M::About) => {
+                self.close_compare();
+                self.show_about = true;
+            }
+            Some(M::Help) => {
+                self.close_compare();
+                self.show_help = true;
+            }
         }
     }
 
@@ -4169,8 +4404,14 @@ impl ScriptCraftApp {
                 menu::ID_SAVE_AS => self.do_save_as(),
                 menu::ID_IMPORT => self.do_import_fountain(),
                 menu::ID_IMPORT_FDX => self.do_import_fdx(),
-                menu::ID_EXPORT => self.show_export = true,
-                menu::ID_PREVIEW => self.preview_pdf(),
+                menu::ID_EXPORT => {
+                    self.close_compare();
+                    self.show_export = true;
+                }
+                menu::ID_PREVIEW => {
+                    self.close_compare();
+                    self.preview_pdf();
+                }
                 menu::ID_TWO_PANEL => {
                     self.settings.two_panel = !self.settings.two_panel;
                     if self.persist {
@@ -4181,16 +4422,24 @@ impl ScriptCraftApp {
                 menu::ID_REDO => self.do_redo(),
                 menu::ID_FIND => {
                     if self.project.is_some() {
+                        self.close_compare();
                         self.show_find = true;
                     }
                 }
                 menu::ID_START_REVISION => self.start_revision(),
                 menu::ID_CLEAR_REVISIONS => {
+                    self.close_compare();
                     if !self.revisions.is_empty() {
                         self.show_clear_revisions = true;
                     }
                 }
-                menu::ID_REVISIONS => self.show_revisions = true,
+                menu::ID_REVISIONS => {
+                    self.close_compare();
+                    self.show_revisions = true;
+                }
+                menu::ID_COMPARE_DRAFTS => {
+                    self.open_compare();
+                }
                 menu::ID_NAVIGATOR => self.show_left_panel = !self.show_left_panel,
                 menu::ID_FORMAT_PANEL => self.show_format_panel = !self.show_format_panel,
                 menu::ID_TYPEWRITER => self.typewriter = !self.typewriter,
@@ -4208,8 +4457,14 @@ impl ScriptCraftApp {
                 }
                 menu::ID_ZOOM_FIT_PAGE => self.fit = FitMode::Page,
                 menu::ID_ZOOM_FIT_WIDTH => self.fit = FitMode::Width,
-                menu::ID_ABOUT => self.show_about = true,
-                menu::ID_HELP => self.show_help = true,
+                menu::ID_ABOUT => {
+                    self.close_compare();
+                    self.show_about = true;
+                }
+                menu::ID_HELP => {
+                    self.close_compare();
+                    self.show_help = true;
+                }
                 _ => {}
             }
         }
@@ -4868,6 +5123,7 @@ impl ScriptCraftApp {
                         draw_rail_icon(p, tab, center, color)
                     });
                     if resp.clicked() {
+                        self.close_compare();
                         self.side_tab = tab;
                     }
                 }
