@@ -1,5 +1,6 @@
 use crate::model::{ElementType, Project, SceneMeta, ScriptBlock};
-use crate::revision::{RevisionHistory, STORAGE_KEY as REVISIONS_KEY};
+use crate::page_lock::PageLock;
+use crate::revision::{RevisionHistory, RevisionSet, STORAGE_KEY as REVISIONS_KEY};
 use quick_xml::events::Event;
 use quick_xml::{Reader, XmlVersion};
 use rusqlite::{params, Connection};
@@ -21,6 +22,19 @@ pub enum KitspError {
     Io(#[from] std::io::Error),
     #[error("json: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("refusing to overwrite the current project with a restored copy")]
+    RestoreOverwritesSource,
+}
+
+/// Result of restoring a revision baseline as a new project.
+#[derive(Clone, Debug, Default)]
+pub struct RestoreReport {
+    /// Non-fatal issues the writer should see: missing baseline metadata,
+    /// partial page-lock matches, or source-file identity warnings.
+    pub warnings: Vec<String>,
+    /// Later revision sets dropped from the restored copy because the
+    /// document was rolled back to an earlier baseline.
+    pub dropped_revisions: usize,
 }
 
 const BLOCK_TAGS: &[&str] = &[
@@ -712,6 +726,207 @@ fn write_revisions(conn: &Connection, revisions: &RevisionHistory) -> Result<(),
         )?;
     }
     Ok(())
+}
+
+/// Restore a revision baseline into a new `.kitsp` at `out_path`.
+///
+/// The current project is copied as a template, so title-page metadata, scene
+/// numbering, page locks, research and other KIT tables survive. The screenplay
+/// text and the ScriptCraft identity rows are replaced with the baseline.
+/// Revision history is truncated after the restored set: later baselines
+/// describe drafts that no longer exist in the copy.
+///
+/// The source file is never modified. Returns non-fatal warnings the caller
+/// should show, including the fact that revision baselines do not yet store
+/// title-page metadata.
+pub fn restore_revision_as_copy(
+    path: impl AsRef<Path>,
+    set: &RevisionSet,
+    out_path: impl AsRef<Path>,
+) -> Result<RestoreReport, KitspError> {
+    let path = path.as_ref();
+    let out_path = out_path.as_ref();
+    if same_path(path, out_path) {
+        return Err(KitspError::RestoreOverwritesSource);
+    }
+
+    let source = load_file_report(path)?;
+    let mut warnings = source.warnings;
+    warnings.push(
+        "Revision baselines do not store title-page or project metadata; the restored copy keeps the current project's metadata."
+            .to_string(),
+    );
+    let project = project_from_baseline(set, &source.project);
+
+    if let Ok(meta) = load_metadata(path) {
+        if !meta.locked_pages.trim().is_empty() {
+            if let Ok(lock) = PageLock::from_json(&meta.locked_pages) {
+                if !lock.is_empty() {
+                    let resolved = lock.resolve(&project.blocks).len();
+                    if resolved < lock.anchors.len() {
+                        warnings.push(format!(
+                            "The page lock was kept, but {} of {} page anchor(s) no longer match the restored draft.",
+                            lock.anchors.len() - resolved,
+                            lock.anchors.len()
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    let history = load_revisions(path).unwrap_or_default();
+    let restored_index = history.sets.iter().position(|candidate| candidate == set);
+    let mut restored_history = history;
+    let dropped_revisions = match restored_index {
+        Some(index) => {
+            let dropped = restored_history.sets.len().saturating_sub(index + 1);
+            restored_history.sets.truncate(index + 1);
+            dropped
+        }
+        None => {
+            if !restored_history.is_empty() {
+                warnings.push(
+                    "The restored revision was not found in the project history; the existing revision history was kept."
+                        .to_string(),
+                );
+            }
+            0
+        }
+    };
+
+    let xml = project_to_scenario_xml(&project);
+    let tmp = out_path.with_extension(format!("kitsp.tmp.{}", std::process::id()));
+    let _ = std::fs::remove_file(&tmp);
+    let result = (|| -> Result<(), KitspError> {
+        std::fs::copy(path, &tmp)?;
+        let conn = Connection::open(&tmp)?;
+        conn.execute("UPDATE scenario SET text=?1 WHERE id=1", params![xml])?;
+        write_identity(&conn, &project)?;
+        write_scene_meta(&conn, &project)?;
+        if restored_index.is_some() {
+            write_revisions(&conn, &restored_history)?;
+        }
+        // Corkboard titles follow the restored headings. Extra cards for
+        // scenes that no longer exist are left alone, as in a normal save.
+        if let Ok(scheme) =
+            conn.query_row("SELECT scheme FROM scenario WHERE id=1", params![], |r| {
+                r.get::<_, String>(0)
+            })
+        {
+            let scenes: Vec<(Option<String>, String)> = project
+                .scenes()
+                .into_iter()
+                .map(|s| (s.kit_uuid, s.heading))
+                .collect();
+            if let Ok(synced) = sync_scheme_cards(&scheme, &scenes) {
+                let _ = conn.execute("UPDATE scenario SET scheme=?1", params![synced]);
+            }
+        }
+        drop(conn);
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&tmp)?
+            .sync_all()?;
+        replace_file(&tmp, out_path)?;
+        if let Some(dir) = out_path.parent() {
+            if let Ok(d) = std::fs::File::open(dir) {
+                let _ = d.sync_all();
+            }
+        }
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result?;
+
+    Ok(RestoreReport {
+        warnings,
+        dropped_revisions,
+    })
+}
+
+type BaselineBlockKey = (&'static str, String);
+type BaselineBlockIds = VecDeque<(Uuid, Option<String>)>;
+
+/// Build the restored project from a baseline. Stable block ids are kept when
+/// the baseline has them; older baselines reuse the current block's id when
+/// its element type and text still match, so identity survives a restore where
+/// possible.
+fn project_from_baseline(set: &RevisionSet, source: &Project) -> Project {
+    let mut available: HashMap<BaselineBlockKey, BaselineBlockIds> = HashMap::new();
+    let mut kit_by_id: HashMap<Uuid, Option<String>> = HashMap::new();
+    for block in &source.blocks {
+        available
+            .entry((block.element_type.tag(), block.text.clone()))
+            .or_default()
+            .push_back((block.id, block.kit_uuid.clone()));
+        kit_by_id.entry(block.id).or_insert(block.kit_uuid.clone());
+    }
+
+    let mut seen = HashSet::new();
+    let mut blocks = Vec::with_capacity(set.baseline.len());
+    for baseline in &set.baseline {
+        let mut pool_match = || {
+            available
+                .get_mut(&(baseline.element_type.tag(), baseline.text.clone()))
+                .and_then(|pool| pool.pop_front())
+        };
+        let id = match baseline.block_id {
+            Some(id) if !seen.contains(&id) => id,
+            _ => {
+                let mut candidate = None;
+                while let Some((id, _)) = pool_match() {
+                    if !seen.contains(&id) {
+                        candidate = Some(id);
+                        break;
+                    }
+                }
+                // A duplicate id in a damaged baseline must not merge two
+                // blocks; give the later one a fresh identity.
+                candidate.unwrap_or_else(Uuid::new_v4)
+            }
+        };
+        seen.insert(id);
+        let kit_uuid = baseline
+            .kit_uuid
+            .clone()
+            .or_else(|| kit_by_id.get(&id).cloned().flatten());
+        blocks.push(ScriptBlock {
+            id,
+            kit_uuid,
+            element_type: baseline.element_type,
+            text: baseline.text.clone(),
+        });
+    }
+
+    let heading_ids: HashSet<Uuid> = blocks
+        .iter()
+        .filter(|b| b.element_type == ElementType::SceneHeading)
+        .map(|b| b.id)
+        .collect();
+    let scene_meta = source
+        .scene_meta
+        .iter()
+        .filter(|meta| heading_ids.contains(&meta.id))
+        .cloned()
+        .collect();
+    Project {
+        title: source.title.clone(),
+        blocks,
+        scene_meta,
+    }
+}
+
+fn same_path(a: &Path, b: &Path) -> bool {
+    if a == b {
+        return true;
+    }
+    match (a.canonicalize(), b.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
 }
 
 /// The original project path recorded in a recovery file, if any.

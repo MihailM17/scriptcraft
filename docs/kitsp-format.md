@@ -45,6 +45,12 @@ ignores unknown rows, and ScriptCraft's normal save path preserves them.
   content. Missing or unreadable JSON is treated as no revisions; it never
   blocks opening the script. Saved KIT `script_versions` rows can be imported
   as baselines; imports are idempotent and capped at 24 revisions.
+  Restoring a baseline as a copy writes a new file and leaves the source
+  untouched. The copy keeps the current title page, metadata, scene-number
+  locks, page locks and other KIT tables, replaces the script and identity
+  rows with the baseline, and truncates revision history after the restored
+  set. Baselines do not store title-page data yet, so the restore reports
+  that the current metadata was kept.
 - `scriptcraft_ids` — schema-versioned JSON identity map, one record per
   screenplay block in `scenario` order (`id`, `element_type`, save-time `text`,
   optional scene-heading `kit_uuid`). This is what makes `ScriptBlock.id` and

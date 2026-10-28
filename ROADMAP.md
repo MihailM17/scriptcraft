@@ -172,7 +172,7 @@ direct workspace dependencies. There is still no benchmark harness.
   editor and PDF now use Courier Prime (OFL), OFL license texts added for all
   bundled fonts, root `LICENSE` (Apache-2.0) and `NOTICE` added.
 - [ ] **Monolith.** `app.rs` is 7,039 lines; state, IO, layout and UI are entangled. v0.8 extracts views one at a time; no big-bang rewrite.
-- [ ] **No restore-as-copy or revision summary.** The diff engine and compare workspace exist (v0.8 M1–M2), but restoring a baseline and the revision summary are still pending. Planned: v0.8 M3 and M7.
+- [ ] **No revision summary.** The diff engine, compare workspace and restore-as-copy exist (v0.8 M1–M3), but the revision summary is still pending. Planned: v0.8 M7.
 - [x] **Stable block/scene identity now survives `.kitsp` reopen.** Fixed
   2026-10-26 (v0.8 M0): versioned `scenario_data.scriptcraft_ids` and
   `scriptcraft_scene_meta` rows persist `ScriptBlock.id` and scene identity;
@@ -244,7 +244,7 @@ Source of truth: `docs/v0.8-plan.md`.
 - [x] **M1 Draft diff** — public `DraftDiff` for any two baselines/current;
   block-level, deterministic. Shipped 2026-10-27.
 - [x] **M2 Compare workspace** — unified/side-by-side, filters, jump-to-change. Shipped 2026-10-28.
-- [ ] **M3 Restore as copy** — never overwrite the current draft.
+- [x] **M3 Restore as copy** — never overwrite the current draft. Shipped 2026-10-28.
 - [ ] **M4 Omitted scenes** — keep identity/number, print `OMITTED`, FDX map.
 - [ ] **M5 Dual dialogue** — two-column layout, editor/PDF parity, FDX.
 - [ ] **M6 Title-page editor** — form + live preview, PDF/FDX parity.
@@ -299,7 +299,8 @@ gate**. M8 runs in parallel; M9 is continuous.
       block-level. Shipped 2026-10-27.
 - [x] M2 — compare workspace: unified/side-by-side, filters, jump-to-change,
       read-only. Shipped 2026-10-28.
-- [ ] M3 — restore a revision as a new `.kitsp`; never overwrite current.
+- [x] M3 — restore a revision as a new `.kitsp`; never overwrite current.
+      Shipped 2026-10-28.
 - [ ] M4 — omitted scenes: identity, numbering, `OMITTED`, pagination, FDX.
 - [ ] M5 — dual dialogue: two-column layout, editor/PDF parity, FDX, undo.
       Gate at week 8; move to v0.8.1 if pagination is at risk.
@@ -1159,6 +1160,31 @@ Newest entries at the bottom. Each entry: date — what changed / what was found
   - Verification: `cargo fmt --all -- --check`, `cargo clippy --workspace
     --all-targets -- -D warnings`, `cargo test --workspace` green.
   - Next: M3 restore as a copy.
+
+- **2026-10-28** — v0.8 M3: restore as a copy.
+  - `scriptcraft-core/src/kitsp.rs`: public `restore_revision_as_copy` and
+    `RestoreReport`. The current project is copied as a template; the
+    screenplay text and versioned identity/scene-meta rows are replaced with
+    the baseline, and the new file is written atomically. The source path is
+    never written (choosing it is refused).
+  - The copy keeps title-page metadata, scene-number locks, page locks,
+    research and other KIT tables. Revision history is truncated after the
+    restored set, since later baselines describe drafts that no longer exist
+    in the copy. Restore warns that baselines do not store title-page data and
+    reports how many page-lock anchors no longer match.
+  - Compare header and Revision History rows expose **Restore copy…** /
+    **Restore as copy…**. The save-as dialog suggests
+    `<project>-<colour>-<date>.kitsp`; if the draft has unsaved changes the
+    normal Save / Don't Save / Cancel prompt runs before the copy is written
+    and opened. The current draft is never mutated.
+  - Tests: four core restore tests (byte-identical source, opening the copy,
+    empty self-comparison, metadata/page-lock preservation, history
+    truncation, same-file refusal, old baselines without block ids) plus an
+    app save → restore → open flow; compare snapshots refreshed for the new
+    action.
+  - Verification: `cargo fmt --all -- --check`, `cargo clippy --workspace
+    --all-targets -- -D warnings`, `cargo test --workspace` green.
+  - Next: M4 omitted scenes.
 
 ---
 

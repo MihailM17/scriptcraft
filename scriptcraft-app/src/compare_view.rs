@@ -297,6 +297,8 @@ pub enum CompareAction {
     None,
     Close,
     Jump(usize),
+    /// Save the base revision as a new project without touching this draft.
+    Restore(usize),
 }
 
 fn set_label(set: &RevisionSet) -> String {
@@ -560,6 +562,15 @@ pub fn show(
                 ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                     if ui.button("Close").clicked() {
                         action = CompareAction::Close;
+                    }
+                    if ui
+                        .button("Restore copy…")
+                        .on_hover_text(
+                            "Save the base revision as a new .kitsp. The current draft is not changed.",
+                        )
+                        .clicked()
+                    {
+                        action = CompareAction::Restore(state.base);
                     }
                 });
             });

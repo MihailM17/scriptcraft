@@ -5,7 +5,7 @@ use scriptcraft_core::{
     format::{validate, Issue},
     kitsp::{self, Card, Metadata},
     model::{ElementType, Project, Scene, ScriptBlock},
-    revision::{RevisionColor, RevisionHistory, RevisionMarks},
+    revision::{RevisionColor, RevisionHistory, RevisionMarks, RevisionSet},
     Stats,
 };
 
@@ -476,6 +476,11 @@ enum PendingAction {
     Quit,
     New,
     Open(String),
+    /// Save the current draft first, then write and open this revision copy.
+    Restore {
+        index: usize,
+        dst: String,
+    },
 }
 
 pub struct ScriptCraftApp {
@@ -703,6 +708,9 @@ impl ScriptCraftApp {
             }
             PendingAction::New => self.do_new(),
             PendingAction::Open(path) => self.open_path(&path),
+            PendingAction::Restore { index, dst } => {
+                self.finish_restore_revision(index, &dst);
+            }
         }
     }
 
@@ -726,6 +734,7 @@ impl ScriptCraftApp {
             PendingAction::Quit => "before quitting",
             PendingAction::New => "before creating a new project",
             PendingAction::Open(_) => "before opening another project",
+            PendingAction::Restore { .. } => "before opening the restored copy",
         };
         let name = if self.title.trim().is_empty() {
             "this script".to_string()
@@ -871,6 +880,32 @@ impl ScriptCraftApp {
     #[doc(hidden)]
     pub fn project_path(&self) -> &str {
         &self.path
+    }
+
+    /// Test hook: restore a revision the same way the file dialog would, but
+    /// to an explicit path. Does not open the copy or touch the current draft.
+    #[doc(hidden)]
+    pub fn restore_revision_copy_for_test(
+        &mut self,
+        index: usize,
+        dst: &std::path::Path,
+    ) -> Result<kitsp::RestoreReport, String> {
+        let set = self
+            .revisions
+            .sets
+            .get(index)
+            .cloned()
+            .ok_or_else(|| "revision not found".to_string())?;
+        kitsp::restore_revision_as_copy(&self.path, &set, dst).map_err(|e| e.to_string())
+    }
+
+    /// Test hook: suggested restore filename for a revision.
+    #[doc(hidden)]
+    pub fn restore_file_name_for_test(&self, index: usize) -> Option<String> {
+        self.revisions
+            .sets
+            .get(index)
+            .map(|set| Self::restore_file_name(&self.path, set))
     }
 
     /// Test hook: select a research pane.
@@ -2029,6 +2064,106 @@ impl ScriptCraftApp {
         let p = self.path.clone();
         self.push_recent(&p);
         self.status = format!("Saved to {}", self.path);
+    }
+
+    /// Save a revision baseline as a new `.kitsp`, then open it. The source
+    /// project is never modified; if this draft has unsaved changes the
+    /// normal save-before-switch prompt appears first.
+    fn restore_revision_as_copy(&mut self, index: usize) -> bool {
+        let Some(set) = self.revisions.sets.get(index).cloned() else {
+            self.status = "That revision is no longer available.".to_string();
+            return false;
+        };
+        if self.path.is_empty() {
+            self.status = "Save the project before restoring a revision.".to_string();
+            return false;
+        }
+        let suggested = Self::restore_file_name(&self.path, &set);
+        let Some(dst) = rfd::FileDialog::new()
+            .add_filter("KITScenarist", &["kitsp"])
+            .set_file_name(&suggested)
+            .save_file()
+        else {
+            return false;
+        };
+        let dst = dst.to_string_lossy().into_owned();
+        self.close_compare();
+        if self.has_unsaved_changes() {
+            self.status =
+                "Save or discard the current changes to open the restored copy.".to_string();
+            self.pending_save = Some(PendingAction::Restore { index, dst });
+            true
+        } else {
+            self.finish_restore_revision(index, &dst)
+        }
+    }
+
+    /// Write the requested revision copy now that unsaved work is resolved,
+    /// then open it and report the warnings the writer should see.
+    fn finish_restore_revision(&mut self, index: usize, dst: &str) -> bool {
+        let Some(set) = self.revisions.sets.get(index).cloned() else {
+            self.status = "That revision is no longer available.".to_string();
+            return false;
+        };
+        match kitsp::restore_revision_as_copy(&self.path, &set, dst) {
+            Ok(report) => {
+                let mut note = format!("Restored {} as {}.", set.color.label(), dst);
+                if report.dropped_revisions > 0 {
+                    note.push_str(&format!(
+                        " {} later revision(s) left out of the copy.",
+                        report.dropped_revisions
+                    ));
+                }
+                if let Some(warning) = report.warnings.first() {
+                    note.push_str(&format!(" Warning: {warning}"));
+                }
+                self.open_path(dst);
+                self.status = note;
+                true
+            }
+            Err(e) => {
+                self.status = format!("Restore failed: {e}");
+                false
+            }
+        }
+    }
+
+    /// `<project>-<colour>-<date>.kitsp`, using the revision start date when
+    /// it is available and today's date otherwise.
+    fn restore_file_name(path: &str, set: &RevisionSet) -> String {
+        let stem = std::path::Path::new(path)
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| "script".to_string());
+        let stem = Self::sanitize_file_stem(&stem);
+        let date = chrono::NaiveDateTime::parse_from_str(&set.started, "%d.%m.%Y %H:%M")
+            .map(|started| started.format("%Y-%m-%d").to_string())
+            .unwrap_or_else(|_| chrono::Local::now().format("%Y-%m-%d").to_string());
+        format!("{stem}-{}-{date}.kitsp", set.color.label().to_lowercase())
+    }
+
+    fn sanitize_file_stem(stem: &str) -> String {
+        let mut out = String::with_capacity(stem.len());
+        let mut after_dash = false;
+        for ch in stem.chars() {
+            if ch.is_alphanumeric() || ch == '_' {
+                out.push(ch);
+                after_dash = false;
+            } else if (ch == '-' || ch.is_whitespace() || ch == '.')
+                && !after_dash
+                && !out.is_empty()
+            {
+                out.push('-');
+                after_dash = true;
+            }
+        }
+        let out = out.trim_matches('-');
+        if out.is_empty() {
+            "script".to_string()
+        } else {
+            out.to_string()
+        }
     }
 
     /// Import a .fountain file into a new in-memory project (Save As to keep it).
@@ -3943,6 +4078,11 @@ impl ScriptCraftApp {
                 self.goto_block(block);
                 self.status = "Opened the selected change in the editor.".to_string();
             }
+            CompareAction::Restore(index) => {
+                if !self.restore_revision_as_copy(index) {
+                    self.compare = Some(compare);
+                }
+            }
         }
     }
 
@@ -4497,6 +4637,7 @@ impl ScriptCraftApp {
 
     fn revisions_window(&mut self, ctx: &egui::Context) {
         let mut open = self.show_revisions;
+        let mut restore = None;
         egui::Window::new("Revision History")
             .open(&mut open)
             .resizable(true)
@@ -4586,6 +4727,9 @@ impl ScriptCraftApp {
                                             ));
                                         }
                                         ui.label(egui::RichText::new(meta).small().weak());
+                                        if ui.small_button("Restore as copy…").clicked() {
+                                            restore = Some(i);
+                                        }
                                     });
                                 });
                                 if i != 0 {
@@ -4604,6 +4748,9 @@ impl ScriptCraftApp {
                 }
             });
         self.show_revisions = open;
+        if let Some(index) = restore {
+            self.restore_revision_as_copy(index);
+        }
     }
 
     fn clear_revisions_window(&mut self, ctx: &egui::Context) {

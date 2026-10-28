@@ -942,6 +942,7 @@ fn revision_history_window_lists_sets_and_toggles_mode() {
     assert!(h.query_by_label("Revision History").is_some());
     assert!(h.query_by_label("Blue Revision").is_some());
     assert!(h.query_by_label("current").is_some());
+    assert!(h.query_by_label("Restore as copy…").is_some());
 
     h.get_by_label("Show current revision only").click();
     h.run();
@@ -1289,4 +1290,100 @@ fn compare_workspace_closes_on_project_change() {
         !h.state().compare_open_for_test(),
         "open_path must close compare"
     );
+}
+
+/// Restoring a revision writes a new project without touching the current
+/// draft, then the restored copy opens with the same baseline.
+#[test]
+fn restore_revision_as_copy_leaves_original_and_opens_copy() {
+    use scriptcraft_core::revision::RevisionColor;
+
+    let fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/../fixtures/A95.kitsp");
+    let dir = std::env::temp_dir().join(format!("scriptcraft-restore-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("Restore.kitsp");
+    std::fs::copy(fixture, &path).unwrap();
+    let path_str = path.to_string_lossy().into_owned();
+
+    let mut h = harness(SideTab::Script);
+    h.run();
+    h.state_mut().open_path(&path_str);
+    h.run();
+
+    let bi = h
+        .state()
+        .find_first_heading_block()
+        .expect("A95 should contain a scene heading");
+    let original = h.state().block_text(bi).unwrap();
+    let edited = format!("{original} — BLUE");
+    h.state_mut()
+        .start_revision_at_for_test("Blue Revision", "28.10.2026 11:58");
+    h.state_mut().set_block_text_for_test(bi, &edited);
+    h.run();
+    assert!(h.state().is_dirty());
+
+    h.get_by_label("Menu").click();
+    h.run();
+    h.get_by_label("Save").click();
+    h.run();
+    assert!(!h.state().is_dirty(), "save must write the Blue draft");
+
+    let source_before = std::fs::read(&path).expect("read source");
+    let restored = dir.join("Restore-blue-2026-10-28.kitsp");
+    let report = h
+        .state_mut()
+        .restore_revision_copy_for_test(0, &restored)
+        .expect("restore blue as copy");
+    assert!(
+        report
+            .warnings
+            .iter()
+            .any(|w| w.contains("title-page") && w.contains("metadata")),
+        "the metadata warning must be available to the UI: {:?}",
+        report.warnings
+    );
+    assert_eq!(
+        std::fs::read(&path).expect("read source again"),
+        source_before,
+        "the source project must stay byte-identical"
+    );
+    assert_eq!(
+        h.state().block_text(bi).unwrap(),
+        edited,
+        "the current draft must not be mutated by the restore"
+    );
+    assert_eq!(h.state().project_path(), path_str);
+    assert!(
+        !h.state().is_dirty(),
+        "restore must not dirty the current draft"
+    );
+    assert!(
+        h.state()
+            .restore_file_name_for_test(0)
+            .unwrap()
+            .starts_with("Restore-blue-"),
+        "suggested filename carries the project and colour"
+    );
+
+    // The restored file opens with the baseline script and history.
+    let restored_str = restored.to_string_lossy().into_owned();
+    h.state_mut().open_path(&restored_str);
+    h.run();
+    assert_eq!(h.state().block_text(bi).unwrap(), original);
+    assert_eq!(h.state().latest_revision_color(), Some(RevisionColor::Blue));
+    assert_eq!(h.state().revision_count_for_test(), 1);
+
+    // Comparing the restored baseline with itself is empty, and the compare
+    // header offers the restore action.
+    h.state_mut().open_compare();
+    h.run();
+    assert_eq!(
+        h.state().compare_counts_for_test(),
+        Some((0, 0, 0)),
+        "restored baseline must match the restored draft"
+    );
+    assert!(h.query_by_label("Restore copy…").is_some());
+
+    let _ = std::fs::remove_dir_all(&dir);
 }
