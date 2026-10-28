@@ -21,7 +21,7 @@ Status legend: `[ ]` to do `[-]` in progress `[x]` done `[!]` blocked
 | Date | 2026-10-28 |
 | Project | ScriptCraft — free, open-source, revision-first screenwriting studio |
 | Repo | `/Users/mihailmihaylov/Documents/Dev_work/scriptcraft` |
-| Branch / commit | `main`; tag `v0.7.0` at `9ce2e0e` (revision workflow); v0.8 M0 at `9bd4839`, M1 at `1948c62`, M2 at `b660219`; v0.8 plan written 2026-10-26 |
+| Branch / commit | `main`; tag `v0.7.0` at `9ce2e0e` (revision workflow); v0.8 M0 at `9bd4839`, M1 at `1948c62`, M2 at `b660219`, M3 at `2708838`; v0.8 plan written 2026-10-26 |
 | Rust workspace | `scriptcraft-core`, `scriptcraft-app`, `scriptcraft-layout` (`Cargo.toml`, resolver 2) |
 | App crate version | `scriptcraft-app 0.7.0`, `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
 | Distribution | **v0.7.0 tagged** at `9ce2e0e`; v0.7 packages and GitHub release notes still pending. Last published release: v0.6.1. Installed `/Applications/ScriptCraft.app` is 0.6.1 + unreleased shortcuts/theme/folder + revision M1/M2/M3 |
@@ -1161,7 +1161,7 @@ Newest entries at the bottom. Each entry: date — what changed / what was found
     --all-targets -- -D warnings`, `cargo test --workspace` green.
   - Next: M3 restore as a copy.
 
-- **2026-10-28** — v0.8 M3: restore as a copy.
+- **2026-10-28** — v0.8 M3: restore as a copy (committed as `2708838`).
   - `scriptcraft-core/src/kitsp.rs`: public `restore_revision_as_copy` and
     `RestoreReport`. The current project is copied as a template; the
     screenplay text and versioned identity/scene-meta rows are replaced with
