@@ -21,7 +21,7 @@ Status legend: `[ ]` to do `[-]` in progress `[x]` done `[!]` blocked
 | Date | 2026-10-28 |
 | Project | ScriptCraft — free, open-source, revision-first screenwriting studio |
 | Repo | `/Users/mihailmihaylov/Documents/Dev_work/scriptcraft` |
-| Branch / commit | `main`; tag `v0.7.0` at `9ce2e0e` (revision workflow); v0.8 M0 at `9bd4839`, M1 at `1948c62`; v0.8 plan written 2026-10-26 |
+| Branch / commit | `main`; tag `v0.7.0` at `9ce2e0e` (revision workflow); v0.8 M0 at `9bd4839`, M1 at `1948c62`, M2 at `b660219`; v0.8 plan written 2026-10-26 |
 | Rust workspace | `scriptcraft-core`, `scriptcraft-app`, `scriptcraft-layout` (`Cargo.toml`, resolver 2) |
 | App crate version | `scriptcraft-app 0.7.0`, `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
 | Distribution | **v0.7.0 tagged** at `9ce2e0e`; v0.7 packages and GitHub release notes still pending. Last published release: v0.6.1. Installed `/Applications/ScriptCraft.app` is 0.6.1 + unreleased shortcuts/theme/folder + revision M1/M2/M3 |
@@ -1137,7 +1137,7 @@ Newest entries at the bottom. Each entry: date — what changed / what was found
     --check`; `cargo clippy --workspace --all-targets -- -D warnings`.
   - Next: M1 `DraftDiff`.
 
-- **2026-10-28** — v0.8 M2: compare workspace.
+- **2026-10-28** — v0.8 M2: compare workspace (committed as `b660219`).
   - `scriptcraft-app/src/compare_view.rs`: read-only draft comparison as a
     full workspace. Base/target selectors compare any revision with the live
     draft or another revision; unified and side-by-side rows share one scroll
