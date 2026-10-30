@@ -8,17 +8,19 @@ production revisions. Open KIT projects, exchange Final Draft files, lock
 pages, issue coloured revisions, and export page-exact PDFs — offline, on
 macOS, Windows and Linux.
 
-> **Status — v0.7 revision workflow, v0.8 M3.** The current tree implements
+> **Status — v0.7 revision workflow, v0.8 M4.** The current tree implements
 > revision sets, coloured margin marks, revision pages, page locks, `42A`/`42B`
 > numbering, KIT saved-version import, and revision metadata in PDF and FDX.
 > v0.8 has started: block and scene identity survive save/reopen and external
 > KIT edits, the core has a deterministic draft-diff engine, a read-only
 > compare workspace shows any revision against the current draft (or another
-> revision), and any baseline can be restored as a new `.kitsp` without
-> touching the current draft.
+> revision), any baseline can be restored as a new `.kitsp` without touching
+> the current draft, and omitted scenes keep their production numbers while
+> their bodies stay out of the editor, statistics and PDF. Plain-text paste now
+> recognises screenplay elements.
 >
-> **Next — v0.8 revision-complete.** Omitted scenes are next, followed by dual
-> dialogue, a title-page editor, and a revision summary. See
+> **Next — v0.8 revision-complete.** Dual dialogue is next, followed by a
+> title-page editor and a revision summary. See
 > [`docs/v0.8-plan.md`](docs/v0.8-plan.md).
 
 ![ScriptCraft editor](scriptcraft-app/tests/snapshots/01_script_top.png)
@@ -63,6 +65,9 @@ app on day one.
   numbers, `(MORE)` / `(CONT'D)` markers, and zoom that scales pages without
   reflowing text.
 - Autocomplete for scene headings, characters, locations and transitions.
+- Screenplay-aware paste: plain text copied from ChatGPT or another editor is
+  split into scene headings, action, cues, parentheticals, dialogue and
+  transitions. Prose without screenplay structure still pastes as one block.
 - Undo/redo, find/replace, typewriter scrolling, multi-document support,
   autosave, and crash recovery from atomic saves.
 - Script, Research, Cards, Statistics and Settings modules, plus a Start page

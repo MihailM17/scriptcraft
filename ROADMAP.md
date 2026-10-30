@@ -25,7 +25,7 @@ Status legend: `[ ]` to do `[-]` in progress `[x]` done `[!]` blocked
 | Rust workspace | `scriptcraft-core`, `scriptcraft-app`, `scriptcraft-layout` (`Cargo.toml`, resolver 2) |
 | App crate version | `scriptcraft-app 0.7.0`, `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
 | Distribution | **v0.7.0 released 2026-10-30** — <https://github.com/MihailM17/scriptcraft/releases/tag/v0.7.0> publishes macOS arm64 DMG, Windows x64 zip and Linux x86_64 tar.gz plus `.sha256` files. Last published release: v0.7.0. Installed `/Applications/ScriptCraft.app` is 0.6.1 + unreleased shortcuts/theme/folder + revision M1–M4 |
-| Current one-liner | Free, open-source, revision-first studio: one screenplay engine (Editor 2.0), crash-safe saves + recovery, revision colours/marks/pages, compare/restore, omitted scenes, KIT version import, revision headers/title-page fields, production page locks with A/B page numbers and FDX revision metadata, OFL fonts, FDX/Fountain import/export; PDF export paginates exactly like the editor. |
+| Current one-liner | Free, open-source, revision-first studio: one screenplay engine (Editor 2.0), crash-safe saves + recovery, revision colours/marks/pages, compare/restore, omitted scenes, smart screenplay paste, KIT version import, revision headers/title-page fields, production page locks with A/B page numbers and FDX revision metadata, OFL fonts, FDX/Fountain import/export; PDF export paginates exactly like the editor. |
 | Next release | **v0.8 revision-complete** — compare/restore, omitted scenes, dual dialogue, title-page editor, revision summary, signed builds and runtime CI. See `docs/v0.8-plan.md`. |
 
 **Positioning (locked 2026-10-26):** the free, open-source, revision-first
@@ -308,6 +308,9 @@ gate**. M8 runs in parallel; M9 is continuous.
 - [x] M4 — omitted scenes: identity, numbering, `OMITTED`, pagination,
       statistics, page locks. Sidecar-only; FDX mapping deferred. Shipped
       2026-10-30.
+- [x] Smart screenplay paste — plain text from chat/other editors is split
+      into headings, action, cues, parentheticals, dialogue and transitions;
+      prose without screenplay structure keeps plain paste. Shipped 2026-10-30.
 - [ ] M5 — dual dialogue: two-column layout, editor/PDF parity, FDX, undo.
       Gate at week 8; move to v0.8.1 if pagination is at risk.
 - [ ] M6 — title-page editor with live PDF-matched preview.
@@ -1247,6 +1250,30 @@ Newest entries at the bottom. Each entry: date — what changed / what was found
     the 8 ms gate). Fixed by taking the best of five samples in
     `scriptcraft-core/src/revision.rs` (`4b37299`, `bf26b08`); CI run
     `41028081715` is green on all five jobs.
+  - Next: v0.8 M5 dual dialogue.
+
+- **2026-10-30** — Smart screenplay paste (user request: match KIT when
+  pasting text from ChatGPT). Committed as `7d1d748`.
+  - New `scriptcraft-core/src/smart_paste.rs` parses plain clipboard text with
+    blank-line-separated elements: scene headings (`INT.`/`EXT.`/`EST.`,
+    Cyrillic `ИНТ.`/`ЕКСТ.`/`НАТ.`, any case), action, character cues and
+    extensions, parentheticals, dialogue and transitions. It strips Markdown
+    bold/heading/blockquote/code-fence noise and leading scene numbers such as
+    `1. INT.` or `Scene 12: INT.`.
+  - Guard rails: all-caps action that ends a sentence stays action; a cue must
+    be followed immediately by speech and, after the first line, be preceded
+    by a blank line; parentheticals only count inside dialogue; ordinary prose
+    is rejected and pastes exactly as before.
+  - `scriptcraft-app/src/script_view.rs`: external paste first checks the
+    parser, then falls back to the old insert path. An empty host block adopts
+    the first parsed type; otherwise the first block joins the caret block and
+    the remaining blocks are inserted with their detected types. In-app
+    structured copy/paste is unchanged, and undo is one history step.
+  - Tests: 7 core parser tests and 2 app interaction tests (screenplay paste
+    types/blocks, plain prose stays one block).
+  - Verification: `cargo fmt --all -- --check`,
+    `cargo clippy --workspace --all-targets -- -D warnings`,
+    `cargo test --workspace` green; `git diff --check` clean.
   - Next: v0.8 M5 dual dialogue.
 
 ---
