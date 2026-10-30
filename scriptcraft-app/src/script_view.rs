@@ -778,9 +778,74 @@ impl Editor {
             .join("\n");
         if internal.len() > 1 && joint == text {
             self.paste_structured(internal);
+        } else if let Some(blocks) = scriptcraft_core::smart_paste::parse(text) {
+            self.paste_screenplay(&blocks);
         } else {
             self.insert(text);
         }
+    }
+
+    /// Insert recognised screenplay text as typed blocks. An empty host block
+    /// adopts the first block's type; otherwise the first block joins the
+    /// current block and the rest follow with their detected types.
+    fn paste_screenplay(&mut self, blocks: &[ScriptBlock]) {
+        if blocks.is_empty() || self.work.is_empty() {
+            return;
+        }
+        let at = self
+            .delete_selection()
+            .or_else(|| self.sel.map(|s| s.focus))
+            .unwrap_or(Pos {
+                bi: 0,
+                para: 0,
+                ch: 0,
+            });
+        let replace_host = self
+            .work
+            .get(at.bi)
+            .is_some_and(|b| at.para == 0 && at.ch == 0 && b.text.trim().is_empty());
+        let first = &blocks[0];
+
+        if replace_host {
+            if self.work[at.bi].element_type != first.element_type {
+                self.press(vec![EditCommand::SetType {
+                    bi: at.bi,
+                    t: first.element_type,
+                }]);
+            }
+            self.press(vec![EditCommand::SetText {
+                bi: at.bi,
+                text: first.text.clone(),
+            }]);
+        } else {
+            let text = match self.work.get(at.bi) {
+                Some(b) if auto_upper(b.element_type) => first.text.to_uppercase(),
+                _ => first.text.clone(),
+            };
+            self.press(vec![EditCommand::InsertText {
+                at,
+                text: text.clone(),
+            }]);
+        }
+
+        let mut caret = advance_pos(at, &first.text);
+        for (offset, block) in blocks[1..].iter().enumerate() {
+            let insert_at = at.bi + 1 + offset;
+            self.press(vec![EditCommand::InsertBlock {
+                at: insert_at,
+                block: block.clone(),
+            }]);
+            caret = advance_pos(
+                Pos {
+                    bi: insert_at,
+                    para: 0,
+                    ch: 0,
+                },
+                &block.text,
+            );
+        }
+        self.sel = Some(Selection::caret(caret));
+        self.scroll = true;
     }
 
     /// Rebuild a multi-block internal copy: the first fragment joins the

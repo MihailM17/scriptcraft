@@ -500,6 +500,94 @@ fn editor2_cut_and_paste_roundtrip() {
     );
 }
 
+/// Pasting plain screenplay text detects element types instead of dropping
+/// everything into the host block as one action paragraph.
+#[test]
+fn editor2_paste_screenplay_formats_blocks() {
+    use scriptcraft_core::model::ElementType;
+
+    let mut h = focused_harness();
+    let last = h.state().block_count() - 1;
+    let text = h.state().block_text(last).unwrap();
+    let end = (
+        last,
+        text.split('\n').count() - 1,
+        text.rsplit('\n').next().unwrap().chars().count(),
+    );
+    h.state_mut().editor2_set_selection((0, 0, 0), end);
+    h.run();
+
+    let screenplay = "\
+INT. COFFEE SHOP - DAY
+
+Sunlight cuts through the blinds.
+
+MAYA
+(to herself)
+Just one more page.
+
+She opens her laptop.
+
+CUT TO:
+
+EXT. STREET - NIGHT
+
+Rain falls.";
+    h.input_mut()
+        .events
+        .push(egui::Event::Paste(screenplay.into()));
+    h.run();
+
+    let got: Vec<(ElementType, String)> = (0..h.state().block_count())
+        .map(|bi| {
+            (
+                h.state().block_element_type(bi).unwrap(),
+                h.state().block_text(bi).unwrap(),
+            )
+        })
+        .collect();
+    use ElementType::*;
+    assert_eq!(
+        got,
+        vec![
+            (SceneHeading, "INT. COFFEE SHOP - DAY".into()),
+            (Action, "Sunlight cuts through the blinds.".into()),
+            (Character, "MAYA".into()),
+            (Parenthetical, "(to herself)".into()),
+            (Dialogue, "Just one more page.".into()),
+            (Action, "She opens her laptop.".into()),
+            (Transition, "CUT TO:".into()),
+            (SceneHeading, "EXT. STREET - NIGHT".into()),
+            (Action, "Rain falls.".into()),
+        ]
+    );
+}
+
+/// Ordinary multi-line text keeps the old paste behaviour: one block, not a
+/// guessed screenplay.
+#[test]
+fn editor2_paste_plain_prose_stays_one_block() {
+    use scriptcraft_core::model::ElementType;
+
+    let mut h = focused_harness();
+    let bi = (0..h.state().block_count())
+        .find(|&bi| h.state().block_element_type(bi) == Some(ElementType::Action))
+        .expect("action block");
+    let text = h.state().block_text(bi).unwrap();
+    let len = text.chars().count();
+    h.state_mut()
+        .editor2_set_selection((bi, 0, 0), (bi, 0, len));
+    h.run();
+    let count = h.state().block_count();
+
+    let prose = "Meet me at 10.\nBring the notes.";
+    h.input_mut().events.push(egui::Event::Paste(prose.into()));
+    h.run();
+
+    assert_eq!(h.state().block_count(), count, "prose must not add blocks");
+    assert_eq!(h.state().block_text(bi).unwrap(), prose);
+}
+
 /// Fit Page / Fit Width lock the zoom to the viewport: the whole page (or
 /// its width) stays visible at any window size, and manual zoom unlocks.
 #[test]
