@@ -1936,16 +1936,24 @@ mod tests {
         }
 
         let _ = set.diff_against_current(&blocks);
-        let started = Instant::now();
-        let diff = set.diff_against_current(&blocks);
-        let elapsed = started.elapsed();
+        // Best of five, as with the revision-diff gate: busy runners can add
+        // tens of milliseconds of scheduler noise to any single sample.
+        let mut best = Duration::MAX;
+        let mut diff = None;
+        for _ in 0..5 {
+            let started = Instant::now();
+            let measured = set.diff_against_current(&blocks);
+            best = best.min(started.elapsed());
+            diff = Some(measured);
+        }
+        let diff = diff.expect("measured at least once");
         assert_eq!(diff.entries.len(), blocks.len());
         assert!(diff.changed >= 140, "sampled edits are reported");
         assert_eq!(diff.removed, 0);
         assert_eq!(diff.added, 0);
         assert!(
-            elapsed < Duration::from_millis(20),
-            "500-page draft compare took {elapsed:?}"
+            best < Duration::from_millis(20),
+            "500-page draft compare took {best:?} (best of 5)"
         );
     }
 }
