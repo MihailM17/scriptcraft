@@ -21,10 +21,10 @@ Status legend: `[ ]` to do `[-]` in progress `[x]` done `[!]` blocked
 | Date | 2026-10-30 |
 | Project | ScriptCraft — free, open-source, revision-first screenwriting studio |
 | Repo | `/Users/mihailmihaylov/Documents/Dev_work/scriptcraft` |
-| Branch / commit | `main`; tag `v0.7.0` at `9ce2e0e` (revision workflow); v0.8 M0 at `9bd4839`, M1 at `1948c62`, M2 at `b660219`, M3 at `2708838`, M4 at `e840a67`; v0.8 plan written 2026-10-26 |
+| Branch / commit | `main` at `bf26b08`; tag `v0.7.0` at `9ce2e0e` (revision workflow); v0.8 M0 at `9bd4839`, M1 at `1948c62`, M2 at `b660219`, M3 at `2708838`, M4 at `e840a67`; v0.8 plan written 2026-10-26 |
 | Rust workspace | `scriptcraft-core`, `scriptcraft-app`, `scriptcraft-layout` (`Cargo.toml`, resolver 2) |
 | App crate version | `scriptcraft-app 0.7.0`, `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
-| Distribution | **v0.7.0 tagged** at `9ce2e0e`; v0.7 packages and GitHub release notes still pending. Last published release: v0.6.1. Installed `/Applications/ScriptCraft.app` is 0.6.1 + unreleased shortcuts/theme/folder + revision M1–M4 |
+| Distribution | **v0.7.0 released 2026-10-30** — <https://github.com/MihailM17/scriptcraft/releases/tag/v0.7.0> publishes macOS arm64 DMG, Windows x64 zip and Linux x86_64 tar.gz plus `.sha256` files. Last published release: v0.7.0. Installed `/Applications/ScriptCraft.app` is 0.6.1 + unreleased shortcuts/theme/folder + revision M1–M4 |
 | Current one-liner | Free, open-source, revision-first studio: one screenplay engine (Editor 2.0), crash-safe saves + recovery, revision colours/marks/pages, compare/restore, omitted scenes, KIT version import, revision headers/title-page fields, production page locks with A/B page numbers and FDX revision metadata, OFL fonts, FDX/Fountain import/export; PDF export paginates exactly like the editor. |
 | Next release | **v0.8 revision-complete** — compare/restore, omitted scenes, dual dialogue, title-page editor, revision summary, signed builds and runtime CI. See `docs/v0.8-plan.md`. |
 
@@ -1223,6 +1223,31 @@ Newest entries at the bottom. Each entry: date — what changed / what was found
   - Verification: `cargo fmt --all -- --check`, `cargo clippy --workspace
     --all-targets -- -D warnings`, `cargo test --workspace` green.
   - Next: M5 dual dialogue.
+
+- **2026-10-30** — Released **v0.7.0** (user request: publish to GitHub).
+  - Pushed `main` through `bcc4713` and tag `v0.7.0` (`9ce2e0e`), then
+    published <https://github.com/MihailM17/scriptcraft/releases/tag/v0.7.0>
+    with three archives plus `.sha256` files:
+    - `ScriptCraft-0.7.0-macos-arm64.dmg` (7,869,402 bytes) SHA-256
+      `c46ab013bdfcbc272318d56031cbfba00ae71a9d741cd041d3e4113e3dbf1119`;
+      built locally from a detached worktree at the tag, ad-hoc signed,
+      version 0.7.0 and `Applications` symlink verified on the mounted DMG.
+    - `ScriptCraft-0.7.0-windows-x64.zip` (6,379,060 bytes) SHA-256
+      `20d723c7734186d9ed9dd3a4b1a1964ea9aaf5962c1192e94862faae1c057236`.
+    - `ScriptCraft-0.7.0-linux-x86_64.tar.gz` (10,664,528 bytes) SHA-256
+      `1541e562c0a6fccd6aaad25bd7410609a281bf6b6ccd0ae129ef627ecdaa7719`.
+    - Windows/Linux came from Packages run `41026658998` on tag `v0.7.0`;
+      upstream checksum files verified after download. The release notes cover
+      only the v0.7 revision workflow; v0.8 M0–M4 are not in the artifacts.
+  - Tag workspace gate: `cargo fmt --all -- --check`, clippy with `-D
+    warnings`, `cargo test --workspace`, `cargo deny check` and `cargo
+    metadata --locked` green.
+  - CI run `41026931044` failed only the single-sample 500-page timing gates
+    while another run shared the runners (Linux 8.55 ms, Windows 9.02 ms for
+    the 8 ms gate). Fixed by taking the best of five samples in
+    `scriptcraft-core/src/revision.rs` (`4b37299`, `bf26b08`); CI run
+    `41028081715` is green on all five jobs.
+  - Next: v0.8 M5 dual dialogue.
 
 ---
 
