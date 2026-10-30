@@ -286,16 +286,26 @@ pub fn layout_pages_with_marks_and_latest(
     marks: &[Option<RevisionColor>],
     latest: Option<&RevisionSet>,
 ) -> Vec<Vec<PrintLine>> {
-    let blocks: Vec<usize> = (0..p.blocks.len())
-        .filter(|&i| p.blocks[i].element_type.is_printable())
+    // Omitted scenes collapse to heading + OMITTED; everything downstream
+    // (pagination, scene numbering, revision marks) sees the page view.
+    let view = p.has_omitted_scenes().then(|| p.document_view());
+    let source_blocks = view.as_ref().map(|v| &v.blocks).unwrap_or(&p.blocks);
+    let blocks: Vec<usize> = (0..source_blocks.len())
+        .filter(|&i| source_blocks[i].element_type.is_printable())
         .collect();
     let renum: Vec<scriptcraft_core::model::ScriptBlock> =
-        blocks.iter().map(|&i| p.blocks[i].clone()).collect();
+        blocks.iter().map(|&i| source_blocks[i].clone()).collect();
     let show_marks = opts.revision_marks || opts.revision_pages_only;
     let revisions: Vec<Option<RevisionColor>> = if show_marks {
         blocks
             .iter()
-            .map(|&i| marks.get(i).copied().flatten())
+            .map(|&i| {
+                let original = view
+                    .as_ref()
+                    .and_then(|view| view.revision_sources.get(i).copied().flatten())
+                    .or_else(|| view.is_none().then_some(i));
+                original.and_then(|bi| marks.get(bi).copied().flatten())
+            })
             .collect()
     } else {
         vec![None; blocks.len()]
@@ -303,10 +313,32 @@ pub fn layout_pages_with_marks_and_latest(
     let page_lock = PageLock::from_json(&meta.locked_pages)
         .ok()
         .filter(|l| !l.is_empty());
-    let page_anchors = page_lock
-        .as_ref()
-        .map(|l| l.resolve(&renum))
-        .unwrap_or_default();
+    let page_anchors = match (&page_lock, &view) {
+        (Some(lock), Some(view)) => {
+            // Omission-aware anchors already carry vanished body-page labels
+            // forward; map them from the full view onto the printable view.
+            let view_to_print: Vec<Option<usize>> = {
+                let mut map = vec![None; view.blocks.len()];
+                for (pi, &vi) in blocks.iter().enumerate() {
+                    map[vi] = Some(pi);
+                }
+                map
+            };
+            lock.resolve_view(&p.blocks, view)
+                .into_iter()
+                .filter_map(|anchor| {
+                    let pi = view_to_print.get(anchor.bi).copied().flatten()?;
+                    Some(scriptcraft_core::page_lock::ResolvedAnchor {
+                        bi: pi,
+                        para: anchor.para,
+                        page: anchor.page,
+                    })
+                })
+                .collect()
+        }
+        (Some(lock), None) => lock.resolve(&renum),
+        (None, _) => Vec::new(),
+    };
     let breaks: Vec<(usize, usize)> = page_anchors.iter().map(|a| (a.bi, a.para)).collect();
     let pages = if page_lock.is_some() {
         paginate_with_breaks(&renum, &RUSSIAN, &breaks)

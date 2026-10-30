@@ -108,6 +108,10 @@ fn snap_08_export_dialog() {
     h.get_by_label("Additional (Numbering, Title Page etc.)")
         .click_accesskit();
     h.run();
+    // The accesskit click leaves the synthetic pointer over the navigator;
+    // clear it so the snapshot shows the dialog, not an incidental hover.
+    h.input_mut().events.push(egui::Event::PointerGone);
+    h.run();
     h.snapshot("08_export_dialog");
 }
 

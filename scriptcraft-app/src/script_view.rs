@@ -155,6 +155,11 @@ pub struct EditState {
 pub struct ScriptViewStyle<'a> {
     pub typewriter: bool,
     pub revision_colors: &'a [Option<RevisionColor>],
+    /// Block ids hidden by omitted scenes; the caret skips over them.
+    pub hidden_blocks: &'a [uuid::Uuid],
+    /// Heading ids of omitted scenes; Enter there is refused so the hidden
+    /// body cannot be split into view.
+    pub omitted_headings: &'a [uuid::Uuid],
 }
 
 /// What the widget wants the app to apply this frame.
@@ -180,6 +185,8 @@ pub fn script_view(
     let ScriptViewStyle {
         typewriter,
         revision_colors,
+        hidden_blocks,
+        omitted_headings,
     } = style;
     let page = page_size_pt(zoom);
     let scale = PT_PER_MM * zoom;
@@ -334,7 +341,15 @@ pub fn script_view(
                 }
             }
             if focused {
-                let (edited, moved) = handle_events(ui, doc, &mut ed, &events, state);
+                let (edited, moved) = handle_events(
+                    ui,
+                    doc,
+                    &mut ed,
+                    &events,
+                    state,
+                    hidden_blocks,
+                    omitted_headings,
+                );
                 text_edited |= edited;
                 caret_moved |= moved;
             }
@@ -417,8 +432,8 @@ pub fn script_view(
                     }
                 }
                 let revision = line
-                    .span
-                    .and_then(|s| revision_colors.get(s.bi).copied().flatten());
+                    .source_bi
+                    .and_then(|bi| revision_colors.get(bi).copied().flatten());
                 paint_line(
                     painter,
                     prect,
@@ -574,6 +589,8 @@ fn handle_events(
     ed: &mut Editor,
     events: &[egui::Event],
     state: &mut EditState,
+    hidden_blocks: &[uuid::Uuid],
+    omitted_headings: &[uuid::Uuid],
 ) -> (bool, bool) {
     let mut text_edited = false;
     let mut caret_moved = false;
@@ -600,9 +617,10 @@ fn handle_events(
                 ..
             } => {
                 if modifiers.command && *key == egui::Key::A {
-                    if let (Some(first), Some(last)) =
-                        (first_pos(ed.blocks()), last_pos(ed.blocks()))
-                    {
+                    if let (Some(first), Some(last)) = (
+                        first_visible_pos(ed.blocks(), hidden_blocks),
+                        last_visible_pos(ed.blocks(), hidden_blocks),
+                    ) {
                         ed.set_selection(first, last);
                         ed.scroll = true;
                     }
@@ -612,7 +630,15 @@ fn handle_events(
                 if modifiers.command || modifiers.alt {
                     continue;
                 }
-                if let Some(action) = key_action(ed.blocks(), doc, ed.sel, *key, *modifiers) {
+                if let Some(action) = key_action(
+                    ed.blocks(),
+                    doc,
+                    ed.sel,
+                    *key,
+                    *modifiers,
+                    hidden_blocks,
+                    omitted_headings,
+                ) {
                     let edited = !action.commands.is_empty();
                     ed.sel = action.selection;
                     ed.press(action.commands);
@@ -849,6 +875,8 @@ fn key_action(
     sel: Option<Selection>,
     key: egui::Key,
     mods: egui::Modifiers,
+    hidden: &[uuid::Uuid],
+    omitted_headings: &[uuid::Uuid],
 ) -> Option<KeyAction> {
     use egui::Key;
     if blocks.is_empty() {
@@ -871,9 +899,9 @@ fn key_action(
                 return Some(KeyAction::caret_at(if right { f } else { a }));
             }
             let Some(target) = (if right {
-                next_pos(blocks, caret)
+                next_visible_pos(blocks, hidden, caret)
             } else {
-                prev_pos(blocks, caret)
+                prev_visible_pos(blocks, hidden, caret)
             }) else {
                 return Some(KeyAction::caret_at(caret));
             };
@@ -962,7 +990,7 @@ fn key_action(
                     scroll: true,
                 });
             }
-            let (commands, target) = backspace_cmds(blocks, caret);
+            let (commands, target) = backspace_cmds(blocks, hidden, caret);
             Some(KeyAction {
                 selection: Some(Selection::caret(target.unwrap_or(caret))),
                 commands,
@@ -979,12 +1007,18 @@ fn key_action(
             }
             Some(KeyAction {
                 selection: Some(Selection::caret(caret)),
-                commands: delete_fwd_cmds(blocks, caret),
+                commands: delete_fwd_cmds(blocks, hidden, caret),
                 scroll: true,
             })
         }
         Key::Enter => {
             let at = if collapsed { caret } else { a };
+            let at_omitted_heading = blocks
+                .get(at.bi)
+                .is_some_and(|b| omitted_headings.contains(&b.id));
+            if at_omitted_heading {
+                return Some(KeyAction::caret_at(caret));
+            }
             let mut commands = if collapsed {
                 Vec::new()
             } else {
@@ -1022,17 +1056,20 @@ fn key_action(
     }
 }
 
-fn first_pos(blocks: &[ScriptBlock]) -> Option<Pos> {
-    (!blocks.is_empty()).then_some(Pos {
-        bi: 0,
-        para: 0,
-        ch: 0,
-    })
+fn hidden_at(blocks: &[ScriptBlock], hidden: &[uuid::Uuid], bi: usize) -> bool {
+    blocks.get(bi).is_some_and(|b| hidden.contains(&b.id))
 }
 
-fn last_pos(blocks: &[ScriptBlock]) -> Option<Pos> {
-    let bi = blocks.len().checked_sub(1)?;
-    let para = blocks[bi].text.split('\n').count() - 1;
+fn first_visible_pos(blocks: &[ScriptBlock], hidden: &[uuid::Uuid]) -> Option<Pos> {
+    let bi = (0..blocks.len()).find(|&bi| !hidden_at(blocks, hidden, bi))?;
+    Some(Pos { bi, para: 0, ch: 0 })
+}
+
+fn last_visible_pos(blocks: &[ScriptBlock], hidden: &[uuid::Uuid]) -> Option<Pos> {
+    let bi = (0..blocks.len())
+        .rev()
+        .find(|&bi| !hidden_at(blocks, hidden, bi))?;
+    let para = paragraph_count(blocks, bi) - 1;
     Some(Pos {
         bi,
         para,
@@ -1094,6 +1131,38 @@ fn next_pos(blocks: &[ScriptBlock], p: Pos) -> Option<Pos> {
         ch: 0,
     })
     .filter(|q| q.bi < blocks.len())
+}
+
+fn prev_visible_pos(blocks: &[ScriptBlock], hidden: &[uuid::Uuid], p: Pos) -> Option<Pos> {
+    let mut q = prev_pos(blocks, p)?;
+    if hidden_at(blocks, hidden, q.bi) {
+        let mut bi = q.bi;
+        while hidden_at(blocks, hidden, bi) {
+            bi = bi.checked_sub(1)?;
+        }
+        let para = paragraph_count(blocks, bi) - 1;
+        q = Pos {
+            bi,
+            para,
+            ch: paragraph_len(blocks, bi, para),
+        };
+    }
+    Some(q)
+}
+
+fn next_visible_pos(blocks: &[ScriptBlock], hidden: &[uuid::Uuid], p: Pos) -> Option<Pos> {
+    let mut q = next_pos(blocks, p)?;
+    if hidden_at(blocks, hidden, q.bi) {
+        let mut bi = q.bi;
+        while bi < blocks.len() && hidden_at(blocks, hidden, bi) {
+            bi += 1;
+        }
+        if bi >= blocks.len() {
+            return None;
+        }
+        q = Pos { bi, para: 0, ch: 0 };
+    }
+    Some(q)
 }
 
 /// Position after inserting `text` at `at` (paragraphs advance, not blocks).
@@ -1218,10 +1287,19 @@ fn delete_selection_cmds(blocks: &[ScriptBlock], a: Pos, f: Pos) -> Vec<EditComm
 }
 
 /// Backspace at a position; returns the commands and the resulting caret.
-fn backspace_cmds(blocks: &[ScriptBlock], p: Pos) -> (Vec<EditCommand>, Option<Pos>) {
+fn backspace_cmds(
+    blocks: &[ScriptBlock],
+    hidden: &[uuid::Uuid],
+    p: Pos,
+) -> (Vec<EditCommand>, Option<Pos>) {
     if p.para == 0 && p.ch == 0 {
         if p.bi == 0 {
             return (Vec::new(), None);
+        }
+        // Never merge the heading into a hidden body: omission is a view
+        // state, not permission to rewrite the stored scene.
+        if hidden_at(blocks, hidden, p.bi - 1) {
+            return (Vec::new(), Some(p));
         }
         let upper = p.bi - 1;
         let para = paragraph_count(blocks, upper).saturating_sub(1);
@@ -1240,7 +1318,7 @@ fn backspace_cmds(blocks: &[ScriptBlock], p: Pos) -> (Vec<EditCommand>, Option<P
             Some(caret),
         );
     }
-    let Some(prev) = prev_pos(blocks, p) else {
+    let Some(prev) = prev_visible_pos(blocks, hidden, p) else {
         return (Vec::new(), None);
     };
     (
@@ -1254,11 +1332,14 @@ fn backspace_cmds(blocks: &[ScriptBlock], p: Pos) -> (Vec<EditCommand>, Option<P
 
 /// Forward delete at a position (Delete key), including joining the next
 /// block when pressed at the very end.
-fn delete_fwd_cmds(blocks: &[ScriptBlock], p: Pos) -> Vec<EditCommand> {
+fn delete_fwd_cmds(blocks: &[ScriptBlock], hidden: &[uuid::Uuid], p: Pos) -> Vec<EditCommand> {
     let last_para = paragraph_count(blocks, p.bi).saturating_sub(1);
     let at_end = p.para == last_para && p.ch == paragraph_len(blocks, p.bi, last_para);
     if at_end {
         if p.bi + 1 < blocks.len() {
+            if hidden_at(blocks, hidden, p.bi + 1) {
+                return Vec::new();
+            }
             return vec![EditCommand::MergeBlocks {
                 bi: p.bi + 1,
                 fuse: p.ch > 0,
@@ -1266,7 +1347,7 @@ fn delete_fwd_cmds(blocks: &[ScriptBlock], p: Pos) -> Vec<EditCommand> {
         }
         return Vec::new();
     }
-    match next_pos(blocks, p) {
+    match next_visible_pos(blocks, hidden, p) {
         Some(next) => vec![EditCommand::DeleteRange {
             start: p,
             end: next,
@@ -1530,7 +1611,7 @@ fn paint_line(
     let size = galley.size();
     let x = prect.left() + PAD_L_MM * scale + line.x_mm * scale;
     let y = prect.top() + PAD_T_MM * scale + line.row as f32 * row_h;
-    if line.role == LineRole::Body {
+    if matches!(line.role, LineRole::Body | LineRole::Omitted) {
         if let Some(revision) = revision {
             let mark = egui::Rect::from_min_size(
                 egui::pos2(prect.left() + REVISION_BAR_X_MM * scale, y),
@@ -1595,6 +1676,7 @@ fn line_galley(
 fn line_color(line: &PlacedLine, blocks: &[ScriptBlock], c: &KitColors) -> egui::Color32 {
     match line.role {
         LineRole::SceneNumber => c.disabled_text,
+        LineRole::Omitted => c.disabled_text,
         LineRole::Body => match line.span.and_then(|s| blocks.get(s.bi)) {
             Some(b) if b.element_type == ElementType::NonPrintable => c.disabled_text,
             Some(b) if b.element_type == ElementType::SceneHeading => c.heading_text,
@@ -1903,6 +1985,8 @@ mod tests {
             Some(Selection::caret(caret)),
             egui::Key::ArrowDown,
             egui::Modifiers::NONE,
+            &[],
+            &[],
         )
         .expect("arrow down is handled");
         let target = down.selection.unwrap().focus;
@@ -1922,6 +2006,8 @@ mod tests {
             })),
             egui::Key::ArrowDown,
             egui::Modifiers::NONE,
+            &[],
+            &[],
         )
         .expect("handled");
         assert_eq!(
@@ -1980,6 +2066,7 @@ mod tests {
         let mut b = sample();
         let cmds = backspace_cmds(
             &b,
+            &[],
             Pos {
                 bi: 2,
                 para: 0,
@@ -2081,7 +2168,16 @@ mod tests {
             para: 0,
             ch: 0,
         }));
-        let next = key_action(&blocks, &doc, sel, egui::Key::Tab, egui::Modifiers::NONE).unwrap();
+        let next = key_action(
+            &blocks,
+            &doc,
+            sel,
+            egui::Key::Tab,
+            egui::Modifiers::NONE,
+            &[],
+            &[],
+        )
+        .unwrap();
         assert_eq!(
             next.commands,
             vec![EditCommand::SetType {
@@ -2089,7 +2185,16 @@ mod tests {
                 t: tab_next(ElementType::Action),
             }]
         );
-        let prev = key_action(&blocks, &doc, sel, egui::Key::Tab, egui::Modifiers::SHIFT).unwrap();
+        let prev = key_action(
+            &blocks,
+            &doc,
+            sel,
+            egui::Key::Tab,
+            egui::Modifiers::SHIFT,
+            &[],
+            &[],
+        )
+        .unwrap();
         assert_eq!(
             prev.commands,
             vec![EditCommand::SetType {
@@ -2115,6 +2220,8 @@ mod tests {
             sel,
             egui::Key::ArrowRight,
             egui::Modifiers::SHIFT,
+            &[],
+            &[],
         )
         .unwrap();
         let new_sel = action.selection.unwrap();

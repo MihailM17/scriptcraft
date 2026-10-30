@@ -9,4 +9,4 @@ pub mod model;
 pub mod page_lock;
 pub mod revision;
 
-pub use model::{ElementType, Project, Scene, SceneMeta, ScriptBlock, Stats};
+pub use model::{DocumentView, ElementType, Project, Scene, SceneMeta, ScriptBlock, Stats};

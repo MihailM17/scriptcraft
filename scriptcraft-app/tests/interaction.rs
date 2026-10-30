@@ -1387,3 +1387,270 @@ fn restore_revision_as_copy_leaves_original_and_opens_copy() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Menu ▸ Omit Scene hides the body from pages and statistics while the
+/// heading, scene number and identity stay; Restore Scene brings it back.
+/// FDX/Fountain exports name the unsupported omission instead of silently
+/// dropping the scene.
+#[test]
+fn omitted_scene_menu_hides_body_stats_and_reports_export_loss() {
+    let mut h = harness(SideTab::Script);
+    h.run();
+
+    let pages_before = h.state().page_count();
+    let words_before = h.state().stats_for_test().words;
+    let blocks_before = h.state().stats_for_test().blocks;
+    let scenes_before = h.state().stats_for_test().scenes;
+    let heading = h.state().scene_heading_block_for_test(0).expect("heading");
+
+    h.get_by_label("Menu").click();
+    h.run();
+    assert!(
+        h.query_by_label("Omit Scene").is_some(),
+        "the Menu must offer Omit Scene"
+    );
+    h.get_by_label("Omit Scene").click();
+    h.run();
+
+    assert!(h.state().scene_omitted_for_test(0));
+    assert_eq!(h.state().omitted_scene_count_for_test(), 1);
+    assert_eq!(h.state().scene_count_for_test(), scenes_before);
+    let hidden = h.state().hidden_block_indices_for_test();
+    assert!(!hidden.is_empty(), "an omitted scene hides its body");
+    assert!(!hidden.contains(&heading), "the heading stays visible");
+    assert_eq!(h.state().hidden_block_count_for_test(), hidden.len());
+
+    let stats = h.state().stats_for_test();
+    assert_eq!(stats.scenes, scenes_before, "scene count stays intact");
+    assert_eq!(stats.blocks, blocks_before - hidden.len());
+    assert!(stats.words < words_before, "omitted words leave statistics");
+    assert!(
+        h.state().page_count() < pages_before,
+        "body pages disappear"
+    );
+
+    let lines = h.state().doc_lines_for_test();
+    assert!(
+        lines
+            .iter()
+            .any(|(_, text, role)| text == "OMITTED" && role == "Omitted"),
+        "the page prints a synthetic OMITTED row"
+    );
+    let body = hidden
+        .iter()
+        .find_map(|&bi| {
+            let text = h.state().block_text(bi)?;
+            (!text.trim().is_empty()).then_some(text)
+        })
+        .expect("omitted scene has body text");
+    assert!(
+        !lines
+            .iter()
+            .any(|(_, text, role)| role == "Body" && text == &body),
+        "hidden body text must not print"
+    );
+
+    let fdx = h.state().omission_export_note_for_test("FDX");
+    assert!(fdx.contains("Omission is unsupported in FDX"));
+    assert!(fdx.contains("1 omitted scene"));
+    let fountain = h.state().omission_export_note_for_test("Fountain");
+    assert!(fountain.contains("Omission is unsupported in Fountain"));
+
+    h.get_by_label("Menu").click();
+    h.run();
+    assert!(
+        h.query_by_label("Restore Scene").is_some(),
+        "the Menu must offer Restore Scene while the scene is omitted"
+    );
+    h.get_by_label("Restore Scene").click();
+    h.run();
+
+    assert!(!h.state().scene_omitted_for_test(0));
+    assert_eq!(h.state().omitted_scene_count_for_test(), 0);
+    assert_eq!(h.state().stats_for_test().words, words_before);
+    assert_eq!(h.state().page_count(), pages_before);
+    assert!(
+        !h.state()
+            .doc_lines_for_test()
+            .iter()
+            .any(|(_, text, role)| text == "OMITTED" && role == "Omitted"),
+        "restoring removes the synthetic marker"
+    );
+}
+
+/// The caret skips an omitted body and edits inside it are refused until the
+/// scene is restored.
+#[test]
+fn editor_navigation_skips_omitted_body_and_refuses_hidden_edits() {
+    let mut h = focused_harness();
+    let heading = h.state().scene_heading_block_for_test(0).expect("heading");
+    h.state_mut().set_scene_omitted_for_test(0, true);
+    h.run();
+
+    let hidden = h.state().hidden_block_indices_for_test();
+    assert!(!hidden.is_empty());
+
+    h.state_mut().focus_block_at(heading, 0);
+    h.run();
+    h.key_press(egui::Key::ArrowDown);
+    h.run();
+    let (_, focus) = h.state().editor2_selection().expect("caret");
+    assert!(
+        !hidden.contains(&focus.0),
+        "arrow navigation must skip hidden body blocks; landed on {focus:?}"
+    );
+
+    let hidden_bi = hidden[0];
+    let original = h.state().block_text(hidden_bi).expect("hidden body text");
+    h.state_mut()
+        .set_block_text_for_test(hidden_bi, "THIS MUST NOT LAND");
+    h.run();
+    assert_eq!(
+        h.state().block_text(hidden_bi).as_deref(),
+        Some(original.as_str()),
+        "editing a hidden body block must be refused"
+    );
+    assert!(h.state().status_for_test().contains("omitted"));
+
+    h.state_mut().set_scene_omitted_for_test(0, false);
+    h.run();
+    h.state_mut()
+        .set_block_text_for_test(hidden_bi, "EDITED AFTER RESTORE");
+    h.run();
+    assert_eq!(
+        h.state().block_text(hidden_bi).as_deref(),
+        Some("EDITED AFTER RESTORE"),
+        "restoring the scene makes its body editable again"
+    );
+}
+
+/// Locked pages keep every scene heading on its production page across
+/// omission, and both omission and the lock survive Save/reopen.
+#[test]
+fn omitted_scene_persists_with_page_locks_and_keeps_later_numbers() {
+    use scriptcraft_core::kitsp;
+    use scriptcraft_core::model::{ElementType, Project, ScriptBlock};
+
+    fn project() -> Project {
+        let mut blocks = Vec::new();
+        for scene in 1..=4 {
+            blocks.push(ScriptBlock::new(
+                ElementType::SceneHeading,
+                format!("INT. OMIT TEST {scene} - DAY"),
+            ));
+            for line in 0..40 {
+                blocks.push(ScriptBlock::new(
+                    ElementType::Action,
+                    format!("Omit test scene {scene} action line {line}."),
+                ));
+            }
+        }
+        Project {
+            title: "Omission Test".into(),
+            blocks,
+            scene_meta: Vec::new(),
+        }
+    }
+
+    fn heading_pages(h: &Harness<'static, ScriptCraftApp>) -> Vec<(String, Option<String>)> {
+        let lines = h.state().doc_lines_for_test();
+        (1..=4)
+            .map(|scene| {
+                let heading = format!("INT. OMIT TEST {scene} - DAY");
+                let page = lines
+                    .iter()
+                    .find(|(_, text, role)| role == "Body" && text == &heading)
+                    .map(|(page, _, _)| page.clone())
+                    .unwrap_or_else(|| panic!("heading {scene} must print"));
+                (heading, page)
+            })
+            .collect()
+    }
+
+    let dir =
+        std::env::temp_dir().join(format!("scriptcraft-omission-lock-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("Omission.kitsp");
+    let path_str = path.to_string_lossy().into_owned();
+    kitsp::create_file(&path, "Omission Test").expect("create");
+    kitsp::save_file(&path, &project()).expect("save project");
+
+    let mut h = harness(SideTab::Script);
+    h.run();
+    h.state_mut().open_path(&path_str);
+    h.run();
+
+    h.state_mut().lock_pages_for_test();
+    h.run();
+    let lock = h.state().page_lock_for_test().expect("pages locked");
+    let pages_before = h.state().page_count();
+    let headings_before = heading_pages(&h);
+    assert!(
+        pages_before >= 4,
+        "the synthetic script must span several pages"
+    );
+
+    h.state_mut().set_scene_omitted_for_test(1, true);
+    h.run();
+    assert!(h.state().scene_omitted_for_test(1));
+    assert!(
+        h.state().page_count() < pages_before,
+        "body pages disappear"
+    );
+    assert_eq!(
+        h.state().page_lock_for_test(),
+        Some(lock.clone()),
+        "omission must not rewrite the lock"
+    );
+    assert_eq!(
+        heading_pages(&h),
+        headings_before,
+        "later headings keep their locked page numbers"
+    );
+
+    h.get_by_label("Menu").click();
+    h.run();
+    h.get_by_label("Save").click();
+    h.run();
+    assert!(!h.state().is_dirty());
+
+    let mut reopened = harness(SideTab::Script);
+    reopened.run();
+    reopened.state_mut().open_path(&path_str);
+    reopened.run();
+    assert!(
+        reopened.state().scene_omitted_for_test(1),
+        "omission survives Save/reopen"
+    );
+    assert_eq!(reopened.state().omitted_scene_count_for_test(), 1);
+    assert_eq!(
+        reopened.state().page_lock_for_test(),
+        Some(lock),
+        "the production lock survives Save/reopen"
+    );
+    assert_eq!(
+        heading_pages(&reopened),
+        headings_before,
+        "reopened pages still use the locked numbers"
+    );
+    assert!(reopened.state().page_count() < pages_before);
+
+    // Restoring and saving brings the body and the original page count back.
+    reopened.state_mut().set_scene_omitted_for_test(1, false);
+    reopened.run();
+    reopened.get_by_label("Menu").click();
+    reopened.run();
+    reopened.get_by_label("Save").click();
+    reopened.run();
+
+    let mut restored = harness(SideTab::Script);
+    restored.run();
+    restored.state_mut().open_path(&path_str);
+    restored.run();
+    assert!(!restored.state().scene_omitted_for_test(1));
+    assert_eq!(restored.state().omitted_scene_count_for_test(), 0);
+    assert!(restored.state().hidden_block_indices_for_test().is_empty());
+    assert_eq!(restored.state().page_count(), pages_before);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

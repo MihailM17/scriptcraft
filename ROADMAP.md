@@ -18,14 +18,14 @@ Status legend: `[ ]` to do `[-]` in progress `[x]` done `[!]` blocked
 
 | Field | Value |
 |---|---|
-| Date | 2026-10-28 |
+| Date | 2026-10-30 |
 | Project | ScriptCraft — free, open-source, revision-first screenwriting studio |
 | Repo | `/Users/mihailmihaylov/Documents/Dev_work/scriptcraft` |
-| Branch / commit | `main`; tag `v0.7.0` at `9ce2e0e` (revision workflow); v0.8 M0 at `9bd4839`, M1 at `1948c62`, M2 at `b660219`, M3 at `2708838`; v0.8 plan written 2026-10-26 |
+| Branch / commit | `main`; tag `v0.7.0` at `9ce2e0e` (revision workflow); v0.8 M0 at `9bd4839`, M1 at `1948c62`, M2 at `b660219`, M3 at `2708838`; M4 implemented 2026-10-30; v0.8 plan written 2026-10-26 |
 | Rust workspace | `scriptcraft-core`, `scriptcraft-app`, `scriptcraft-layout` (`Cargo.toml`, resolver 2) |
 | App crate version | `scriptcraft-app 0.7.0`, `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
-| Distribution | **v0.7.0 tagged** at `9ce2e0e`; v0.7 packages and GitHub release notes still pending. Last published release: v0.6.1. Installed `/Applications/ScriptCraft.app` is 0.6.1 + unreleased shortcuts/theme/folder + revision M1/M2/M3 |
-| Current one-liner | Free, open-source, revision-first studio: one screenplay engine (Editor 2.0), crash-safe saves + recovery, revision colours/marks/pages, KIT version import, revision headers/title-page fields, production page locks with A/B page numbers and FDX revision metadata, OFL fonts, FDX/Fountain import/export; PDF export paginates exactly like the editor. |
+| Distribution | **v0.7.0 tagged** at `9ce2e0e`; v0.7 packages and GitHub release notes still pending. Last published release: v0.6.1. Installed `/Applications/ScriptCraft.app` is 0.6.1 + unreleased shortcuts/theme/folder + revision M1–M4 |
+| Current one-liner | Free, open-source, revision-first studio: one screenplay engine (Editor 2.0), crash-safe saves + recovery, revision colours/marks/pages, compare/restore, omitted scenes, KIT version import, revision headers/title-page fields, production page locks with A/B page numbers and FDX revision metadata, OFL fonts, FDX/Fountain import/export; PDF export paginates exactly like the editor. |
 | Next release | **v0.8 revision-complete** — compare/restore, omitted scenes, dual dialogue, title-page editor, revision summary, signed builds and runtime CI. See `docs/v0.8-plan.md`. |
 
 **Positioning (locked 2026-10-26):** the free, open-source, revision-first
@@ -183,9 +183,10 @@ direct workspace dependencies. There is still no benchmark harness.
 - [-] **Production layer is partial.** Revision sets/colours/marks, revision
   pages, FDX metadata, KIT version import, header/footer labels and Revised
   title-page fields and page locks with A/B page numbers shipped 2026-10-21.
-  Still open: FDX revision-ID import, dual dialogue, omitted scenes,
-  title-page editor, revision summary, scene metadata, spellcheck. Planned:
-  v0.8 M4–M7.
+  Compare/restore and sidecar-only omitted scenes shipped in v0.8 M1–M4. Still
+  open: FDX revision-ID import, dual dialogue, title-page editor, revision
+  summary, spellcheck, and an FDX omission mapping (waiting on a real Final
+  Draft fixture). Planned: v0.8 M5–M7.
 - [ ] **No signed/notarised builds or auto-update.** macOS is ad-hoc signed;
   Windows/Linux packages are unsigned. Dock/AppleScript quit still bypasses the
   save prompt, and Windows/Linux have no GUI smoke test. Planned: v0.8 M8.
@@ -245,7 +246,10 @@ Source of truth: `docs/v0.8-plan.md`.
   block-level, deterministic. Shipped 2026-10-27.
 - [x] **M2 Compare workspace** — unified/side-by-side, filters, jump-to-change. Shipped 2026-10-28.
 - [x] **M3 Restore as copy** — never overwrite the current draft. Shipped 2026-10-28.
-- [ ] **M4 Omitted scenes** — keep identity/number, print `OMITTED`, FDX map.
+- [x] **M4 Omitted scenes** — heading, number and identity retained; `OMITTED`
+  marker; body excluded from pages/stats; page labels carried across the gap.
+  Sidecar-only; FDX mapping deferred until a real Final Draft fixture. Shipped
+  2026-10-30.
 - [ ] **M5 Dual dialogue** — two-column layout, editor/PDF parity, FDX.
 - [ ] **M6 Title-page editor** — form + live preview, PDF/FDX parity.
 - [ ] **M7 Revision summary** — scene/page/block counts, CSV + printable view.
@@ -301,7 +305,9 @@ gate**. M8 runs in parallel; M9 is continuous.
       read-only. Shipped 2026-10-28.
 - [x] M3 — restore a revision as a new `.kitsp`; never overwrite current.
       Shipped 2026-10-28.
-- [ ] M4 — omitted scenes: identity, numbering, `OMITTED`, pagination, FDX.
+- [x] M4 — omitted scenes: identity, numbering, `OMITTED`, pagination,
+      statistics, page locks. Sidecar-only; FDX mapping deferred. Shipped
+      2026-10-30.
 - [ ] M5 — dual dialogue: two-column layout, editor/PDF parity, FDX, undo.
       Gate at week 8; move to v0.8.1 if pagination is at risk.
 - [ ] M6 — title-page editor with live PDF-matched preview.
@@ -1185,6 +1191,38 @@ Newest entries at the bottom. Each entry: date — what changed / what was found
   - Verification: `cargo fmt --all -- --check`, `cargo clippy --workspace
     --all-targets -- -D warnings`, `cargo test --workspace` green.
   - Next: M4 omitted scenes.
+
+- **2026-10-30** — v0.8 M4: omitted scenes (sidecar-only).
+  - `scriptcraft-core/src/model.rs`: `SceneMeta.omitted` is the canonical
+    state. `Project::document_view()` keeps every omitted scene heading and
+    inserts one synthetic `OMITTED` action row after it; `hidden_blocks` maps
+    the hidden body back to original indices. Statistics, duration, word and
+    character counts exclude hidden bodies.
+  - `scriptcraft-layout`: `layout_document_view`, `LineRole::Omitted` and
+    `PlacedLine.source_bi` render the same view in the editor and PDF, keeping
+    scene numbers, revision colours and source spans. Print pagination excludes
+    omitted bodies. `PageLock::resolve_view` carries the last hidden page label
+    to the first visible block after the omission, so later headings keep their
+    production numbers.
+  - `scriptcraft-app`: Menu ▸ **Omit Scene** / **Restore Scene**, navigator and
+    card markers, and omission-aware caret navigation. Enter/structural edits
+    that would enter a hidden body are refused with a status message until the
+    scene is restored. Save status explains that KIT will show the body; FDX
+    and Fountain exports state that omission is unsupported and how many scenes
+    are affected.
+  - Format decision: KIT 0.7.2 has no native omitted state (source audit), so
+    the versioned `scriptcraft_scene_meta` sidecar remains canonical. FDX
+    mapping is deferred until a real Final Draft `.fdx` fixture exists; no FDX
+    shape is guessed. Findings are in `docs/format-spikes.md`.
+  - Tests: four core omission tests, three layout/PDF tests (including
+    `pdf_keeps_locked_heading_pages_across_omission`) and three app interaction
+    flows covering menu/export warnings, caret skip/hidden-edit refusal and
+    page-lock persistence through save, reopen and restore. Existing UI
+    snapshots pass unchanged; the export-dialog test clears a synthetic
+    pointer hover with `PointerGone`.
+  - Verification: `cargo fmt --all -- --check`, `cargo clippy --workspace
+    --all-targets -- -D warnings`, `cargo test --workspace` green.
+  - Next: M5 dual dialogue.
 
 ---
 

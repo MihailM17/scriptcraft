@@ -56,8 +56,9 @@ ignores unknown rows, and ScriptCraft's normal save path preserves them.
   optional scene-heading `kit_uuid`). This is what makes `ScriptBlock.id` and
   scene identity survive save/reopen and external KIT edits. See below.
 - `scriptcraft_scene_meta` — schema-versioned JSON per-scene metadata keyed by
-  the heading block's stable id; currently `omitted` (reserved for v0.8 M4).
-  Entries for scenes that no longer exist are ignored with a warning.
+  the heading block's stable id. Currently stores `omitted` (v0.8 M4), the
+  canonical ScriptCraft omission state. Entries for scenes that no longer exist
+  are ignored with a warning.
 - `locked_scene_numbers` — comma-separated frozen scene numbers; a leading
   `*` also locks numbers for newly inserted scenes.
 - `scriptcraft_locked_pages` — JSON page lock: original page count plus one
@@ -66,6 +67,33 @@ ignores unknown rows, and ScriptCraft's normal save path preserves them.
   pages `42A`, `42B`, …. KIT ignores this row.
 - `scriptcraft_recovery_origin` — original project path inside a crash
   recovery copy.
+
+### Omitted scenes (sidecar-only)
+
+KIT Scenarist 0.7.2 has no native omitted-scene representation (source audit
+recorded in `docs/format-spikes.md`). Omission is therefore ScriptCraft metadata
+and never rewrites the KIT screenplay:
+
+```json
+{
+  "schema": 1,
+  "scenes": [{ "id": "<heading block id>", "omitted": true }]
+}
+```
+
+While a scene is omitted:
+
+- The full body stays in `scenario` unchanged. ScriptCraft keeps the heading,
+  scene number and revision colour and replaces the body with one `OMITTED` row
+  in the editor, print layout and PDF. Body text is excluded from statistics and
+  page counts but is not deleted.
+- Page-lock anchors inside the omitted body disappear with its pages. The last
+  hidden page label is carried to the first visible block after the omission, so
+  later headings keep their production page numbers.
+- KIT shows the full body because it ignores the sidecar row. FDX export reports
+  the omission as unsupported instead of inventing an attribute; Fountain export
+  warns that omission cannot be represented. Adding an FDX mapping requires a
+  real Final Draft fixture first.
 
 ## Stable identity and external edits
 

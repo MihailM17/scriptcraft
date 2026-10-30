@@ -382,6 +382,7 @@ pub fn scene_row(
     heading: &str,
     preview: &str,
     duration: &str,
+    omitted: bool,
     selected: bool,
 ) -> Response {
     let c = kit();
@@ -430,15 +431,34 @@ pub fn scene_row(
         c.heading_text,
         head_w,
     );
-    if !preview.is_empty() {
+    let mut preview_x = left;
+    if omitted {
+        let font = FontId::proportional(9.5);
+        let g = p.layout_no_wrap("OMITTED".to_owned(), font.clone(), c.text);
+        let pill = Rect::from_min_size(
+            Pos2::new(left, card.top() + 32.0),
+            egui::vec2(g.size().x + 12.0, 16.0),
+        );
+        p.rect_filled(pill, 8.0, c.field_stroke);
+        p.galley(
+            Pos2::new(
+                pill.center().x - g.size().x / 2.0,
+                pill.center().y - g.size().y / 2.0,
+            ),
+            g,
+            c.text,
+        );
+        preview_x = pill.right() + 8.0;
+    }
+    if !preview.is_empty() && preview_x < right {
         paint_ellipsized(
             p,
-            Pos2::new(left, card.top() + 39.0),
+            Pos2::new(preview_x, card.top() + 39.0),
             card.top() + 39.0,
             preview,
             FontId::proportional(11.5),
             muted,
-            right - left,
+            right - preview_x,
         );
     }
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)

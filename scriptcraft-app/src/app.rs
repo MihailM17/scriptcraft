@@ -518,6 +518,10 @@ pub struct ScriptCraftApp {
     /// Title-page fields edited in the Research view, pending save.
     meta_dirty: bool,
     selected_scene: usize,
+    /// Heading ids of omitted scenes (editor navigation skips their bodies).
+    omitted_heading_ids: Vec<uuid::Uuid>,
+    /// Block ids hidden by omission (editor edits are refused there).
+    hidden_block_ids: Vec<uuid::Uuid>,
     /// The block the Editor 2.0 caret is in (mirrors `editor2.selection`).
     selected_block: Option<usize>,
     side_tab: SideTab,
@@ -615,6 +619,8 @@ impl Default for ScriptCraftApp {
             versions: Vec::new(),
             meta_dirty: false,
             selected_scene: 0,
+            omitted_heading_ids: Vec::new(),
+            hidden_block_ids: Vec::new(),
             selected_block: None,
             side_tab: SideTab::default(),
             recent: Vec::new(),
@@ -1261,6 +1267,99 @@ impl ScriptCraftApp {
     }
 
     #[doc(hidden)]
+    pub fn set_scene_omitted_for_test(&mut self, index: usize, omitted: bool) {
+        self.set_scene_omitted(index, omitted);
+    }
+
+    #[doc(hidden)]
+    pub fn scene_omitted_for_test(&self, index: usize) -> bool {
+        self.project
+            .as_ref()
+            .and_then(|p| p.scenes().get(index).map(|s| p.scene_is_omitted(s)))
+            .unwrap_or(false)
+    }
+
+    #[doc(hidden)]
+    pub fn omitted_scene_count_for_test(&self) -> usize {
+        self.project
+            .as_ref()
+            .map(Project::omitted_scene_count)
+            .unwrap_or(0)
+    }
+
+    #[doc(hidden)]
+    pub fn stats_for_test(&self) -> &Stats {
+        &self.stats
+    }
+
+    #[doc(hidden)]
+    pub fn hidden_block_count_for_test(&self) -> usize {
+        self.hidden_block_ids.len()
+    }
+
+    /// Original indices of blocks hidden by omitted scenes (interaction tests).
+    #[doc(hidden)]
+    pub fn hidden_block_indices_for_test(&self) -> Vec<usize> {
+        let Some(p) = &self.project else {
+            return Vec::new();
+        };
+        p.hidden_blocks()
+            .into_iter()
+            .enumerate()
+            .filter_map(|(bi, hidden)| hidden.then_some(bi))
+            .collect()
+    }
+
+    /// Heading block of scene `index` (interaction tests).
+    #[doc(hidden)]
+    pub fn scene_heading_block_for_test(&self, index: usize) -> Option<usize> {
+        self.project
+            .as_ref()?
+            .scenes()
+            .get(index)
+            .and_then(|scene| scene.blocks.first().copied())
+    }
+
+    /// Number of scenes in the open project (interaction tests).
+    #[doc(hidden)]
+    pub fn scene_count_for_test(&self) -> usize {
+        self.project.as_ref().map(|p| p.scenes().len()).unwrap_or(0)
+    }
+
+    /// Last status-bar message (interaction tests).
+    #[doc(hidden)]
+    pub fn status_for_test(&self) -> &str {
+        &self.status
+    }
+
+    /// Visible lines on every page: `(page number, line text, role)`.
+    #[doc(hidden)]
+    pub fn doc_lines_for_test(&self) -> Vec<(Option<String>, String, String)> {
+        self.doc
+            .as_ref()
+            .map(|doc| {
+                doc.pages
+                    .iter()
+                    .flat_map(|page| {
+                        page.lines.iter().map(move |line| {
+                            (
+                                page.number.clone(),
+                                line.text.clone(),
+                                format!("{:?}", line.role),
+                            )
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    #[doc(hidden)]
+    pub fn omission_export_note_for_test(&self, target: &str) -> String {
+        self.omission_export_note(target)
+    }
+
+    #[doc(hidden)]
     pub fn latest_revision_color(&self) -> Option<RevisionColor> {
         self.revisions.latest().map(|s| s.color)
     }
@@ -1374,6 +1473,26 @@ impl ScriptCraftApp {
     fn refresh_derived(&mut self) {
         self.revision_marks_dirty = true;
         self.invalidate_compare();
+        let (omitted_headings, hidden_blocks) = match &self.project {
+            Some(p) => {
+                let hidden = p.hidden_blocks();
+                let omitted = p.omitted_heading_blocks();
+                let mut headings = Vec::new();
+                let mut blocks = Vec::new();
+                for (bi, block) in p.blocks.iter().enumerate() {
+                    if hidden.get(bi).copied().unwrap_or(false) {
+                        blocks.push(block.id);
+                    }
+                    if omitted.get(bi).copied().unwrap_or(false) {
+                        headings.push(block.id);
+                    }
+                }
+                (headings, blocks)
+            }
+            None => (Vec::new(), Vec::new()),
+        };
+        self.omitted_heading_ids = omitted_headings;
+        self.hidden_block_ids = hidden_blocks;
         if let Some(p) = &self.project {
             self.issues = validate(p);
             self.stats = p.stats();
@@ -1410,32 +1529,46 @@ impl ScriptCraftApp {
                     scriptcraft_core::page_lock::PageLock::from_json(&self.meta.locked_pages)
                         .ok()
                         .filter(|l| !l.is_empty());
-                let incremental = if page_lock.is_some() {
-                    None
-                } else {
-                    match (hint, old.as_ref()) {
-                        (Some((first, upto)), Some(prev)) => {
-                            scriptcraft_layout::place::relayout_from(
-                                &p.blocks,
-                                &RUSSIAN,
-                                &scriptcraft_layout::place::RUSSIAN_GEOMETRY,
-                                &labels,
-                                prev,
-                                first,
-                                upto,
-                            )
-                        }
-                        _ => None,
-                    }
-                };
-                incremental.or_else(|| {
-                    Some(crate::script_view::document_layout_with_page_lock(
+                if p.has_omitted_scenes() {
+                    // Omission changes block indices and page composition;
+                    // incremental relayout is only valid on the full draft.
+                    let view = p.document_view();
+                    Some(scriptcraft_layout::place::layout_document_view(
+                        &view,
                         &p.blocks,
                         &RUSSIAN,
+                        &scriptcraft_layout::place::RUSSIAN_GEOMETRY,
                         &labels,
                         page_lock.as_ref(),
                     ))
-                })
+                } else {
+                    let incremental = if page_lock.is_some() {
+                        None
+                    } else {
+                        match (hint, old.as_ref()) {
+                            (Some((first, upto)), Some(prev)) => {
+                                scriptcraft_layout::place::relayout_from(
+                                    &p.blocks,
+                                    &RUSSIAN,
+                                    &scriptcraft_layout::place::RUSSIAN_GEOMETRY,
+                                    &labels,
+                                    prev,
+                                    first,
+                                    upto,
+                                )
+                            }
+                            _ => None,
+                        }
+                    };
+                    incremental.or_else(|| {
+                        Some(crate::script_view::document_layout_with_page_lock(
+                            &p.blocks,
+                            &RUSSIAN,
+                            &labels,
+                            page_lock.as_ref(),
+                        ))
+                    })
+                }
             }
             None => None,
         };
@@ -1509,6 +1642,16 @@ impl ScriptCraftApp {
     /// Capture every current page start as a production page lock.
     fn lock_pages(&mut self) {
         let starts = match &self.project {
+            Some(p) if p.has_omitted_scenes() => {
+                let view = p.document_view();
+                scriptcraft_layout::paginate::page_starts(&view.blocks, &RUSSIAN)
+                    .into_iter()
+                    .filter_map(|(vi, para)| {
+                        let bi = view.sources.get(vi).copied().flatten()?;
+                        Some((bi, para))
+                    })
+                    .collect()
+            }
             Some(p) => scriptcraft_layout::paginate::page_starts(&p.blocks, &RUSSIAN),
             None => Vec::new(),
         };
@@ -1591,9 +1734,47 @@ impl ScriptCraftApp {
         self.status = what.to_string();
     }
 
+    /// An editor command may not touch a block hidden by omission. Structural
+    /// commands around hidden runs are refused too, so the hidden body stays
+    /// byte-identical until the writer restores the scene.
+    fn commands_touch_omitted(&self, commands: &[edit::EditCommand]) -> bool {
+        let Some(p) = &self.project else {
+            return false;
+        };
+        let hidden = &self.hidden_block_ids;
+        let headings = &self.omitted_heading_ids;
+        let id = |bi: usize| p.blocks.get(bi).map(|b| b.id);
+        let is_hidden = |bi: usize| id(bi).is_some_and(|id| hidden.contains(&id));
+        let is_heading = |bi: usize| id(bi).is_some_and(|id| headings.contains(&id));
+        commands.iter().any(|cmd| match cmd {
+            edit::EditCommand::InsertText { at, .. } => is_hidden(at.bi),
+            edit::EditCommand::DeleteRange { start, end } => {
+                (start.bi.min(end.bi)..=start.bi.max(end.bi)).any(is_hidden)
+            }
+            edit::EditCommand::SetText { bi, .. } | edit::EditCommand::SetType { bi, .. } => {
+                is_hidden(*bi)
+            }
+            edit::EditCommand::SplitBlock { at, .. } => is_hidden(at.bi) || is_heading(at.bi),
+            edit::EditCommand::MergeBlocks { bi, .. } => {
+                is_hidden(*bi) || is_hidden(bi.saturating_sub(1))
+            }
+            edit::EditCommand::InsertBlock { at, .. } => {
+                is_hidden(*at) || (*at > 0 && (is_hidden(at - 1) || is_heading(at - 1)))
+            }
+            edit::EditCommand::DeleteBlock { bi } => is_hidden(*bi),
+            edit::EditCommand::ReplaceAll { .. } => false,
+        })
+    }
+
     /// Apply Editor 2.0's frame output through its command history.
     fn apply_editor2_output(&mut self, out: crate::script_view::ScriptViewOutput) {
         if out.commands.is_empty() && !out.undo && !out.redo {
+            return;
+        }
+        if self.commands_touch_omitted(&out.commands) {
+            self.editor2.autocomplete = None;
+            self.status = "That edit touches an omitted scene. Restore the scene to edit its body."
+                .to_string();
             return;
         }
         let Some(p) = self.project.as_mut() else {
@@ -1802,8 +1983,9 @@ impl ScriptCraftApp {
                 self.last_autosave = std::time::Instant::now();
                 self.write_backup();
                 self.clear_recovery_files();
+                let note = self.omission_save_note();
                 self.status = match meta {
-                    Ok(()) => format!("Saved to {} (.bak backup kept)", self.path),
+                    Ok(()) => format!("Saved to {} (.bak backup kept){note}", self.path),
                     Err(e) => format!("Script saved, but title page failed: {e}"),
                 };
             }
@@ -2063,7 +2245,8 @@ impl ScriptCraftApp {
         self.clear_recovery_files();
         let p = self.path.clone();
         self.push_recent(&p);
-        self.status = format!("Saved to {}", self.path);
+        let note = self.omission_save_note();
+        self.status = format!("Saved to {}{note}", self.path);
     }
 
     /// Save a revision baseline as a new `.kitsp`, then open it. The source
@@ -2305,8 +2488,9 @@ impl ScriptCraftApp {
     fn save_fountain(&mut self, dst: &std::path::Path) {
         let Some(p) = &self.project else { return };
         let text = scriptcraft_core::fountain::to_fountain(p, &self.meta);
+        let note = self.omission_export_note("Fountain");
         match std::fs::write(dst, text) {
-            Ok(()) => self.status = format!("Exported to {}", dst.to_string_lossy()),
+            Ok(()) => self.status = format!("Exported to {}{note}", dst.to_string_lossy()),
             Err(e) => self.status = format!("Export failed: {e}"),
         }
     }
@@ -2318,8 +2502,9 @@ impl ScriptCraftApp {
         let latest = self.revisions.latest();
         let xml =
             scriptcraft_core::fdx::to_fdx_with_revisions_and_latest(p, &self.meta, &marks, latest);
+        let note = self.omission_export_note("FDX");
         match std::fs::write(dst, xml) {
-            Ok(()) => self.status = format!("Exported to {}", dst.to_string_lossy()),
+            Ok(()) => self.status = format!("Exported to {}{note}", dst.to_string_lossy()),
             Err(e) => self.status = format!("Export failed: {e}"),
         }
     }
@@ -2637,6 +2822,97 @@ impl ScriptCraftApp {
         });
         self.editor2.scroll_caret = true;
         self.selected_block = Some(at);
+    }
+
+    fn current_scene_omitted(&self) -> bool {
+        let Some(p) = &self.project else {
+            return false;
+        };
+        p.scenes()
+            .get(self.selected_scene)
+            .is_some_and(|scene| p.scene_is_omitted(scene))
+    }
+
+    /// Omit a scene (keep its heading, number and identity; hide its body)
+    /// or restore it. The state lives in the versioned scene sidecar.
+    fn set_scene_omitted(&mut self, index: usize, omitted: bool) {
+        let Some(p) = &self.project else {
+            return;
+        };
+        let Some(scene) = p.scenes().get(index).cloned() else {
+            return;
+        };
+        let Some(&heading_bi) = scene.blocks.first() else {
+            return;
+        };
+        if p.scene_is_omitted(&scene) == omitted {
+            return;
+        }
+        if let Some(p) = self.project.as_mut() {
+            p.set_scene_omitted(scene.id, omitted);
+            p.retain_scene_meta();
+        }
+        self.dirty = true;
+        self.selected_scene = index;
+        self.goto_block(heading_bi);
+        self.refresh_derived();
+        let number = self.scene_label(index);
+        self.status = if omitted {
+            format!(
+                "Scene {number} omitted — heading and number stay on the page; body is hidden from pages, stats and PDF."
+            )
+        } else {
+            format!("Scene {number} restored to the script.")
+        };
+    }
+
+    fn toggle_scene_omitted(&mut self, index: usize) {
+        if let Some(p) = &self.project {
+            let omitted = p
+                .scenes()
+                .get(index)
+                .is_some_and(|scene| p.scene_is_omitted(scene));
+            self.set_scene_omitted(index, !omitted);
+        }
+    }
+
+    fn toggle_current_scene_omitted(&mut self) {
+        self.toggle_scene_omitted(self.selected_scene);
+    }
+
+    /// KIT sees the complete script: omission is ScriptCraft metadata only.
+    fn omission_save_note(&self) -> String {
+        let n = self
+            .project
+            .as_ref()
+            .map(Project::omitted_scene_count)
+            .unwrap_or(0);
+        if n == 0 {
+            String::new()
+        } else {
+            format!(
+                " {n} omitted scene{} stored in ScriptCraft metadata; KIT will show their body.",
+                if n == 1 { "" } else { "s" }
+            )
+        }
+    }
+
+    /// FDX/Fountain have no verified omission mapping yet; exports keep the
+    /// full body and say so instead of inventing an attribute.
+    fn omission_export_note(&self, target: &str) -> String {
+        let n = self
+            .project
+            .as_ref()
+            .map(Project::omitted_scene_count)
+            .unwrap_or(0);
+        if n == 0 {
+            String::new()
+        } else {
+            format!(
+                " Omission is unsupported in {target}: {n} omitted scene{} exported with full body.",
+                if n == 1 { "" } else { "s" }
+            )
+        }
     }
 
     /// Insert a new scene heading after the current scene.
@@ -3879,6 +4155,9 @@ fn kit_section(ui: &mut egui::Ui, text: &str) {
 
 /// First printable action-ish line of a scene, for navigator rows.
 fn scene_preview(p: &Project, s: &Scene) -> String {
+    if p.scene_is_omitted(s) {
+        return "Body hidden from pages and statistics.".to_string();
+    }
     for &bi in &s.blocks {
         if let Some(b) = p.blocks.get(bi) {
             if matches!(
@@ -4315,6 +4594,7 @@ impl ScriptCraftApp {
             Undo,
             Redo,
             Find,
+            ToggleOmit,
             StartRevision,
             ClearRevisions,
             Revisions,
@@ -4383,6 +4663,14 @@ impl ScriptCraftApp {
             }
             if menu_item(ui, "Find…", Some("⌘F"), has) {
                 action = Some(M::Find);
+            }
+            let omit_label = if self.current_scene_omitted() {
+                "Restore Scene"
+            } else {
+                "Omit Scene"
+            };
+            if menu_item(ui, omit_label, None, has) {
+                action = Some(M::ToggleOmit);
             }
             ui.separator();
             let next_color = self.revisions.next_color();
@@ -4485,6 +4773,7 @@ impl ScriptCraftApp {
                     self.show_find = true;
                 }
             }
+            Some(M::ToggleOmit) => self.toggle_current_scene_omitted(),
             Some(M::StartRevision) => self.start_revision(),
             Some(M::ClearRevisions) => {
                 self.close_compare();
@@ -5300,8 +5589,9 @@ impl ScriptCraftApp {
             ui.label("No project open.");
             return;
         };
-        // Owned rows: (scene idx, heading block, heading, preview, duration).
-        let rows: Vec<(usize, usize, String, String, f64)> = p
+        // Owned rows: (scene idx, heading block, heading, preview, duration,
+        // omitted).
+        let rows: Vec<(usize, usize, String, String, f64, bool)> = p
             .scenes()
             .into_iter()
             .enumerate()
@@ -5312,6 +5602,7 @@ impl ScriptCraftApp {
                     s.heading.clone(),
                     scene_preview(p, &s),
                     p.scene_duration_secs(Some(&s)),
+                    p.scene_is_omitted(&s),
                 )
             })
             .collect();
@@ -5321,11 +5612,12 @@ impl ScriptCraftApp {
             overline(ui, &format!("Scenes · {n_rows}"));
         });
         ui.add_space(4.0);
+        let mut toggle: Option<usize> = None;
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
-                for (i, bi, heading, preview, secs) in rows {
+                for (i, bi, heading, preview, secs, omitted) in rows {
                     let selected = self.selected_scene == i;
                     let dur = format_duration(secs);
                     let resp = scene_row(
@@ -5334,14 +5626,31 @@ impl ScriptCraftApp {
                         &heading,
                         &preview,
                         dur.trim_matches(['(', ')']),
+                        omitted,
                         selected,
                     );
-                    if resp.clicked() {
+                    let clicked = resp.clicked();
+                    egui::Popup::menu(&resp).show(|ui| {
+                        ui.set_min_width(180.0);
+                        let label = if omitted {
+                            "Restore scene"
+                        } else {
+                            "Omit scene"
+                        };
+                        if ui.button(label).clicked() {
+                            toggle = Some(i);
+                            ui.close();
+                        }
+                    });
+                    if clicked {
                         self.selected_scene = i;
                         self.goto_block(bi);
                     }
                 }
             });
+        if let Some(i) = toggle {
+            self.toggle_scene_omitted(i);
+        }
     }
 
     /// Corkboard grid: scene cards you can drag to reorder scenes.
@@ -5351,8 +5660,9 @@ impl ScriptCraftApp {
             ui.label("No project open.");
             return;
         };
-        // Owned rows: (scene idx, heading block, title, duration, preview).
-        let rows: Vec<(usize, usize, String, f64, String)> = p
+        // Owned rows: (scene idx, heading block, title, duration, preview,
+        // omitted).
+        let rows: Vec<(usize, usize, String, f64, String, bool)> = p
             .scenes()
             .into_iter()
             .enumerate()
@@ -5369,6 +5679,7 @@ impl ScriptCraftApp {
                     title,
                     p.scene_duration_secs(Some(&s)),
                     scene_preview(p, &s),
+                    p.scene_is_omitted(&s),
                 )
             })
             .collect();
@@ -5376,10 +5687,11 @@ impl ScriptCraftApp {
         let mut drop_at: Option<(usize, bool)> = None;
         let mut clicked: Option<usize> = None;
         let mut dbl_clicked: Option<(usize, usize)> = None;
+        let mut toggle: Option<usize> = None;
         egui::ScrollArea::vertical().show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
-                for (i, (si, bi, title, secs, preview)) in rows.iter().enumerate() {
+                for (i, (si, bi, title, secs, preview, omitted)) in rows.iter().enumerate() {
                     let (rect, resp) = ui.allocate_exact_size(
                         egui::vec2(168.0, 112.0),
                         egui::Sense::click_and_drag(),
@@ -5412,6 +5724,14 @@ impl ScriptCraftApp {
                             .strong()
                             .color(kit().heading_text),
                     );
+                    if *omitted {
+                        card_ui.label(
+                            egui::RichText::new("OMITTED")
+                                .small()
+                                .strong()
+                                .color(kit().accent_text),
+                        );
+                    }
                     card_ui.label(
                         egui::RichText::new(format_duration(*secs))
                             .small()
@@ -5448,6 +5768,18 @@ impl ScriptCraftApp {
                             }
                         }
                     }
+                    egui::Popup::menu(&resp).show(|ui| {
+                        ui.set_min_width(180.0);
+                        let label = if *omitted {
+                            "Restore scene"
+                        } else {
+                            "Omit scene"
+                        };
+                        if ui.button(label).clicked() {
+                            toggle = Some(*si);
+                            ui.close();
+                        }
+                    });
                     if resp.drag_started() {
                         self.drag_scene = Some(*si);
                     }
@@ -5467,6 +5799,9 @@ impl ScriptCraftApp {
             self.selected_scene = si;
             self.goto_block(bi);
             self.side_tab = SideTab::Script;
+        }
+        if let Some(si) = toggle {
+            self.toggle_scene_omitted(si);
         }
         // Finish drag: pointer released over a target card.
         let released = ui.input(|i| i.pointer.any_released());
@@ -7130,6 +7465,8 @@ impl ScriptCraftApp {
                         crate::script_view::ScriptViewStyle {
                             typewriter: self.typewriter,
                             revision_colors,
+                            hidden_blocks: &self.hidden_block_ids,
+                            omitted_headings: &self.omitted_heading_ids,
                         },
                         &mut self.editor2,
                     ),
@@ -7188,25 +7525,29 @@ fn stat_text_rows(p: &Project, include_notes: bool) -> (Vec<RepRow>, usize, usiz
         b.element_type.is_printable()
             || (include_notes && b.element_type == ElementType::NonPrintable)
     };
+    let hidden = p.hidden_blocks();
+    let visible = |bi: usize| !hidden.get(bi).copied().unwrap_or(false);
     let total_words: usize = p
         .blocks
         .iter()
-        .filter(|b| counted(b))
-        .map(|b| b.text.split_whitespace().count())
+        .enumerate()
+        .filter(|(bi, b)| visible(*bi) && counted(b))
+        .map(|(_, b)| b.text.split_whitespace().count())
         .sum();
     let total_chars: usize = p
         .blocks
         .iter()
-        .filter(|b| counted(b))
-        .map(|b| b.text.chars().count())
+        .enumerate()
+        .filter(|(bi, b)| visible(*bi) && counted(b))
+        .map(|(_, b)| b.text.chars().count())
         .sum();
     let mut rows = Vec::new();
     for (idx, (t, name)) in kinds.iter().enumerate() {
         let mut size = 0usize;
         let mut words = 0usize;
         let mut chars = 0usize;
-        for b in &p.blocks {
-            if b.element_type == *t {
+        for (bi, b) in p.blocks.iter().enumerate() {
+            if visible(bi) && b.element_type == *t {
                 size += 1;
                 words += b.text.split_whitespace().count();
                 chars += b.text.chars().count();
@@ -7231,8 +7572,8 @@ fn stat_text_rows(p: &Project, include_notes: bool) -> (Vec<RepRow>, usize, usiz
         let mut size = 0usize;
         let mut words = 0usize;
         let mut chars = 0usize;
-        for b in &p.blocks {
-            if b.element_type == ElementType::NonPrintable {
+        for (bi, b) in p.blocks.iter().enumerate() {
+            if visible(bi) && b.element_type == ElementType::NonPrintable {
                 size += 1;
                 words += b.text.split_whitespace().count();
                 chars += b.text.chars().count();
@@ -7257,39 +7598,48 @@ fn stat_text_rows(p: &Project, include_notes: bool) -> (Vec<RepRow>, usize, usiz
 
 fn stat_scene_rows(p: &Project, labels: &[String]) -> Vec<RepRow> {
     let scenes = p.scenes();
+    let hidden = p.hidden_blocks();
+    let visible = |bi: usize| !hidden.get(bi).copied().unwrap_or(false);
     let total_blocks: usize = scenes
         .iter()
-        .map(|s| {
-            s.blocks
-                .iter()
-                .filter_map(|bi| p.blocks.get(*bi))
-                .filter(|b| b.element_type.is_printable())
-                .count()
-        })
-        .sum();
+        .flat_map(|s| s.blocks.iter().copied())
+        .filter(|bi| visible(*bi))
+        .filter_map(|bi| p.blocks.get(bi))
+        .filter(|b| b.element_type.is_printable())
+        .count();
     let mut rows = Vec::new();
     for (i, s) in scenes.iter().enumerate() {
         let blocks = s
             .blocks
             .iter()
-            .filter_map(|bi| p.blocks.get(*bi))
+            .copied()
+            .filter(|bi| visible(*bi))
+            .filter_map(|bi| p.blocks.get(bi))
             .filter(|b| b.element_type.is_printable())
             .count();
         let words: usize = s
             .blocks
             .iter()
-            .filter_map(|bi| p.blocks.get(*bi))
+            .copied()
+            .filter(|bi| visible(*bi))
+            .filter_map(|bi| p.blocks.get(bi))
             .filter(|b| b.element_type.is_printable())
             .map(|b| b.text.split_whitespace().count())
             .sum();
         let secs = p.scene_duration_secs(Some(s));
+        let omitted = p.scene_is_omitted(s);
         let pct = if total_blocks == 0 {
             0.0
         } else {
             blocks as f32 * 100.0 / total_blocks as f32
         };
+        let label = labels.get(i).cloned().unwrap_or_default();
         rows.push(RepRow {
-            label: labels.get(i).cloned().unwrap_or_default(),
+            label: if omitted {
+                format!("{label}  [OMITTED]")
+            } else {
+                label
+            },
             cells: vec![
                 format_duration(secs).trim_matches(['(', ')']).to_string(),
                 words.to_string(),
@@ -7360,7 +7710,11 @@ fn stat_location_rows(p: &Project) -> Vec<RepRow> {
 fn stat_char_stats(p: &Project) -> Vec<(String, usize, usize, usize)> {
     let mut map: Vec<(String, usize, usize, usize)> = Vec::new();
     let mut current: Vec<String> = Vec::new();
-    for b in &p.blocks {
+    let hidden = p.hidden_blocks();
+    for (bi, b) in p.blocks.iter().enumerate() {
+        if hidden.get(bi).copied().unwrap_or(false) {
+            continue;
+        }
         match b.element_type {
             ElementType::Character => {
                 current = vec![cue_name(&b.text)];

@@ -20,7 +20,8 @@ pub mod wrap;
 
 pub use paginate::{paginate, paginate_lines, Chunk, Page};
 pub use place::{
-    layout, layout_with_page_lock, relayout_from, DocLayout, LineRole, PageLayout, PlacedLine,
-    SourceSpan, TemplateGeometry, MM_PER_CELL, ROW_MM, RUSSIAN_GEOMETRY, TEXT_W_MM,
+    layout, layout_document_view, layout_with_page_lock, relayout_from, DocLayout, LineRole,
+    PageLayout, PlacedLine, SourceSpan, TemplateGeometry, MM_PER_CELL, ROW_MM, RUSSIAN_GEOMETRY,
+    TEXT_W_MM,
 };
 pub use wrap::{wrap_lines, wrap_paragraph, wrap_rows, WrappedLine};

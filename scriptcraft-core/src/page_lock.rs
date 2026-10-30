@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::{ElementType, ScriptBlock};
+use crate::model::{DocumentView, ElementType, ScriptBlock};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PageAnchor {
@@ -118,6 +118,60 @@ impl PageLock {
             cursor = Some((bi, para));
         }
         out
+    }
+
+    /// Resolve anchors against the full original blocks, then map them into
+    /// the display view. Page starts that lived inside an omitted scene's
+    /// body vanish with those pages; their last label is carried to the first
+    /// visible block after the omission so later pages keep their production
+    /// numbers instead of collapsing onto the previous page.
+    pub fn resolve_view(&self, blocks: &[ScriptBlock], view: &DocumentView) -> Vec<ResolvedAnchor> {
+        let mut visible: Vec<ResolvedAnchor> = Vec::new();
+        // Marker view index -> last page label hidden behind that marker.
+        let mut carries: Vec<(usize, u32)> = Vec::new();
+        for anchor in self.resolve(blocks) {
+            let Some(view_bi) = view.original_to_view.get(anchor.bi).copied().flatten() else {
+                continue;
+            };
+            if view.omitted.get(view_bi).copied().unwrap_or(false) {
+                if let Some(entry) = carries.iter_mut().find(|(marker, _)| *marker == view_bi) {
+                    entry.1 = anchor.page;
+                } else {
+                    carries.push((view_bi, anchor.page));
+                }
+                continue;
+            }
+            let last = view
+                .blocks
+                .get(view_bi)
+                .map(|b| b.text.split('\n').count().saturating_sub(1))
+                .unwrap_or(0);
+            visible.push(ResolvedAnchor {
+                bi: view_bi,
+                para: anchor.para.min(last),
+                page: anchor.page,
+            });
+        }
+        for (marker, page) in carries {
+            let Some(target) = (marker + 1..view.blocks.len())
+                .find(|&vi| !view.omitted.get(vi).copied().unwrap_or(false))
+            else {
+                continue;
+            };
+            // A visible anchor at the same block already pins the page; only
+            // add the carried label when the omission swallowed that anchor.
+            if visible.iter().any(|a| a.bi == target && a.page >= page) {
+                continue;
+            }
+            visible.push(ResolvedAnchor {
+                bi: target,
+                para: 0,
+                page,
+            });
+        }
+        visible.sort_by_key(|a| (a.bi, a.para));
+        visible.dedup_by(|next, prev| next.bi == prev.bi && next.para == prev.para);
+        visible
     }
 
     pub fn to_json(&self) -> Result<String, serde_json::Error> {

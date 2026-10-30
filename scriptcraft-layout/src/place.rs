@@ -14,7 +14,7 @@
 use crate::paginate;
 use crate::wrap;
 use scriptcraft_core::editing::{cue_name_for, TemplateMetrics};
-use scriptcraft_core::model::{ElementType, ScriptBlock};
+use scriptcraft_core::model::{DocumentView, ElementType, ScriptBlock};
 use scriptcraft_core::page_lock::PageLock;
 
 /// Millimetres per character cell (0.6 em at 12 pt).
@@ -63,6 +63,8 @@ pub enum LineRole {
     More,
     /// A scene number in the left margin, beside its heading.
     SceneNumber,
+    /// The synthetic `OMITTED` line that replaces an omitted scene's body.
+    Omitted,
 }
 
 /// Char range of a body line within its source paragraph.
@@ -88,8 +90,11 @@ pub struct PlacedLine {
     pub bold: bool,
     pub italic: bool,
     pub right_aligned: bool,
-    /// `None` for synthetic rows ((MORE), (CONT'D), scene numbers).
+    /// `None` for synthetic rows ((MORE), (CONT'D), scene numbers, OMITTED).
     pub span: Option<SourceSpan>,
+    /// Original block whose revision colour paints this row. Real body rows
+    /// carry their own index; an `OMITTED` row carries its scene heading's.
+    pub source_bi: Option<usize>,
 }
 
 /// One laid-out page: its rows in placement order, plus the KIT page number
@@ -128,8 +133,48 @@ pub fn layout_with_page_lock(
     scene_labels: &[String],
     page_lock: Option<&PageLock>,
 ) -> DocLayout {
+    layout_inner(blocks, None, blocks, m, geometry, scene_labels, page_lock)
+}
+
+/// Lay out a project with omitted scenes collapsed to a retained heading and
+/// a synthetic `OMITTED` line. `original_blocks` is the full project (used to
+/// resolve production page locks); `view` supplies the paginated blocks and
+/// maps every line back to its original block index.
+pub fn layout_document_view(
+    view: &DocumentView,
+    original_blocks: &[ScriptBlock],
+    m: &TemplateMetrics,
+    geometry: &TemplateGeometry,
+    scene_labels: &[String],
+    page_lock: Option<&PageLock>,
+) -> DocLayout {
+    layout_inner(
+        &view.blocks,
+        Some(view),
+        original_blocks,
+        m,
+        geometry,
+        scene_labels,
+        page_lock,
+    )
+}
+
+fn layout_inner(
+    blocks: &[ScriptBlock],
+    view: Option<&DocumentView>,
+    original_blocks: &[ScriptBlock],
+    m: &TemplateMetrics,
+    geometry: &TemplateGeometry,
+    scene_labels: &[String],
+    page_lock: Option<&PageLock>,
+) -> DocLayout {
     let lock = page_lock.filter(|l| !l.is_empty());
-    let anchors = lock.map(|l| l.resolve(blocks)).unwrap_or_default();
+    let anchors = lock
+        .map(|l| match view {
+            Some(view) => l.resolve_view(original_blocks, view),
+            None => l.resolve(original_blocks),
+        })
+        .unwrap_or_default();
     let breaks: Vec<(usize, usize)> = anchors.iter().map(|a| (a.bi, a.para)).collect();
     let pages = if lock.is_some() {
         paginate::paginate_with_breaks(blocks, m, &breaks)
@@ -153,6 +198,7 @@ pub fn layout_with_page_lock(
             page,
             label,
             blocks,
+            view,
             m,
             geometry,
             scene_labels,
@@ -247,6 +293,7 @@ pub fn relayout_from(
             &page,
             label.as_deref(),
             blocks,
+            None,
             m,
             geometry,
             scene_labels,
@@ -291,10 +338,12 @@ pub fn relayout_from(
     Some(DocLayout { pages })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn layout_page(
     page: &paginate::Page,
     label: Option<&str>,
     blocks: &[ScriptBlock],
+    view: Option<&DocumentView>,
     m: &TemplateMetrics,
     geometry: &TemplateGeometry,
     scene_labels: &[String],
@@ -308,6 +357,14 @@ fn layout_page(
             continue;
         };
         let t = block.element_type;
+        let omitted_here =
+            view.is_some_and(|view| view.omitted.get(chunk.bi).copied().unwrap_or(false));
+        let source_bi = view
+            .and_then(|view| view.sources.get(chunk.bi).copied().flatten())
+            .or(if view.is_none() { Some(chunk.bi) } else { None });
+        let revision_bi = view
+            .and_then(|view| view.revision_sources.get(chunk.bi).copied().flatten())
+            .or(source_bi);
         if chunk.contd {
             if let Some(cue) = cue_name_for(blocks, chunk.bi) {
                 lines.push(PlacedLine {
@@ -319,6 +376,7 @@ fn layout_page(
                     italic: false,
                     right_aligned: false,
                     span: None,
+                    source_bi: revision_bi,
                 });
             }
             // The row is reserved even when no cue can be resolved, exactly
@@ -336,16 +394,25 @@ fn layout_page(
                     row,
                     x_mm,
                     text: wl.text,
-                    role: LineRole::Body,
+                    role: if omitted_here {
+                        LineRole::Omitted
+                    } else {
+                        LineRole::Body
+                    },
                     bold: is_bold(t),
                     italic: t == ElementType::Lyrics,
                     right_aligned: false,
-                    span: Some(SourceSpan {
-                        bi: chunk.bi,
-                        para,
-                        start: wl.start,
-                        end: wl.end,
-                    }),
+                    span: if omitted_here {
+                        None
+                    } else {
+                        Some(SourceSpan {
+                            bi: source_bi.unwrap_or(chunk.bi),
+                            para,
+                            start: wl.start,
+                            end: wl.end,
+                        })
+                    },
+                    source_bi: revision_bi,
                 });
                 row += 1;
             }
@@ -360,6 +427,7 @@ fn layout_page(
                 italic: false,
                 right_aligned: true,
                 span: None,
+                source_bi: revision_bi,
             });
             row += 1;
         }
@@ -375,6 +443,7 @@ fn layout_page(
                         italic: false,
                         right_aligned: true,
                         span: None,
+                        source_bi: revision_bi,
                     });
                 }
             }
