@@ -8,9 +8,10 @@ production revisions. Open KIT projects, exchange Final Draft files, lock
 pages, issue coloured revisions, and export page-exact PDFs — offline, on
 macOS, Windows and Linux.
 
-> **Status — v0.7 revision workflow.** The current tree implements revision
-> sets, coloured margin marks, revision pages, page locks, `42A`/`42B`
-> numbering, KIT saved-version import, and revision metadata in PDF and FDX.
+> **Status — v0.7 revision workflow, patch 0.7.1.** The current tree implements
+> revision sets, coloured margin marks, revision pages, page locks, `42A`/`42B`
+> numbering, KIT saved-version import, revision metadata in PDF and FDX, and
+> screenplay-aware plain-text paste.
 >
 > **Next — v0.8 revision-complete.** Draft comparison and restore, omitted
 > scenes, dual dialogue, a title-page editor, and a revision summary.
@@ -52,6 +53,9 @@ app on day one.
   numbers, `(MORE)` / `(CONT'D)` markers, and zoom that scales pages without
   reflowing text.
 - Autocomplete for scene headings, characters, locations and transitions.
+- Screenplay-aware paste: plain text copied from ChatGPT or another editor is
+  split into scene headings, action, cues, parentheticals, dialogue and
+  transitions. Prose without screenplay structure still pastes as one block.
 - Undo/redo, find/replace, typewriter scrolling, multi-document support,
   autosave, and crash recovery from atomic saves.
 - Script, Research, Cards, Statistics and Settings modules, plus a Start page
