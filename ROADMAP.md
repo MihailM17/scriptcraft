@@ -21,10 +21,10 @@ Status legend: `[ ]` to do `[-]` in progress `[x]` done `[!]` blocked
 | Date | 2026-10-30 |
 | Project | ScriptCraft — free, open-source, revision-first screenwriting studio |
 | Repo | `/Users/mihailmihaylov/Documents/Dev_work/scriptcraft` |
-| Branch / commit | `main` at `bf26b08`; tag `v0.7.0` at `9ce2e0e` (revision workflow); v0.8 M0 at `9bd4839`, M1 at `1948c62`, M2 at `b660219`, M3 at `2708838`, M4 at `e840a67`; v0.8 plan written 2026-10-26 |
+| Branch / commit | `main` at `54d1311`; tags `v0.7.0` at `9ce2e0e` and `v0.7.1` at `d8b17de` (maintenance); v0.8 M0 at `9bd4839`, M1 at `1948c62`, M2 at `b660219`, M3 at `2708838`, M4 at `e840a67`; v0.8 plan written 2026-10-26 |
 | Rust workspace | `scriptcraft-core`, `scriptcraft-app`, `scriptcraft-layout` (`Cargo.toml`, resolver 2) |
-| App crate version | `scriptcraft-app 0.7.0`, `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
-| Distribution | **v0.7.0 released 2026-10-30** — <https://github.com/MihailM17/scriptcraft/releases/tag/v0.7.0> publishes macOS arm64 DMG, Windows x64 zip and Linux x86_64 tar.gz plus `.sha256` files. Last published release: v0.7.0. Installed `/Applications/ScriptCraft.app` is 0.6.1 + unreleased shortcuts/theme/folder + revision M1–M4 |
+| App crate version | `scriptcraft-app 0.7.0` on `main`; `0.7.1` at tag `v0.7.1`; `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
+| Distribution | **v0.7.1 released 2026-10-30** — <https://github.com/MihailM17/scriptcraft/releases/tag/v0.7.1> is a small maintenance release adding screenplay-aware paste on top of v0.7.0. Last published release: v0.7.1. Installed `/Applications/ScriptCraft.app` is 0.6.1 + unreleased shortcuts/theme/folder + revision M1–M4 |
 | Current one-liner | Free, open-source, revision-first studio: one screenplay engine (Editor 2.0), crash-safe saves + recovery, revision colours/marks/pages, compare/restore, omitted scenes, smart screenplay paste, KIT version import, revision headers/title-page fields, production page locks with A/B page numbers and FDX revision metadata, OFL fonts, FDX/Fountain import/export; PDF export paginates exactly like the editor. |
 | Next release | **v0.8 revision-complete** — compare/restore, omitted scenes, dual dialogue, title-page editor, revision summary, signed builds and runtime CI. See `docs/v0.8-plan.md`. |
 
@@ -1274,6 +1274,31 @@ Newest entries at the bottom. Each entry: date — what changed / what was found
   - Verification: `cargo fmt --all -- --check`,
     `cargo clippy --workspace --all-targets -- -D warnings`,
     `cargo test --workspace` green; `git diff --check` clean.
+  - Next: v0.8 M5 dual dialogue.
+
+- **2026-10-30** — Released **v0.7.1** (user request: small patch with the
+  paste fix).
+  - Created maintenance branch `release/v0.7.1` from tag `v0.7.0`, so the
+    release does **not** include v0.8 M0–M4. Cherry-picked `be430c5`
+    (`clipboard-win` 5.4.3) and `7d1d748` (smart paste), bumped
+    `scriptcraft-app` to 0.7.1, and tagged `v0.7.1` at `d8b17de`.
+  - Published <https://github.com/MihailM17/scriptcraft/releases/tag/v0.7.1>
+    with three archives plus `.sha256` files:
+    - `ScriptCraft-0.7.1-macos-arm64.dmg` (7,877,284 bytes) SHA-256
+      `541f87b2d7c5f825198b7129dbbc66fd95e4b9689c95bba712c2fcb3d73b06b8`;
+      built locally from the tag, ad-hoc signed, version 0.7.1 and
+      `Applications` symlink verified on the mounted DMG.
+    - `ScriptCraft-0.7.1-windows-x64.zip` (6,387,455 bytes) SHA-256
+      `329811e79ef8ad4a6925102cb00ab07bd92db07cebde94cedd3865b1a28bbfdb`.
+    - `ScriptCraft-0.7.1-linux-x86_64.tar.gz` (10,672,359 bytes) SHA-256
+      `9471c532fd24154185ab5c0b9df2217bde461185b85eda52f1e08a9f957610b9`.
+    - Windows/Linux came from Packages run `41065597333` on tag `v0.7.1`;
+      checksums verified after download.
+  - Maintenance-branch gate: `cargo fmt --all -- --check`, clippy with `-D
+    warnings`, `cargo test --workspace`, `cargo deny check` and `cargo
+    metadata --locked` green.
+  - `main` remains at `54d1311` with the same paste feature and continues with
+    v0.8; the patch release has no v0.8 code.
   - Next: v0.8 M5 dual dialogue.
 
 ---
