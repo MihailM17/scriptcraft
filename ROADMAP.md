@@ -18,15 +18,15 @@ Status legend: `[ ]` to do `[-]` in progress `[x]` done `[!]` blocked
 
 | Field | Value |
 |---|---|
-| Date | 2026-10-30 |
+| Date | 2026-11-02 |
 | Project | ScriptCraft — free, open-source, revision-first screenwriting studio |
 | Repo | `/Users/mihailmihaylov/Documents/Dev_work/scriptcraft` |
-| Branch / commit | `main` at `54d1311`; tags `v0.7.0` at `9ce2e0e` and `v0.7.1` at `d8b17de` (maintenance); v0.8 M0 at `9bd4839`, M1 at `1948c62`, M2 at `b660219`, M3 at `2708838`, M4 at `e840a67`; v0.8 plan written 2026-10-26 |
+| Branch / commit | `main` at `5a5b14e`; tags `v0.7.0` at `9ce2e0e` and `v0.7.1` at `d8b17de` (maintenance); v0.8 M0 at `9bd4839`, M1 at `1948c62`, M2 at `b660219`, M3 at `2708838`, M4 at `e840a67`; v0.8 plan written 2026-10-26. The 2026-11-01/02 P0/P2/P1 changes are staged for the v0.7.2 release. |
 | Rust workspace | `scriptcraft-core`, `scriptcraft-app`, `scriptcraft-layout` (`Cargo.toml`, resolver 2) |
-| App crate version | `scriptcraft-app 0.7.0` on `main`; `0.7.1` at tag `v0.7.1`; `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
-| Distribution | **v0.7.1 released 2026-10-30** — <https://github.com/MihailM17/scriptcraft/releases/tag/v0.7.1> is a small maintenance release adding screenplay-aware paste on top of v0.7.0. Last published release: v0.7.1. Installed `/Applications/ScriptCraft.app` is 0.6.1 + unreleased shortcuts/theme/folder + revision M1–M4 |
-| Current one-liner | Free, open-source, revision-first studio: one screenplay engine (Editor 2.0), crash-safe saves + recovery, revision colours/marks/pages, compare/restore, omitted scenes, smart screenplay paste, KIT version import, revision headers/title-page fields, production page locks with A/B page numbers and FDX revision metadata, OFL fonts, FDX/Fountain import/export; PDF export paginates exactly like the editor. |
-| Next release | **v0.8 revision-complete** — compare/restore, omitted scenes, dual dialogue, title-page editor, revision summary, signed builds and runtime CI. See `docs/v0.8-plan.md`. |
+| App crate version | `scriptcraft-app 0.7.2` on `main`; `0.7.1` at tag `v0.7.1`; `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
+| Distribution | **v0.7.1 released 2026-10-30** — <https://github.com/MihailM17/scriptcraft/releases/tag/v0.7.1>. **v0.7.2 is being prepared** with v0.8 M0–M4, KIT version writing, the settings cleanup and the Dock-quit fix. Latest published release: v0.7.1. |
+| Current one-liner | Free, open-source, revision-first studio: one screenplay engine (Editor 2.0), crash-safe saves + recovery, revision colours/marks/pages, compare/restore, omitted scenes, smart screenplay paste, KIT version write/import, revision headers/title-page fields, production page locks with A/B page numbers and FDX revision metadata, OFL fonts, FDX/Fountain import/export; PDF export paginates exactly like the editor. |
+| Next release | **v0.8 revision-complete** — dual dialogue, title-page editor and revision summary remain (M5–M7); signed builds and runtime CI (M8). See `docs/v0.8-plan.md`. |
 
 **Positioning (locked 2026-10-26):** the free, open-source, revision-first
 screenwriting studio. Moat = the production revision workflow (colours, locked
@@ -152,11 +152,16 @@ direct workspace dependencies. There is still no benchmark harness.
   non-printable notes are shown by the editor but excluded from print (so a
   project with notes can break pages differently), and PDF lyrics are not
   italic because the exporter has no italic face. (`src/pdf.rs`.)
-- [ ] **macOS Dock/AppleScript quit bypasses the save prompt.** winit 0.30.13
-  has no `applicationShouldTerminate`, so Dock ▸ Quit / `osascript quit`
-  terminate immediately without `close_requested`. Window close (red button,
-  Alt+F4) and the custom Cmd+Q menu item are covered. Needs a small objc hook
-  if Dock quit must prompt too (`app.rs`, `menu.rs`).
+- [x] **macOS Dock/AppleScript quit bypasses the save prompt.** Fixed
+  2026-11-02: `scriptcraft-app/src/quit_guard.rs` swizzles
+  `-[NSApplication terminate:]` once at startup, records the request and wakes
+  egui. `app.rs` consumes it and routes it through the existing
+  `PendingAction::Quit` Save / Don't Save / Cancel prompt. Verified live with a
+  native `NSRunningApplication.terminate()` request on a dirty A95: the prompt
+  appeared, a real Cancel click kept the app alive and the project dirty, and
+  Escape also cancelled. Unit test:
+  `native_quit_request_prompts_when_dirty`. Window close and Cmd+Q were
+  already covered.
 - [ ] **Windows/Linux builds are packaged but not runtime-tested.** CI compiles
   the app and packages it; there is no GUI smoke test on those runners. The
   first cross-platform release should be treated as experimental: no native
@@ -188,8 +193,8 @@ direct workspace dependencies. There is still no benchmark harness.
   summary, spellcheck, and an FDX omission mapping (waiting on a real Final
   Draft fixture). Planned: v0.8 M5–M7.
 - [ ] **No signed/notarised builds or auto-update.** macOS is ad-hoc signed;
-  Windows/Linux packages are unsigned. Dock/AppleScript quit still bypasses the
-  save prompt, and Windows/Linux have no GUI smoke test. Planned: v0.8 M8.
+  Windows/Linux packages are unsigned, and Windows/Linux have no GUI smoke
+  test. Planned: v0.8 M8.
 - [ ] **Hardcoded font metrics.** `ROW_MM` is the measured Courier Prime value
   (`scriptcraft-layout/src/place.rs:24`), but is still a constant. Must derive
   from the TTF at runtime (e.g. `ttf-parser`) so swapping fonts cannot break
@@ -315,8 +320,10 @@ gate**. M8 runs in parallel; M9 is continuous.
       Gate at week 8; move to v0.8.1 if pagination is at risk.
 - [ ] M6 — title-page editor with live PDF-matched preview.
 - [ ] M7 — revision summary (scene/page/block counts, CSV, printable view).
-- [ ] M8 — signing/notarisation, auto-update, Windows/Linux runtime CI, Dock
-      quit, font metrics from TTF, benchmark harness.
+- [-] M8 — Dock/AppleScript quit fixed 2026-11-02 (native `terminate:`
+      routed through the save prompt). Remaining: signing/notarisation,
+      auto-update, Windows/Linux runtime CI, font metrics from TTF, benchmark
+      harness.
 - [ ] M9 — extract compare/title/summary views; update README, ROADMAP and
       `docs/kitsp-format.md`.
 - [ ] Release gate and 5–10 writer validation; tag v0.8.0.
@@ -1300,6 +1307,59 @@ Newest entries at the bottom. Each entry: date — what changed / what was found
   - `main` remains at `54d1311` with the same paste feature and continues with
     v0.8; the patch release has no v0.8 code.
   - Next: v0.8 M5 dual dialogue.
+
+- **2026-11-01** — P0 KIT-compatible version writing + P2 UI-honesty pass.
+  - `scriptcraft-core/src/kitsp.rs`: `VersionInfo` and
+    `save_file_with_revisions_and_version` append a real `script_versions` row
+    inside the existing temp-file save, before the rename. `ensure_version_schema`
+    creates the 0.7.2 table (including `color`/`description`) and upgrades older
+    projects. Empty and duplicate names fail with `VersionNameEmpty` /
+    `VersionNameExists` and leave the file untouched. `KitspVersion` now exposes
+    `description`/`username`; the loader tolerates pre-0.7.2 schemas.
+  - `scriptcraft-app/src/app.rs`: Research ▸ Versions gains **Save Current as
+    Version…** (disabled until the project is saved), a name/description modal,
+    and a refreshed version list. Saving runs through the normal atomic save,
+    title-page write, backup and recovery cleanup.
+  - P2: removed the no-op Two Panel menu item/F2 shortcut/setting, plus the
+    stored-only Spell Check, Compact Mode and HiDPI rows. Collapsed the dead
+    Settings pages (`SettingsPane`, Common/Modules tabs, Templates Library,
+    "No settings available yet") and the language Change no-op. Settings is now
+    one page of controls that all take effect.
+  - Tests: core `save_version_round_trips_through_kit_table`,
+    `save_version_rejects_duplicate_names`; app
+    `save_version_writes_kit_row_and_refreshes_list`; `cargo fmt --all --
+    --check`, `cargo clippy --workspace --all-targets -- -D warnings` and
+    `cargo test --workspace` green; `07_settings.png` regenerated.
+  - Pending manual acceptance: create a version in ScriptCraft, open the
+    `.kitsp` in Scenarist 0.7.2 and restore that version. Live UI automation
+    works on this machine now; the Scenarist round-trip remains a human check.
+  - Next: choose between P1 Dock/AppleScript quit, P3 Outline/Research export,
+    or P4 dialogue numbering.
+
+- **2026-11-02** — P1 Dock/AppleScript quit guard; v0.7.2 release preparation.
+  - `scriptcraft-app/src/quit_guard.rs` (new): installs once in `app::run`,
+    swizzles `-[NSApplication terminate:]` on the shared `NSApplication`,
+    records a request and wakes egui. Non-macOS is a no-op.
+  - `scriptcraft-app/src/app.rs`: consumes `quit_guard::take_request()` right
+    after the window-close check and routes it through `request_quit`, so Dock
+    ▸ Quit and `osascript quit` get the same Save / Don't Save / Cancel prompt.
+    Added `objc2 = "0.6"` for macOS only.
+  - Live verification (2026-11-02): opened A95, typed into the editor
+    (title showed the dirty dot), sent a real
+    `NSRunningApplication.terminate()` request, and confirmed the prompt
+    appeared. A real mouse click on **Cancel** and the Escape key both kept
+    the app alive with the project still dirty; **Don't Save** then exited.
+    The prompt text was “Save your changes to “A95” before quitting?”.
+  - Test: `native_quit_request_prompts_when_dirty` (Cancel path). Existing
+    `quit_prompts_when_dirty` still covers the window-close path.
+  - Release prep: `scriptcraft-app` bumped to 0.7.2; README, ROADMAP,
+    `docs/v0.8-plan.md` and `docs/kitsp-format.md` updated. KIT version
+    writing, the settings cleanup and the quit fix ship together.
+  - Gate: `cargo fmt --all -- --check`, `cargo clippy --workspace
+    --all-targets -- -D warnings`, `cargo test --workspace`, `cargo deny
+    check`, `git diff --check` all green (2026-11-02).
+  - Next: tag `v0.7.2`, build macOS DMG and Windows/Linux packages, publish
+    the GitHub release, then record the release in this log.
 
 ---
 

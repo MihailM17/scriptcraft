@@ -8,19 +8,16 @@ production revisions. Open KIT projects, exchange Final Draft files, lock
 pages, issue coloured revisions, and export page-exact PDFs — offline, on
 macOS, Windows and Linux.
 
-> **Status — v0.7 revision workflow, v0.8 M4.** The current tree implements
-> revision sets, coloured margin marks, revision pages, page locks, `42A`/`42B`
-> numbering, KIT saved-version import, and revision metadata in PDF and FDX.
-> v0.8 has started: block and scene identity survive save/reopen and external
-> KIT edits, the core has a deterministic draft-diff engine, a read-only
-> compare workspace shows any revision against the current draft (or another
-> revision), any baseline can be restored as a new `.kitsp` without touching
-> the current draft, and omitted scenes keep their production numbers while
-> their bodies stay out of the editor, statistics and PDF. Plain-text paste now
-> recognises screenplay elements.
+> **Status — v0.7.2.** The current release packages the v0.8 M0–M4 work:
+> stable block/scene identity across save and external KIT edits, a
+> deterministic draft diff, a read-only compare workspace, restore-as-a-copy,
+> and omitted scenes that keep their production numbers while their bodies
+> stay out of statistics and PDF. It also writes real KIT `script_versions`
+> rows, cleans up Settings so every control takes effect, and makes
+> Dock/AppleScript quit ask before discarding unsaved work.
 >
-> **Next — v0.8 revision-complete.** Dual dialogue is next, followed by a
-> title-page editor and a revision summary. See
+> **Next — v0.8 revision-complete.** Dual dialogue (M5), a title-page editor
+> (M6) and a revision summary (M7) remain, then signing/runtime CI (M8). See
 > [`docs/v0.8-plan.md`](docs/v0.8-plan.md).
 
 ![ScriptCraft editor](scriptcraft-app/tests/snapshots/01_script_top.png)
@@ -54,10 +51,14 @@ app on day one.
 - **Locked pages and scenes** — freeze issued pagination. Pages inserted after
   a lock are labelled `42A`, `42B`, …; later pages keep their original numbers.
   Scene numbers have a separate lock.
-- **KIT version import** — every recoverable saved version in a `.kitsp`
-  project can become a revision baseline.
-- **Next (v0.8)** — compare any two drafts, restore a baseline as a copy, omit
-  scenes, dual dialogue, a title-page editor, and a revision summary.
+- **KIT versions** — save the current draft as a real `script_versions` row in
+  the KIT 0.7.2 schema (round-trip tested); existing saved versions can become
+  revision baselines.
+- **Compare, restore, omit** — compare any two drafts or a draft against a
+  revision baseline, restore a baseline as a new `.kitsp`, and omit a scene
+  without losing its number.
+- **Still ahead (v0.8)** — dual dialogue, a title-page editor, and a revision
+  summary.
 
 ## The editor
 
@@ -73,7 +74,8 @@ app on day one.
 - Script, Research, Cards, Statistics and Settings modules, plus a Start page
   with recent projects and a one-click Open Projects Folder button.
 - Light and Midnight themes, picked in Settings ▸ Theme, with the ScriptCraft
-  icon-blue accent.
+  icon-blue accent. Settings lists only controls that take effect — language
+  and feature stubs that changed nothing are gone.
 - FastFormat shortcuts: select one or more blocks and press `Cmd+1`…`Cmd+0`
   (`Ctrl+1`…`Ctrl+0` on Windows/Linux) for scene heading, action, character,
   parenthetical, dialogue, transition, shot, scene characters, lyrics and

@@ -929,6 +929,36 @@ fn quit_prompts_when_dirty() {
     assert!(h.state().is_dirty());
 }
 
+/// Dock ▸ Quit / AppleScript `quit` arrive through the native quit hook; they
+/// must open the same save prompt as the window close button.
+#[test]
+fn native_quit_request_prompts_when_dirty() {
+    let mut h = focused_harness();
+    let bi = h
+        .state()
+        .find_first_heading_block()
+        .expect("A95 should contain a scene heading");
+    h.state_mut().focus_block_at(bi, 0);
+    h.run_steps(2);
+    h.input_mut().events.push(egui::Event::Text("Q".into()));
+    h.run();
+    assert!(h.state().is_dirty());
+
+    scriptcraft_app::quit_guard::request_for_test();
+    h.run();
+
+    assert!(
+        h.state().save_prompt_open(),
+        "a Dock/AppleScript quit must show the save prompt"
+    );
+    assert!(h.state().is_dirty(), "nothing saved yet");
+
+    h.get_by_label("Cancel").click();
+    h.run();
+    assert!(!h.state().save_prompt_open());
+    assert!(h.state().is_dirty(), "Cancel must keep the unsaved project");
+}
+
 /// Revision marks follow edits; starting a new colour re-baselines so only
 /// later edits take the new colour.
 #[test]
@@ -1135,6 +1165,84 @@ fn revisions_persist_across_save_and_reopen() {
         reopened.state().revision_marks_for_test().get(bi),
         Some(&Some(RevisionColor::Blue))
     );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Saving a version writes a KIT `script_versions` row with the current
+/// scenario XML, refreshes the Research ▸ Versions list, and refuses a
+/// duplicate name without disturbing the first version.
+#[test]
+fn save_version_writes_kit_row_and_refreshes_list() {
+    let fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/../fixtures/A95.kitsp");
+    let dir = std::env::temp_dir().join(format!("scriptcraft-versions-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("Versions.kitsp");
+    std::fs::copy(fixture, &path).unwrap();
+    let path_str = path.to_string_lossy().into_owned();
+
+    let mut h = harness(SideTab::Script);
+    h.run();
+    h.state_mut().open_path(&path_str);
+    h.run();
+    assert!(
+        h.state()
+            .versions_for_test()
+            .iter()
+            .all(|(name, _)| name != "Draft One"),
+        "the fixture has no Draft One version"
+    );
+    let seed_rows = h.state().versions_for_test().len();
+
+    assert!(
+        h.state_mut()
+            .save_version_for_test("Draft One", "first pass"),
+        "saving a version must succeed"
+    );
+    assert!(!h.state().is_dirty(), "saving a version is a save");
+    assert_eq!(h.state().versions_for_test().len(), seed_rows + 1);
+    assert_eq!(h.state().versions_for_test().last().unwrap().0, "Draft One");
+
+    let rows = scriptcraft_core::kitsp::load_version_scripts(&path).unwrap();
+    assert_eq!(rows.len(), seed_rows + 1, "one KIT-visible row was added");
+    let row = rows.iter().find(|r| r.name == "Draft One").unwrap();
+    assert_eq!(row.description, "first pass");
+    assert_eq!(row.username, "tester");
+    assert_eq!(row.datetime, "2026-11-01 10:00:00:123");
+    let saved = scriptcraft_core::kitsp::parse_scenario(&row.script_text).unwrap();
+    assert_eq!(
+        saved.blocks.len(),
+        h.state().block_count(),
+        "the version XML must hold the whole current script"
+    );
+
+    // A duplicate name is refused, and the first row is untouched.
+    assert!(!h.state_mut().save_version_for_test("Draft One", "again"));
+    assert!(
+        h.state().status_for_test().contains("already exists"),
+        "the status must explain the duplicate: {}",
+        h.state().status_for_test()
+    );
+    assert_eq!(h.state().versions_for_test().len(), seed_rows + 1);
+    assert_eq!(
+        scriptcraft_core::kitsp::load_version_scripts(&path)
+            .unwrap()
+            .len(),
+        seed_rows + 1
+    );
+
+    // Reopening picks the version list back up.
+    let mut reopened = harness(SideTab::Script);
+    reopened.run();
+    reopened.state_mut().open_path(&path_str);
+    reopened.run();
+    assert_eq!(reopened.state().versions_for_test().len(), seed_rows + 1);
+    assert!(reopened
+        .state()
+        .versions_for_test()
+        .iter()
+        .any(|(name, _)| name == "Draft One"));
 
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -18,7 +18,6 @@ pub const ID_IMPORT: &str = "kit.import";
 pub const ID_IMPORT_FDX: &str = "kit.import_fdx";
 pub const ID_EXPORT: &str = "kit.export";
 pub const ID_PREVIEW: &str = "kit.preview";
-pub const ID_TWO_PANEL: &str = "kit.two_panel";
 pub const ID_UNDO: &str = "kit.undo";
 pub const ID_REDO: &str = "kit.redo";
 pub const ID_FIND: &str = "kit.find";
@@ -40,7 +39,6 @@ pub const ID_QUIT: &str = "kit.quit";
 
 pub struct NativeMenu {
     _menu: Menu,
-    pub two_panel: CheckMenuItem,
     pub navigator: CheckMenuItem,
     pub format_panel: CheckMenuItem,
     pub typewriter: CheckMenuItem,
@@ -48,12 +46,7 @@ pub struct NativeMenu {
 
 impl NativeMenu {
     /// Build the menu bar and attach it to the macOS application.
-    pub fn install(
-        two_panel: bool,
-        navigator: bool,
-        format_panel: bool,
-        typewriter: bool,
-    ) -> muda::Result<Self> {
+    pub fn install(navigator: bool, format_panel: bool, typewriter: bool) -> muda::Result<Self> {
         let new = MenuItem::with_id(ID_NEW, "New", true, None);
         let open = MenuItem::with_id(ID_OPEN, "Open...", true, acc("CmdOrCtrl+O"));
         let save = MenuItem::with_id(ID_SAVE, "Save", true, acc("CmdOrCtrl+S"));
@@ -62,8 +55,6 @@ impl NativeMenu {
         let import_fdx = MenuItem::with_id(ID_IMPORT_FDX, "Import Final Draft...", true, None);
         let export = MenuItem::with_id(ID_EXPORT, "Export to...", true, None);
         let preview = MenuItem::with_id(ID_PREVIEW, "Print preview script", true, acc("F12"));
-        let two_panel_item =
-            CheckMenuItem::with_id(ID_TWO_PANEL, "Two panel mode", true, two_panel, acc("F2"));
 
         // The first submenu is the macOS application menu (app name).
         let app_about = MenuItem::with_id(ID_ABOUT, "About ScriptCraft", true, None);
@@ -107,7 +98,6 @@ impl NativeMenu {
                 &export,
                 &preview,
                 &sep_b,
-                &two_panel_item,
             ],
         )?;
 
@@ -180,7 +170,6 @@ impl NativeMenu {
 
         Ok(Self {
             _menu: menu,
-            two_panel: two_panel_item,
             navigator: navigator_item,
             format_panel: format_item,
             typewriter: typewriter_item,

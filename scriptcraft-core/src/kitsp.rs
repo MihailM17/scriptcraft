@@ -24,6 +24,43 @@ pub enum KitspError {
     Json(#[from] serde_json::Error),
     #[error("refusing to overwrite the current project with a restored copy")]
     RestoreOverwritesSource,
+    #[error("a script version named {0:?} already exists")]
+    VersionNameExists(String),
+    #[error("script version name cannot be empty")]
+    VersionNameEmpty,
+}
+
+/// Metadata for one saved draft stored in KIT's `script_versions` table.
+///
+/// KIT stores the whole scenario XML in `script_text`; [`save_file_inner`]
+/// supplies that from the same serialization used for `scenario.text`, so a
+/// version written here can be opened and restored by KIT Scenarist.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VersionInfo {
+    pub name: String,
+    pub description: String,
+    /// KIT `QColor` name, normally `#ffffff`.
+    pub color: String,
+    pub username: String,
+    /// KIT format: `yyyy-MM-dd hh:mm:ss:zzz`.
+    pub datetime: String,
+}
+
+impl VersionInfo {
+    pub fn new(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        username: impl Into<String>,
+        datetime: impl Into<String>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            description: description.into(),
+            color: "#ffffff".to_string(),
+            username: username.into(),
+            datetime: datetime.into(),
+        }
+    }
 }
 
 /// Result of restoring a revision baseline as a new project.
@@ -587,7 +624,7 @@ fn replace_file(from: &std::path::Path, to: &std::path::Path) -> std::io::Result
 /// over the target, so a crash mid-save can never leave a half-written
 /// project behind.
 pub fn save_file(path: impl AsRef<Path>, p: &Project) -> Result<(), KitspError> {
-    save_file_inner(path, p, None)
+    save_file_inner(path, p, None, None)
 }
 
 pub fn save_file_with_revisions(
@@ -595,13 +632,27 @@ pub fn save_file_with_revisions(
     p: &Project,
     revisions: &RevisionHistory,
 ) -> Result<(), KitspError> {
-    save_file_inner(path, p, Some(revisions))
+    save_file_inner(path, p, Some(revisions), None)
+}
+
+/// Save the project and, in the same atomic rewrite, append one KIT-visible
+/// row to `script_versions`. The row's `script_text` is the same `<scenario>`
+/// XML used by the live script, which is what KIT's own "New script version"
+/// stores.
+pub fn save_file_with_revisions_and_version(
+    path: impl AsRef<Path>,
+    p: &Project,
+    revisions: &RevisionHistory,
+    version: Option<&VersionInfo>,
+) -> Result<(), KitspError> {
+    save_file_inner(path, p, Some(revisions), version)
 }
 
 fn save_file_inner(
     path: impl AsRef<Path>,
     p: &Project,
     revisions: Option<&RevisionHistory>,
+    version: Option<&VersionInfo>,
 ) -> Result<(), KitspError> {
     let path = path.as_ref();
     let bak = path.with_extension("kitsp.bak");
@@ -617,6 +668,9 @@ fn save_file_inner(
         write_scene_meta(&conn, p)?;
         if let Some(revisions) = revisions {
             write_revisions(&conn, revisions)?;
+        }
+        if let Some(version) = version {
+            write_version(&conn, &xml, version)?;
         }
         // Corkboard sync must never break the save itself.
         if let Ok(scheme) =
@@ -695,7 +749,7 @@ fn write_recovery_file_inner(
             params![RECOVERY_ORIGIN_KEY, origin],
         )?;
     }
-    save_file_inner(dst, p, revisions)
+    save_file_inner(dst, p, revisions, None)
 }
 
 pub fn load_revisions(path: impl AsRef<Path>) -> Result<RevisionHistory, KitspError> {
@@ -725,6 +779,79 @@ fn write_revisions(conn: &Connection, revisions: &RevisionHistory) -> Result<(),
             params![REVISIONS_KEY, revisions.to_json()?],
         )?;
     }
+    Ok(())
+}
+
+/// Match KIT's `script_versions` schema, including the 0.7.2 `color` and
+/// `description` columns. Older ScriptCraft/KIT projects may predate them;
+/// adding the columns keeps the file writable without a separate migration.
+fn ensure_version_schema(conn: &Connection) -> Result<(), KitspError> {
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS script_versions ( id INTEGER PRIMARY KEY AUTOINCREMENT, fk_script_id INTEGER NOT NULL, username TEXT NOT NULL, datetime TEXT NOT NULL, color TEXT DEFAULT(NULL), name TEXT UNIQUE NOT NULL, description TEXT DEFAULT(NULL), script_text TEXT NOT NULL)",
+        [],
+    )?;
+    let mut stmt = conn.prepare("PRAGMA table_info(script_versions)")?;
+    let columns: Vec<String> = stmt
+        .query_map([], |r| r.get::<_, String>(1))?
+        .collect::<Result<Vec<_>, _>>()?;
+    drop(stmt);
+    if !columns.iter().any(|c| c == "color") {
+        conn.execute(
+            "ALTER TABLE script_versions ADD COLUMN color TEXT DEFAULT(NULL)",
+            [],
+        )?;
+    }
+    if !columns.iter().any(|c| c == "description") {
+        conn.execute(
+            "ALTER TABLE script_versions ADD COLUMN description TEXT DEFAULT(NULL)",
+            [],
+        )?;
+    }
+    Ok(())
+}
+
+/// Append one KIT script version. `script_text` is the scenario XML, exactly
+/// what KIT's `ScriptVersionStorage::storeScriptVersion` receives.
+fn write_version(
+    conn: &Connection,
+    script_text: &str,
+    version: &VersionInfo,
+) -> Result<(), KitspError> {
+    let name = version.name.trim();
+    if name.is_empty() {
+        return Err(KitspError::VersionNameEmpty);
+    }
+    ensure_version_schema(conn)?;
+    let exists: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM script_versions WHERE name = ?1)",
+        params![name],
+        |r| r.get(0),
+    )?;
+    if exists {
+        return Err(KitspError::VersionNameExists(name.to_string()));
+    }
+    let username = if version.username.trim().is_empty() {
+        "ScriptCraft"
+    } else {
+        version.username.trim()
+    };
+    let color = if version.color.trim().is_empty() {
+        "#ffffff"
+    } else {
+        version.color.trim()
+    };
+    conn.execute(
+        "INSERT INTO script_versions (fk_script_id, username, datetime, color, name, description, script_text)
+         VALUES (0, ?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            username,
+            version.datetime.trim(),
+            color,
+            name,
+            version.description.trim(),
+            script_text
+        ],
+    )?;
     Ok(())
 }
 
@@ -1182,6 +1309,8 @@ pub fn load_research(path: impl AsRef<Path>) -> Result<Vec<ResearchEntry>, Kitsp
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct KitspVersion {
     pub name: String,
+    pub description: String,
+    pub username: String,
     pub datetime: String,
     pub script_text: String,
 }
@@ -1194,18 +1323,41 @@ pub fn load_version_scripts(path: impl AsRef<Path>) -> Result<Vec<KitspVersion>,
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,
     )
     .or_else(|_| Connection::open(path.as_ref()))?;
-    let mut stmt = match conn.prepare(
-        "SELECT COALESCE(name,''), COALESCE(datetime,''), COALESCE(script_text,'')
-         FROM script_versions ORDER BY id",
-    ) {
+    // Older KIT projects may lack the 0.7.2 `description` column; keep
+    // reading them instead of returning an empty list.
+    let columns: Vec<String> = match conn.prepare("PRAGMA table_info(script_versions)") {
+        Ok(mut s) => s
+            .query_map([], |r| r.get::<_, String>(1))?
+            .collect::<Result<Vec<_>, _>>()?,
+        Err(_) => return Ok(Vec::new()),
+    };
+    let has = |name: &str| columns.iter().any(|c| c == name);
+    let description = if has("description") {
+        "COALESCE(description,'')"
+    } else {
+        "''"
+    };
+    let username = if has("username") {
+        "COALESCE(username,'')"
+    } else {
+        "''"
+    };
+    let sql = format!(
+        "SELECT COALESCE(name,''), {description}, {username},
+                COALESCE(datetime,''), COALESCE(script_text,'')
+         FROM script_versions ORDER BY id"
+    );
+    let mut stmt = match conn.prepare(&sql) {
         Ok(s) => s,
         Err(_) => return Ok(Vec::new()),
     };
     let rows = stmt.query_map(params![], |r| {
         Ok(KitspVersion {
             name: r.get(0)?,
-            datetime: r.get(1)?,
-            script_text: r.get(2)?,
+            description: r.get(1)?,
+            username: r.get(2)?,
+            datetime: r.get(3)?,
+            script_text: r.get(4)?,
         })
     })?;
     rows.collect::<Result<Vec<_>, _>>()
@@ -1912,5 +2064,87 @@ mod tests {
             assert_eq!(a.text, b.text);
             assert_eq!(a.kit_uuid, b.kit_uuid);
         }
+    }
+
+    fn version_test_dir() -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("scriptcraft-version-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn save_version_round_trips_through_kit_table() {
+        let dir = version_test_dir();
+        let path = dir.join("project.kitsp");
+        let mut p = create_file(&path, "Version Test").unwrap();
+        p.blocks.push(crate::model::ScriptBlock::new(
+            ElementType::Action,
+            "A new line for the version.".to_string(),
+        ));
+        let version = VersionInfo::new(
+            "Draft One",
+            "first pass",
+            "tester",
+            "2026-11-01 10:00:00:123",
+        );
+        save_file_with_revisions_and_version(
+            &path,
+            &p,
+            &RevisionHistory::default(),
+            Some(&version),
+        )
+        .unwrap();
+
+        let versions = load_version_scripts(&path).unwrap();
+        assert_eq!(versions.len(), 1);
+        assert_eq!(versions[0].name, "Draft One");
+        assert_eq!(versions[0].datetime, "2026-11-01 10:00:00:123");
+        assert_eq!(versions[0].script_text, project_to_scenario_xml(&p));
+
+        let parsed = parse_scenario(&versions[0].script_text).unwrap();
+        assert_eq!(parsed.blocks.len(), p.blocks.len());
+        assert_eq!(
+            parsed.blocks.last().unwrap().text,
+            "A new line for the version."
+        );
+
+        let mut history = RevisionHistory::default();
+        assert_eq!(
+            import_versions_as_revisions(&path, &mut history).unwrap(),
+            1
+        );
+        assert_eq!(history.sets.len(), 1);
+        assert_eq!(history.sets[0].name, "Draft One");
+        assert_eq!(history.sets[0].started, "2026-11-01 10:00:00:123");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn save_version_rejects_duplicate_names() {
+        let dir = version_test_dir();
+        let path = dir.join("project.kitsp");
+        let p = create_file(&path, "Version Test").unwrap();
+        let version = VersionInfo::new("Draft", "", "tester", "2026-11-01 10:00:00:123");
+        save_file_with_revisions_and_version(
+            &path,
+            &p,
+            &RevisionHistory::default(),
+            Some(&version),
+        )
+        .unwrap();
+
+        let err = save_file_with_revisions_and_version(
+            &path,
+            &p,
+            &RevisionHistory::default(),
+            Some(&version),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, KitspError::VersionNameExists(ref name) if name == "Draft"),
+            "unexpected error: {err}"
+        );
+        assert_eq!(load_version_scripts(&path).unwrap().len(), 1);
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

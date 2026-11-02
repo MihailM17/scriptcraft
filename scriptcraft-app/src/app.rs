@@ -78,11 +78,11 @@ pub fn run() -> eframe::Result<()> {
             install_fonts(&cc.egui_ctx);
             let mut app = ScriptCraftApp::default();
             app.load_persistent();
+            crate::quit_guard::install(&cc.egui_ctx);
             #[cfg(target_os = "macos")]
             {
                 app.custom_titlebar = true;
                 if let Ok(menu) = crate::menu::NativeMenu::install(
-                    app.settings.two_panel,
                     app.show_left_panel,
                     app.show_format_panel,
                     app.typewriter,
@@ -352,19 +352,6 @@ pub enum SideTab {
     Settings,
 }
 
-/// Settings module pages (left list): name says it all.
-#[derive(Default, PartialEq, Eq, Clone, Copy)]
-pub enum SettingsPane {
-    #[default]
-    Application,
-    Research,
-    Cards,
-    ScriptEditor,
-    Navigator,
-    DurationCounters,
-    TemplatesLibrary,
-}
-
 /// Export dialog modules, mirroring KIT's Research / Outline / Script tabs.
 #[derive(Default, PartialEq, Eq, Clone, Copy)]
 enum ExportTab {
@@ -400,10 +387,6 @@ struct AppSettings {
     autosave_minutes: u32,
     backups: bool,
     backups_dir: String,
-    spell_check: bool,
-    compact_mode: bool,
-    two_panel: bool,
-    hidpi: bool,
     theme: Theme,
 }
 
@@ -414,10 +397,6 @@ impl Default for AppSettings {
             autosave_minutes: 5,
             backups: true,
             backups_dir: default_backups_dir(),
-            spell_check: false,
-            compact_mode: false,
-            two_panel: false,
-            hidpi: false,
             theme: Theme::Midnight,
         }
     }
@@ -515,6 +494,11 @@ pub struct ScriptCraftApp {
     stats_notes: bool,
     /// Draft versions stored inside the .kitsp (name, datetime).
     versions: Vec<(String, String)>,
+    show_version_dialog: bool,
+    version_name: String,
+    version_description: String,
+    /// Why the last version save failed, shown inside the dialog.
+    version_error: String,
     /// Title-page fields edited in the Research view, pending save.
     meta_dirty: bool,
     selected_scene: usize,
@@ -527,9 +511,6 @@ pub struct ScriptCraftApp {
     side_tab: SideTab,
     /// Recent projects (path, "dd.mm.yyyy HH:MM"); persisted in recent.txt.
     recent: Vec<(String, String)>,
-    /// Settings module: selected page and Common/Modules tab.
-    settings_pane: SettingsPane,
-    settings_modules: bool,
     settings: AppSettings,
     /// Disk persistence armed (real app only; tests never touch the disk).
     persist: bool,
@@ -617,6 +598,10 @@ impl Default for ScriptCraftApp {
             stats_gen: String::new(),
             stats_notes: false,
             versions: Vec::new(),
+            show_version_dialog: false,
+            version_name: String::new(),
+            version_description: String::new(),
+            version_error: String::new(),
             meta_dirty: false,
             selected_scene: 0,
             omitted_heading_ids: Vec::new(),
@@ -624,8 +609,6 @@ impl Default for ScriptCraftApp {
             selected_block: None,
             side_tab: SideTab::default(),
             recent: Vec::new(),
-            settings_pane: SettingsPane::default(),
-            settings_modules: false,
             settings: AppSettings::default(),
             persist: false,
             last_autosave: std::time::Instant::now(),
@@ -803,6 +786,90 @@ impl ScriptCraftApp {
                     self.finish_pending(pending, ctx);
                 }
             }
+        }
+    }
+
+    /// Save the current draft as a KIT script version.
+    fn version_dialog(&mut self, ctx: &egui::Context) {
+        if !self.show_version_dialog {
+            return;
+        }
+        let mut save = false;
+        let mut close = false;
+        let modal = egui::Modal::new(egui::Id::new("save_script_version")).show(ctx, |ui| {
+            ui.set_width(430.0);
+            ui.label(
+                egui::RichText::new("Save Current Version")
+                    .size(17.0)
+                    .strong(),
+            );
+            ui.add_space(4.0);
+            ui.label(
+                egui::RichText::new(
+                    "Stores this draft inside the .kitsp as a KIT script version, so Scenarist can open and restore it.",
+                )
+                .size(12.0)
+                .color(kit().disabled_text),
+            );
+            ui.add_space(10.0);
+            ui.label("Name");
+            ui.add(
+                egui::TextEdit::singleline(&mut self.version_name)
+                    .hint_text("Draft 1")
+                    .desired_width(f32::INFINITY),
+            );
+            ui.add_space(8.0);
+            ui.label("Description (optional)");
+            ui.add(
+                egui::TextEdit::multiline(&mut self.version_description)
+                    .desired_rows(3)
+                    .desired_width(f32::INFINITY),
+            );
+            if !self.version_error.is_empty() {
+                ui.add_space(8.0);
+                ui.label(
+                    egui::RichText::new(&self.version_error)
+                        .size(12.0)
+                        .color(REP_RED),
+                );
+            }
+            ui.add_space(12.0);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button("Cancel").clicked() {
+                    close = true;
+                }
+                let can_save = !self.version_name.trim().is_empty();
+                if ui
+                    .add_enabled(can_save, egui::Button::new("Save Version"))
+                    .clicked()
+                {
+                    save = true;
+                }
+            });
+        });
+        if modal.should_close() {
+            close = true;
+        }
+        if save {
+            let user = std::env::var("USER")
+                .or_else(|_| std::env::var("USERNAME"))
+                .unwrap_or_else(|_| "ScriptCraft".to_string());
+            let version = kitsp::VersionInfo::new(
+                self.version_name.trim(),
+                self.version_description.trim(),
+                user,
+                chrono::Local::now()
+                    .format("%Y-%m-%d %H:%M:%S:%3f")
+                    .to_string(),
+            );
+            if self.do_save_version(&version) {
+                close = true;
+            } else {
+                self.version_error = self.status.clone();
+            }
+        }
+        if close {
+            self.show_version_dialog = false;
         }
     }
 
@@ -1238,6 +1305,21 @@ impl ScriptCraftApp {
             self.status = "No recoverable saved versions found.".to_string();
         }
         imported
+    }
+
+    /// Save the open project as a KIT script version through the same path as
+    /// the Versions pane action.
+    #[doc(hidden)]
+    pub fn save_version_for_test(&mut self, name: &str, description: &str) -> bool {
+        let version =
+            kitsp::VersionInfo::new(name, description, "tester", "2026-11-01 10:00:00:123");
+        self.do_save_version(&version)
+    }
+
+    /// Version rows shown in Research ▸ Versions: (name, datetime).
+    #[doc(hidden)]
+    pub fn versions_for_test(&self) -> &[(String, String)] {
+        &self.versions
     }
 
     #[doc(hidden)]
@@ -1962,13 +2044,31 @@ impl ScriptCraftApp {
     }
 
     fn do_save(&mut self) {
+        self.do_save_inner(None);
+    }
+
+    /// Save through the normal atomic path. When `version` is present, append a
+    /// KIT-visible row in the same rewrite. Returns whether the script saved.
+    fn do_save_inner(&mut self, version: Option<&kitsp::VersionInfo>) -> bool {
         if Self::is_fixture_path(&self.path) || self.path.is_empty() {
+            if version.is_some() {
+                self.status = "Save the project before creating a version.".to_string();
+                return false;
+            }
             self.do_save_as();
-            return;
+            return true;
         }
         let script = match &self.project {
-            Some(p) => kitsp::save_file_with_revisions(&self.path, p, &self.revisions),
-            None => return,
+            Some(p) => match version {
+                Some(v) => kitsp::save_file_with_revisions_and_version(
+                    &self.path,
+                    p,
+                    &self.revisions,
+                    Some(v),
+                ),
+                None => kitsp::save_file_with_revisions(&self.path, p, &self.revisions),
+            },
+            None => return false,
         };
         match script {
             Ok(()) => {
@@ -1988,9 +2088,40 @@ impl ScriptCraftApp {
                     Ok(()) => format!("Saved to {} (.bak backup kept){note}", self.path),
                     Err(e) => format!("Script saved, but title page failed: {e}"),
                 };
+                true
             }
-            Err(e) => self.status = format!("Save failed: {e}"),
+            Err(e) => {
+                self.status = format!("Save failed: {e}");
+                false
+            }
         }
+    }
+
+    /// Save the current draft as a KIT script version. The row is written by
+    /// `do_save_inner` inside the same atomic temp-file rewrite, then the
+    /// Research ▸ Versions list is refreshed.
+    fn do_save_version(&mut self, version: &kitsp::VersionInfo) -> bool {
+        if !self.do_save_inner(Some(version)) {
+            return false;
+        }
+        self.versions = kitsp::load_versions(&self.path).unwrap_or_default();
+        // A title-page write failure must not be hidden by the success message.
+        let meta_failure = self
+            .status
+            .split_once("title page failed: ")
+            .map(|(_, detail)| detail.to_string());
+        if let Some(detail) = meta_failure {
+            self.status = format!(
+                "Version \"{}\" saved, but title page failed: {detail}",
+                version.name
+            );
+        } else {
+            self.status = format!(
+                "Saved version \"{}\" to {} (KIT will see it in Script Versions).",
+                version.name, self.path
+            );
+        }
+        true
     }
 
     /// Timestamped copy of the project in the configured backups folder.
@@ -3778,68 +3909,6 @@ fn kit_square_button(ui: &mut egui::Ui, icon: KitIcon) -> egui::Response {
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
-/// One row of the Settings module's left page list.
-fn settings_row(ui: &mut egui::Ui, icon: KitIcon, name: &str, selected: bool) -> egui::Response {
-    let c = kit();
-    let w = ui.available_width();
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(w, 38.0), egui::Sense::click());
-    let inner = rect.shrink2(egui::vec2(8.0, 2.0));
-    if selected {
-        ui.painter().rect_filled(inner, 8.0, c.accent_soft);
-    } else if resp.hovered() {
-        ui.painter().rect_filled(inner, 8.0, c.hover_light);
-    }
-    draw_kit_icon(
-        ui.painter(),
-        icon,
-        egui::pos2(rect.left() + 26.0, rect.center().y),
-        if selected { c.accent_text } else { c.text },
-    );
-    ui.painter().text(
-        egui::pos2(rect.left() + 44.0, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        name,
-        egui::FontId::proportional(13.5),
-        if selected { c.heading_text } else { c.text },
-    );
-    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
-}
-
-/// Common / Modules tab header of the Settings module.
-fn settings_tab(ui: &mut egui::Ui, text: &str, selected: bool) -> egui::Response {
-    let g = ui.painter().layout_no_wrap(
-        text.to_string(),
-        egui::FontId::proportional(14.0),
-        kit().text,
-    );
-    let (rect, resp) =
-        ui.allocate_exact_size(egui::vec2(g.size().x + 18.0, 30.0), egui::Sense::click());
-    let color = if selected {
-        if kit_is_light() {
-            kit().text
-        } else {
-            egui::Color32::WHITE
-        }
-    } else {
-        kit().disabled_text
-    };
-    ui.painter().text(
-        rect.center(),
-        egui::Align2::CENTER_CENTER,
-        text,
-        egui::FontId::proportional(14.0),
-        color,
-    );
-    if selected {
-        let bar = egui::Rect::from_min_size(
-            egui::pos2(rect.left() + 5.0, rect.bottom() - 2.0),
-            egui::vec2(rect.width() - 10.0, 2.0),
-        );
-        ui.painter().rect_filled(bar, 1.0, kit().accent);
-    }
-    resp
-}
-
 // ---- Persisted settings & recent projects ---------------------------------
 
 /// Tiny stable hash for recovery file names (FNV-1a, no deps).
@@ -3922,10 +3991,6 @@ fn load_settings() -> AppSettings {
                         s.backups_dir = v.to_string();
                     }
                 }
-                "spell_check" => s.spell_check = v == "1",
-                "compact_mode" => s.compact_mode = v == "1",
-                "two_panel" => s.two_panel = v == "1",
-                "hidpi" => s.hidpi = v == "1",
                 "theme" => {
                     s.theme = match v {
                         "light" => Theme::Light,
@@ -3952,15 +4017,11 @@ fn load_settings() -> AppSettings {
 fn save_settings(s: &AppSettings) {
     let _ = std::fs::create_dir_all(config_dir());
     let text = format!(
-        "autosave={}\nautosave_minutes={}\nbackups={}\nbackups_dir={}\nspell_check={}\ncompact_mode={}\ntwo_panel={}\nhidpi={}\ntheme={}\n",
+        "autosave={}\nautosave_minutes={}\nbackups={}\nbackups_dir={}\ntheme={}\n",
         s.autosave as u8,
         s.autosave_minutes.clamp(1, 60),
         s.backups as u8,
         s.backups_dir,
-        s.spell_check as u8,
-        s.compact_mode as u8,
-        s.two_panel as u8,
-        s.hidpi as u8,
         s.theme.key(),
     );
     let _ = std::fs::write(config_dir().join("settings.conf"), text);
@@ -4191,6 +4252,11 @@ impl eframe::App for ScriptCraftApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.request_quit(ctx);
         }
+        // Dock ▸ Quit / AppleScript `quit` arrive through AppKit's
+        // `terminate:`; route them into the same prompt.
+        if crate::quit_guard::take_request() {
+            self.request_quit(ctx);
+        }
         // Native macOS menu bar events (no-ops in tests).
         self.poll_native_menu(ctx);
         // Research-view title edits persist once no field has focus.
@@ -4328,6 +4394,7 @@ impl eframe::App for ScriptCraftApp {
         }
         // Above every module so it can block the app while open.
         self.save_prompt(ctx);
+        self.version_dialog(ctx);
     }
 }
 
@@ -4590,7 +4657,6 @@ impl ScriptCraftApp {
             ImportFdx,
             Export,
             Preview,
-            TwoPanel,
             Undo,
             Redo,
             Find,
@@ -4643,16 +4709,6 @@ impl ScriptCraftApp {
             }
             if menu_item(ui, "Print preview script", Some("F12"), has) {
                 action = Some(M::Preview);
-            }
-            ui.separator();
-            if menu_check(
-                ui,
-                "Two panel mode",
-                self.settings.two_panel,
-                Some("F2"),
-                true,
-            ) {
-                action = Some(M::TwoPanel);
             }
             ui.separator();
             if menu_item(ui, "Undo", Some("⌘Z"), can_undo) {
@@ -4759,12 +4815,6 @@ impl ScriptCraftApp {
                 self.close_compare();
                 self.preview_pdf();
             }
-            Some(M::TwoPanel) => {
-                self.settings.two_panel = !self.settings.two_panel;
-                if self.persist {
-                    save_settings(&self.settings);
-                }
-            }
             Some(M::Undo) => self.do_undo(),
             Some(M::Redo) => self.do_redo(),
             Some(M::Find) => {
@@ -4841,12 +4891,6 @@ impl ScriptCraftApp {
                     self.close_compare();
                     self.preview_pdf();
                 }
-                menu::ID_TWO_PANEL => {
-                    self.settings.two_panel = !self.settings.two_panel;
-                    if self.persist {
-                        save_settings(&self.settings);
-                    }
-                }
                 menu::ID_UNDO => self.do_undo(),
                 menu::ID_REDO => self.do_redo(),
                 menu::ID_FIND => {
@@ -4898,7 +4942,6 @@ impl ScriptCraftApp {
             }
         }
         if let Some(m) = &self.menu {
-            m.two_panel.set_checked(self.settings.two_panel);
             m.navigator.set_checked(self.show_left_panel);
             m.format_panel.set_checked(self.show_format_panel);
             m.typewriter.set_checked(self.typewriter);
@@ -6239,38 +6282,62 @@ impl ScriptCraftApp {
 
     fn research_versions_pane(&mut self, ui: &mut egui::Ui) {
         kit_section(ui, "Versions");
+        let can_write = !self.path.is_empty() && !Self::is_fixture_path(&self.path);
+        if ui
+            .add_enabled(can_write, egui::Button::new("Save Current as Version…"))
+            .on_disabled_hover_text("Save the project before creating a version.")
+            .clicked()
+        {
+            self.version_name = format!("Draft {}", chrono::Local::now().format("%Y-%m-%d %H:%M"));
+            self.version_description.clear();
+            self.version_error.clear();
+            self.show_version_dialog = true;
+        }
+        if !can_write {
+            ui.label(
+                egui::RichText::new("Save the project first — fixture is read-only.")
+                    .size(11.0)
+                    .color(egui::Color32::from_gray(0xA1)),
+            );
+        }
+        ui.add_space(8.0);
         if self.versions.is_empty() {
             ui.label(egui::RichText::new("No versions in this project.").size(13.0));
-            return;
-        }
-        for (name, when) in &self.versions {
-            let (rect, _) = ui
-                .allocate_exact_size(egui::vec2(ui.available_width(), 40.0), egui::Sense::hover());
-            ui.painter().rect_filled(rect, 2.0, kit().strip);
-            draw_kit_icon(
-                ui.painter(),
-                KitIcon::Layers,
-                egui::pos2(rect.left() + 18.0, rect.center().y),
-                kit().text,
-            );
-            ui.painter().text(
-                egui::pos2(rect.left() + 36.0, rect.center().y - 7.0),
-                egui::Align2::LEFT_CENTER,
-                name,
-                egui::FontId::proportional(13.0),
-                kit().text,
-            );
-            ui.painter().text(
-                egui::pos2(rect.left() + 36.0, rect.center().y + 8.0),
-                egui::Align2::LEFT_CENTER,
-                when,
-                egui::FontId::proportional(11.5),
-                egui::Color32::from_gray(0xA1),
-            );
-            ui.add_space(6.0);
+        } else {
+            for (name, when) in &self.versions {
+                let (rect, _) = ui.allocate_exact_size(
+                    egui::vec2(ui.available_width(), 40.0),
+                    egui::Sense::hover(),
+                );
+                ui.painter().rect_filled(rect, 2.0, kit().strip);
+                draw_kit_icon(
+                    ui.painter(),
+                    KitIcon::Layers,
+                    egui::pos2(rect.left() + 18.0, rect.center().y),
+                    kit().text,
+                );
+                ui.painter().text(
+                    egui::pos2(rect.left() + 36.0, rect.center().y - 7.0),
+                    egui::Align2::LEFT_CENTER,
+                    name,
+                    egui::FontId::proportional(13.0),
+                    kit().text,
+                );
+                ui.painter().text(
+                    egui::pos2(rect.left() + 36.0, rect.center().y + 8.0),
+                    egui::Align2::LEFT_CENTER,
+                    when,
+                    egui::FontId::proportional(11.5),
+                    egui::Color32::from_gray(0xA1),
+                );
+                ui.add_space(6.0);
+            }
         }
         ui.add_space(4.0);
-        if kit_button(ui, "Import Versions as Revisions").clicked() {
+        if ui
+            .add_enabled(can_write, egui::Button::new("Import Versions as Revisions"))
+            .clicked()
+        {
             self.import_versions_as_revisions();
         }
         ui.label(
@@ -7192,95 +7259,34 @@ impl ScriptCraftApp {
     /// KIT's Preferences dialog rendered as a full module.
     fn settings_view(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
-            let avail_h = ui.available_height();
-            ui.spacing_mut().item_spacing.x = 0.0;
             let mut changed = false;
-            ui.horizontal_top(|ui| {
-                ui.allocate_ui_with_layout(
-                    egui::vec2(240.0, avail_h),
-                    egui::Layout::top_down(egui::Align::Min),
-                    |ui| {
-                        ui.set_min_width(240.0);
-                        ui.set_max_width(240.0);
-                        ui.add_space(6.0);
-                        for (pane, icon, name) in [
-                            (SettingsPane::Application, KitIcon::Gear, "Application"),
-                            (SettingsPane::Research, KitIcon::Book, "Research"),
-                            (SettingsPane::Cards, KitIcon::Layers, "Cards"),
-                            (SettingsPane::ScriptEditor, KitIcon::Script, "Script Editor"),
-                            (SettingsPane::Navigator, KitIcon::Paragraph, "Navigator"),
-                            (
-                                SettingsPane::DurationCounters,
-                                KitIcon::Chart,
-                                "Duration/Counters",
-                            ),
-                            (
-                                SettingsPane::TemplatesLibrary,
-                                KitIcon::File,
-                                "Templates Library",
-                            ),
-                        ] {
-                            if settings_row(ui, icon, name, self.settings_pane == pane).clicked() {
-                                self.settings_pane = pane;
-                            }
-                        }
-                        let rest = ui.available_height() - 42.0;
-                        if rest > 0.0 {
-                            ui.add_space(rest);
-                        }
-                        ui.horizontal(|ui| {
-                            ui.add_space(14.0);
-                            ui.vertical(|ui| {
-                                ui.set_width(212.0);
-                                if start_button(ui, None, "Reset Settings") {
-                                    self.settings = AppSettings::default();
-                                    if self.persist {
-                                        save_settings(&self.settings);
-                                    }
-                                    self.status = "Settings reset to defaults.".to_string();
-                                }
-                            });
-                        });
-                        ui.add_space(8.0);
-                    },
-                );
-                ui.add_space(6.0);
-                let (sep, _) =
-                    ui.allocate_exact_size(egui::vec2(1.0, avail_h), egui::Sense::hover());
-                ui.painter().rect_filled(sep, 0.0, kit().sep);
-                ui.add_space(6.0);
-                ui.vertical(|ui| {
-                    ui.add_space(8.0);
-                    ui.horizontal(|ui| {
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                ui.add_space(20.0);
+                ui.horizontal(|ui| {
+                    ui.add_space(24.0);
+                    ui.vertical(|ui| {
+                        ui.set_max_width(640.0);
+                        ui.label(egui::RichText::new("Settings").size(18.0).strong());
+                        ui.add_space(4.0);
+                        ui.label(
+                            egui::RichText::new(
+                                "Application preferences. Everything here is applied and saved.",
+                            )
+                            .size(12.0)
+                            .color(kit().disabled_text),
+                        );
                         ui.add_space(16.0);
-                        if settings_tab(ui, "Common", !self.settings_modules).clicked() {
-                            self.settings_modules = false;
-                        }
-                        ui.add_space(6.0);
-                        if settings_tab(ui, "Modules", self.settings_modules).clicked() {
-                            self.settings_modules = true;
-                        }
-                    });
-                    ui.add_space(12.0);
-                    if self.settings_modules {
-                        ui.horizontal(|ui| {
-                            ui.add_space(16.0);
-                            ui.label(
-                                egui::RichText::new("No modules installed.")
-                                    .color(kit().disabled_text),
-                            );
-                        });
-                    } else if self.settings_pane == SettingsPane::Application {
                         changed |= self.settings_common(ui);
-                    } else {
-                        ui.horizontal(|ui| {
-                            ui.add_space(16.0);
-                            ui.label(
-                                egui::RichText::new("No settings available yet.")
-                                    .color(kit().disabled_text),
-                            );
-                        });
-                    }
+                        ui.add_space(24.0);
+                        if start_button(ui, None, "Reset Settings") {
+                            self.settings = AppSettings::default();
+                            if self.persist {
+                                save_settings(&self.settings);
+                            }
+                            self.status = "Settings reset to defaults.".to_string();
+                        }
+                        ui.add_space(24.0);
+                    });
                 });
             });
             if changed && self.persist {
@@ -7289,7 +7295,7 @@ impl ScriptCraftApp {
         });
     }
 
-    /// Application ▸ Common option rows; returns true when something changed.
+    /// Application preference rows; returns true when something changed.
     fn settings_common(&mut self, ui: &mut egui::Ui) -> bool {
         let mut changed = false;
         let mut v = ui.visuals().clone();
@@ -7302,11 +7308,10 @@ impl ScriptCraftApp {
             ui.add_space(16.0);
             ui.label("Language:");
             ui.add_space(6.0);
-            ui.label(egui::RichText::new("English").color(kit().disabled_text));
-            ui.add_space(6.0);
-            if kit_button(ui, "Change").clicked() {
-                self.status = "Only English is bundled in this build.".to_string();
-            }
+            ui.label(
+                egui::RichText::new("English (the only language in this build)")
+                    .color(kit().disabled_text),
+            );
         });
         ui.add_space(12.0);
         ui.horizontal(|ui| {
@@ -7375,40 +7380,6 @@ impl ScriptCraftApp {
                     changed = true;
                 }
             }
-        });
-        ui.add_space(12.0);
-        ui.horizontal(|ui| {
-            ui.add_space(16.0);
-            let r = ui.checkbox(&mut self.settings.spell_check, "Spell Check");
-            changed |= r.changed();
-            r.on_hover_text("Dictionaries are not bundled in this build (setting is stored only).");
-            ui.add_space(6.0);
-            ui.add_enabled_ui(false, |ui| {
-                egui::ComboBox::from_id_salt("spell_lang")
-                    .selected_text("English (GB)")
-                    .show_ui(ui, |_ui| {});
-            });
-        });
-        ui.add_space(12.0);
-        ui.horizontal(|ui| {
-            ui.add_space(16.0);
-            let r = ui.checkbox(&mut self.settings.compact_mode, "Compact Mode");
-            changed |= r.changed();
-            r.on_hover_text("Stored only — layout is unchanged in this build.");
-        });
-        ui.add_space(12.0);
-        ui.horizontal(|ui| {
-            ui.add_space(16.0);
-            let r = ui.checkbox(&mut self.settings.two_panel, "Two Panel Mode (F2)");
-            changed |= r.changed();
-            r.on_hover_text("Stored only — layout is unchanged in this build.");
-        });
-        ui.add_space(12.0);
-        ui.horizontal(|ui| {
-            ui.add_space(16.0);
-            let r = ui.checkbox(&mut self.settings.hidpi, "Enable HiDPI scaling");
-            changed |= r.changed();
-            r.on_hover_text("Stored only — scaling is unchanged in this build.");
         });
         changed
     }

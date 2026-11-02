@@ -15,8 +15,11 @@ SQLite 3.x, ~1.1 MB. Relevant tables:
   year, logline, synopsis, header/footer…`. ScriptCraft prints `header` and
   `footer` in PDF margins and expands `{revision}`, `{date}` and `{page}`.
 - `scenario_changes` — undo history. `script_versions` — named snapshots;
-  `script_text` is a complete `<scenario>` document, so ScriptCraft can import
-  non-empty snapshots as revision baselines.
+  `script_text` is a complete `<scenario>` document. ScriptCraft can import
+  non-empty snapshots as revision baselines, and "Save Current as Version"
+  appends the same XML KIT writes (`fk_script_id=0`, unique name, local user
+  and KIT `yyyy-MM-dd hh:mm:ss:zzz` datetime) inside the normal atomic save,
+  so Scenarist lists and restores it.
 - `system_variables` (`application-version`…), `places, times,
   character_states (Voice Over/Off Screen/Off Camera/SUBTITLE),
   transitions (CUT TO:/FADE IN:/FADE OUT:/…/FADE TO BLACK)`.
