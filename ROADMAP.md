@@ -21,10 +21,10 @@ Status legend: `[ ]` to do `[-]` in progress `[x]` done `[!]` blocked
 | Date | 2026-11-02 |
 | Project | ScriptCraft — free, open-source, revision-first screenwriting studio |
 | Repo | `/Users/mihailmihaylov/Documents/Dev_work/scriptcraft` |
-| Branch / commit | `main` at `5a5b14e`; tags `v0.7.0` at `9ce2e0e` and `v0.7.1` at `d8b17de` (maintenance); v0.8 M0 at `9bd4839`, M1 at `1948c62`, M2 at `b660219`, M3 at `2708838`, M4 at `e840a67`; v0.8 plan written 2026-10-26. The 2026-11-01/02 P0/P2/P1 changes are staged for the v0.7.2 release. |
+| Branch / commit | `main` at `6814feb`; tags `v0.7.0` at `9ce2e0e`, `v0.7.1` at `d8b17de` (maintenance) and `v0.7.2` at `8b75f9a`; v0.8 M0 at `9bd4839`, M1 at `1948c62`, M2 at `b660219`, M3 at `2708838`, M4 at `e840a67`. |
 | Rust workspace | `scriptcraft-core`, `scriptcraft-app`, `scriptcraft-layout` (`Cargo.toml`, resolver 2) |
-| App crate version | `scriptcraft-app 0.7.2` on `main`; `0.7.1` at tag `v0.7.1`; `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
-| Distribution | **v0.7.1 released 2026-10-30** — <https://github.com/MihailM17/scriptcraft/releases/tag/v0.7.1>. **v0.7.2 is being prepared** with v0.8 M0–M4, KIT version writing, the settings cleanup and the Dock-quit fix. Latest published release: v0.7.1. |
+| App crate version | `scriptcraft-app 0.7.2` at tag `v0.7.2`; `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
+| Distribution | **v0.7.2 released 2026-11-02** — <https://github.com/MihailM17/scriptcraft/releases/tag/v0.7.2> packages v0.8 M0–M4, KIT version writing, the Settings cleanup and the Dock-quit fix. Last published release: v0.7.2. |
 | Current one-liner | Free, open-source, revision-first studio: one screenplay engine (Editor 2.0), crash-safe saves + recovery, revision colours/marks/pages, compare/restore, omitted scenes, smart screenplay paste, KIT version write/import, revision headers/title-page fields, production page locks with A/B page numbers and FDX revision metadata, OFL fonts, FDX/Fountain import/export; PDF export paginates exactly like the editor. |
 | Next release | **v0.8 revision-complete** — dual dialogue, title-page editor and revision summary remain (M5–M7); signed builds and runtime CI (M8). See `docs/v0.8-plan.md`. |
 
@@ -1360,6 +1360,33 @@ Newest entries at the bottom. Each entry: date — what changed / what was found
     check`, `git diff --check` all green (2026-11-02).
   - Next: tag `v0.7.2`, build macOS DMG and Windows/Linux packages, publish
     the GitHub release, then record the release in this log.
+
+- **2026-11-02** — Released **v0.7.2** (user request: P1 + release + GitHub).
+  - Tag `v0.7.2` at `8b75f9a`; `main` pushed. Release:
+    <https://github.com/MihailM17/scriptcraft/releases/tag/v0.7.2>
+  - Release notes deliberately call this a **v0.8 M0–M4 development snapshot**,
+    not v0.8-complete; M5–M7 (dual dialogue, title-page editor, revision
+    summary) remain.
+  - Assets (all built from the tag; checksums verified after build and again
+    after re-downloading the published files):
+    - `ScriptCraft-0.7.2-macos-arm64.dmg` (8,035,510 bytes) SHA-256
+      `b2a7a69f82d7b120edb3013255edbc1796e48cb52c7b8ad654a0e351288fa066`.
+      Built locally from the tag, ad-hoc signed; Info.plist
+      `CFBundleShortVersionString`/`CFBundleVersion` = 0.7.2, Applications
+      symlink present, `codesign --verify --deep --strict` passes on the
+      mounted DMG.
+    - `ScriptCraft-0.7.2-windows-x64.zip` (6,539,735 bytes) SHA-256
+      `434d487a17755b11024e5aae9c7c57193079a5a6356c5d8505f2e408836c3dca`.
+    - `ScriptCraft-0.7.2-linux-x86_64.tar.gz` (10,835,602 bytes) SHA-256
+      `605670502c4e334fd3dcb95e7613ad4f8b55fd91c52e62b10d4cfd5a4cce7172`.
+    - Windows/Linux came from Packages run `41432641969` on `main` at
+      `8b75f9a`; both jobs succeeded.
+  - Release gate before tagging: `cargo fmt --all -- --check`, clippy with
+    `-D warnings`, `cargo test --workspace`, `cargo deny check` and
+    `git diff --check` green.
+  - Re-downloaded the six published assets and matched their SHA-256 values.
+  - Next: v0.8 M5 dual dialogue, then M6 title-page editor and M7 revision
+    summary.
 
 ---
 
