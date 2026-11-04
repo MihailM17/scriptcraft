@@ -18,14 +18,14 @@ Status legend: `[ ]` to do `[-]` in progress `[x]` done `[!]` blocked
 
 | Field | Value |
 |---|---|
-| Date | 2026-11-02 |
+| Date | 2026-11-04 |
 | Project | ScriptCraft — free, open-source, revision-first screenwriting studio |
 | Repo | `/Users/mihailmihaylov/Documents/Dev_work/scriptcraft` |
-| Branch / commit | `main` after the v0.7.2 release record; tags `v0.7.0` at `9ce2e0e`, `v0.7.1` at `d8b17de` (maintenance) and `v0.7.2` at `8b75f9a`; v0.8 M0 at `9bd4839`, M1 at `1948c62`, M2 at `b660219`, M3 at `2708838`, M4 at `e840a67`. |
+| Branch / commit | `main` after the v0.8 settings/menu/shortcut polish; tags `v0.7.0` at `9ce2e0e`, `v0.7.1` at `d8b17de` (maintenance) and `v0.7.2` at `8b75f9a`; v0.8 M0 at `9bd4839`, M1 at `1948c62`, M2 at `b660219`, M3 at `2708838`, M4 at `e840a67`; UI polish at `41ea7d5`. |
 | Rust workspace | `scriptcraft-core`, `scriptcraft-app`, `scriptcraft-layout` (`Cargo.toml`, resolver 2) |
 | App crate version | `scriptcraft-app 0.7.2` at tag `v0.7.2`; `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
 | Distribution | **v0.7.2 released 2026-11-02** — <https://github.com/MihailM17/scriptcraft/releases/tag/v0.7.2> packages v0.8 M0–M4, KIT version writing, the Settings cleanup and the Dock-quit fix. Last published release: v0.7.2. |
-| Current one-liner | Free, open-source, revision-first studio: one screenplay engine (Editor 2.0), crash-safe saves + recovery, revision colours/marks/pages, compare/restore, omitted scenes, smart screenplay paste, KIT version write/import, revision headers/title-page fields, production page locks with A/B page numbers and FDX revision metadata, OFL fonts, FDX/Fountain import/export; PDF export paginates exactly like the editor. |
+| Current one-liner | Free, open-source, revision-first studio: one screenplay engine (Editor 2.0), crash-safe saves + recovery, revision colours/marks/pages, compare/restore, omitted scenes, smart screenplay paste, KIT version write/import, revision headers/title-page fields, production page locks with A/B page numbers and FDX revision metadata, KIT-style editor/navigator settings, macOS standard selection keys, a compact file-focused Menu, OFL fonts, FDX/Fountain import/export; PDF export paginates exactly like the editor. |
 | Next release | **v0.8 revision-complete** — dual dialogue, title-page editor and revision summary remain (M5–M7); signed builds and runtime CI (M8). See `docs/v0.8-plan.md`. |
 
 **Positioning (locked 2026-10-26):** the free, open-source, revision-first
@@ -81,7 +81,7 @@ writing features.
   - `pdf.rs` — print layout + `printpdf` renderer (title page, scene/page numbers, watermarks, current-revision margin bars/pages).
   - `tests/` — `parity.rs` (golden hashes), `pagination.rs`, `place.rs`, `pdf_export.rs`, `scale.rs` (500-page timings).
 - `scriptcraft-app/src/`
-  - `app.rs` — 7,039-line monolith: all state, IO, views, editor, export dialog. v0.8 extracts compare, title page and revision summary into their own modules.
+  - `app.rs` — 7,983-line monolith: all state, IO, views, editor, export dialog. v0.8 extracts compare, title page and revision summary into their own modules.
   - `script_view.rs` — Editor 2.0 `ScriptView` (the only editor since M5): paints `DocLayout` pages (visible pages only; zoom scales geometry, never breaks) and edits by emitting `core::edit` commands — selection/caret, keyboard/pointer, cross-block clipboard, IME, command-history undo/redo.
   - `theme.rs` — palette + egui style. `menu.rs` — native macOS menu. `main.rs`, `lib.rs`.
   - `assets/fonts/` — Courier Prime (Regular/Bold/Italic), PT Sans, IBM Plex Mono; all OFL, license texts in `assets/fonts/licenses/`.
@@ -1387,6 +1387,40 @@ Newest entries at the bottom. Each entry: date — what changed / what was found
   - Re-downloaded the six published assets and matched their SHA-256 values.
   - Next: v0.8 M5 dual dialogue, then M6 title-page editor and M7 revision
     summary.
+
+- **2026-11-04** — Settings that apply, compact Menu, macOS selection keys
+  (committed as `41ea7d5`).
+  - Settings is now three KIT-style pages — Application, Scenario Editor,
+    Navigator — and every control takes effect. Scenario Editor options mirror
+    KIT keys: scene numbers (`scenario-editor/show-scenes-numbers`),
+    current-line highlight, capitalize first word, correct double capitals,
+    replace three dots and smart quotes. Navigator options apply its preview
+    and scene numbers. The smart typography, scene-number and current-line
+    options are carried into `ScriptView` painting and typing; new typing
+    options are opt-in, scene numbers and navigator preview default on.
+  - macOS standard selection keys now work in the editor:
+    `Shift+Cmd+Left/Right` selects by line, `Option+Left/Right` moves by word
+    and `Shift+Option+Left/Right` selects by word, `Option+Up/Down` moves by
+    paragraph, `Cmd+Up/Down` moves to document bounds, and
+    `Cmd/Option+Backspace/Delete` deletes the same units. `script_view` unit
+    tests cover each movement and selection.
+  - The in-app Menu is file-focused: New/Open/Save/Save As, New Script
+    Version, Import, Export, Print preview, Settings, Help and About.
+    Revision controls moved to Research ▸ Script ▸ Versions; scene Omit/Restore
+    lives in the scene-row context menu. The native macOS menu keeps only
+    undo/redo/find in Edit, adds a Script submenu for revisions, and puts
+    Settings (`⌘,`) in the app menu. Stale strings now point to the new
+    locations, and the unverified KIT Script Versions claim was removed.
+  - Accessibility: scene rows and Settings navigation rows expose labels.
+  - Tests/snapshots: interaction flows updated for the new locations;
+    `settings_pages_apply_navigator_and_typography_options` added;
+    `07_settings.png` regenerated; `16_settings_editor.png` and
+    `17_settings_navigator.png` added; all 16 UI snapshots pass.
+  - Gate: `cargo fmt --check`, `cargo clippy --workspace --all-targets --
+    -D warnings`, `cargo test --workspace`, `cargo deny check` and
+    `git diff --check` green.
+  - Next: v0.8 M5 dual dialogue (FDX/KIT representation spike first), then M6
+    title-page editor and M7 revision summary.
 
 ---
 
