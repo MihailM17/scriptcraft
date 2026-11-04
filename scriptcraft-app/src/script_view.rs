@@ -151,6 +151,30 @@ pub struct EditState {
     pub debug_autocomplete: Vec<(String, egui::Rect)>,
 }
 
+/// KIT Scenario Editor preferences that change typing or painting.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EditorOptions {
+    pub show_scene_numbers: bool,
+    pub highlight_current_line: bool,
+    pub capitalize_first_word: bool,
+    pub correct_double_capitals: bool,
+    pub replace_three_dots: bool,
+    pub smart_quotes: bool,
+}
+
+impl Default for EditorOptions {
+    fn default() -> Self {
+        Self {
+            show_scene_numbers: true,
+            highlight_current_line: false,
+            capitalize_first_word: false,
+            correct_double_capitals: false,
+            replace_three_dots: false,
+            smart_quotes: false,
+        }
+    }
+}
+
 /// Per-frame display options that are not part of the document layout.
 pub struct ScriptViewStyle<'a> {
     pub typewriter: bool,
@@ -160,6 +184,8 @@ pub struct ScriptViewStyle<'a> {
     /// Heading ids of omitted scenes; Enter there is refused so the hidden
     /// body cannot be split into view.
     pub omitted_headings: &'a [uuid::Uuid],
+    /// Scenario Editor preferences (numbers, current-line highlight, typing).
+    pub options: EditorOptions,
 }
 
 /// What the widget wants the app to apply this frame.
@@ -187,6 +213,7 @@ pub fn script_view(
         revision_colors,
         hidden_blocks,
         omitted_headings,
+        options,
     } = style;
     let page = page_size_pt(zoom);
     let scale = PT_PER_MM * zoom;
@@ -308,7 +335,7 @@ pub fn script_view(
         let mut text_edited = false;
         let mut caret_moved = false;
         if pointer_work || !events.is_empty() {
-            let mut ed = Editor::new(blocks, state.selection);
+            let mut ed = Editor::with_options(blocks, state.selection, options);
             if resp.clicked() {
                 resp.request_focus();
                 caret_moved = true;
@@ -418,8 +445,26 @@ pub fn script_view(
             }
             paint_page(painter, prect);
             paint_page_number(painter, prect, page_lay, body, row_h, scale);
+            if focused && options.highlight_current_line {
+                if let Some((cpi, page_rect, caret)) = caret_geo {
+                    if cpi == pi {
+                        let band = egui::Rect::from_min_max(
+                            egui::pos2(page_rect.left() + PAD_L_MM * scale, caret.top()),
+                            egui::pos2(page_rect.right() - PAD_R_MM * scale, caret.top() + row_h),
+                        );
+                        painter.rect_filled(
+                            band,
+                            2.0,
+                            egui::Color32::from_rgba_unmultiplied(0x42, 0x94, 0xF8, 26),
+                        );
+                    }
+                }
+            }
             let content_top = prect.top() + PAD_T_MM * scale;
             for line in &page_lay.lines {
+                if line.role == LineRole::SceneNumber && !options.show_scene_numbers {
+                    continue;
+                }
                 let y = content_top + line.row as f32 * row_h;
                 if let Some((a, f)) = selection {
                     if let Some((c0, c1)) = selection_columns(line, a, f) {
@@ -627,9 +672,6 @@ fn handle_events(
                     caret_moved = true;
                     continue;
                 }
-                if modifiers.command || modifiers.alt {
-                    continue;
-                }
                 if let Some(action) = key_action(
                     ed.blocks(),
                     doc,
@@ -710,10 +752,16 @@ struct Editor {
     sel: Option<Selection>,
     cmds: Vec<EditCommand>,
     scroll: bool,
+    options: EditorOptions,
 }
 
 impl Editor {
+    #[cfg(test)]
     fn new(base: &[ScriptBlock], sel: Option<Selection>) -> Self {
+        Self::with_options(base, sel, EditorOptions::default())
+    }
+
+    fn with_options(base: &[ScriptBlock], sel: Option<Selection>, options: EditorOptions) -> Self {
         let work = base.to_vec();
         // Undo or another editor may have shrunk the document since the
         // caret was placed; never operate on a stale position.
@@ -728,6 +776,7 @@ impl Editor {
             sel,
             cmds: Vec::new(),
             scroll: false,
+            options,
         }
     }
 
@@ -779,17 +828,60 @@ impl Editor {
                 para: 0,
                 ch: 0,
             });
+        let Some(block) = self.work.get(at.bi) else {
+            return;
+        };
         // Scene headings, cues and transitions are uppercase-on-type in KIT;
         // writers should never have to hold Shift or fix case afterwards.
-        let text = match self.work.get(at.bi) {
-            Some(b) if auto_upper(b.element_type) => text.to_uppercase(),
-            _ => text.to_string(),
+        let upper = auto_upper(block.element_type);
+        let old = block.text.clone();
+        let prefix = text_upto(&old, at);
+        let mut typed = if upper {
+            text.to_uppercase()
+        } else {
+            text.to_string()
         };
-        self.press(vec![EditCommand::InsertText {
-            at,
-            text: text.clone(),
-        }]);
-        self.sel = Some(Selection::caret(advance_pos(at, &text)));
+        if self.options.smart_quotes {
+            typed = smart_quotes(&typed, &prefix);
+        }
+        if self.options.capitalize_first_word && !upper {
+            typed = capitalize_sentence_start(&typed, &prefix);
+        }
+
+        let abs = char_index(&old, at);
+        let mut new_text: String = old.chars().take(abs).collect();
+        new_text.push_str(&typed);
+        new_text.extend(old.chars().skip(abs));
+        let mut caret_abs = abs + typed.chars().count();
+        let mut rewritten = false;
+        if self.options.replace_three_dots {
+            if let Some((text, caret)) = replace_ellipsis(&new_text, caret_abs) {
+                new_text = text;
+                caret_abs = caret;
+                rewritten = true;
+            }
+        }
+        if self.options.correct_double_capitals {
+            if let Some((text, caret)) = correct_double_capitals(&new_text, caret_abs) {
+                new_text = text;
+                caret_abs = caret;
+                rewritten = true;
+            }
+        }
+        if rewritten {
+            let caret = pos_at_char(&new_text, at.bi, caret_abs);
+            self.press(vec![EditCommand::SetText {
+                bi: at.bi,
+                text: new_text,
+            }]);
+            self.sel = Some(Selection::caret(caret));
+        } else {
+            self.press(vec![EditCommand::InsertText {
+                at,
+                text: typed.clone(),
+            }]);
+            self.sel = Some(Selection::caret(advance_pos(at, &typed)));
+        }
         self.scroll = true;
     }
 
@@ -960,15 +1052,21 @@ fn key_action(
     match key {
         Key::ArrowLeft | Key::ArrowRight => {
             let right = key == Key::ArrowRight;
-            if !extend && !collapsed {
+            if !mods.command && !mods.alt && !extend && !collapsed {
                 return Some(KeyAction::caret_at(if right { f } else { a }));
             }
-            let Some(target) = (if right {
-                next_visible_pos(blocks, hidden, caret)
+            let target = if mods.command {
+                line_boundary(doc, blocks, caret, right)
+            } else if mods.alt {
+                if right {
+                    word_right(blocks, caret)
+                } else {
+                    word_left(blocks, caret)
+                }
+            } else if right {
+                next_visible_pos(blocks, hidden, caret).unwrap_or(caret)
             } else {
-                prev_visible_pos(blocks, hidden, caret)
-            }) else {
-                return Some(KeyAction::caret_at(caret));
+                prev_visible_pos(blocks, hidden, caret).unwrap_or(caret)
             };
             Some(KeyAction {
                 selection: Some(if extend {
@@ -984,6 +1082,42 @@ fn key_action(
             })
         }
         Key::ArrowUp | Key::ArrowDown => {
+            let up = key == egui::Key::ArrowUp;
+            if mods.command {
+                let target = if up {
+                    first_visible_pos(blocks, hidden)
+                } else {
+                    last_visible_pos(blocks, hidden)
+                }
+                .unwrap_or(caret);
+                return Some(KeyAction {
+                    selection: Some(if extend {
+                        Selection {
+                            anchor: sel.anchor,
+                            focus: target,
+                        }
+                    } else {
+                        Selection::caret(target)
+                    }),
+                    commands: Vec::new(),
+                    scroll: true,
+                });
+            }
+            if mods.alt {
+                let target = paragraph_edge(blocks, caret, !up);
+                return Some(KeyAction {
+                    selection: Some(if extend {
+                        Selection {
+                            anchor: sel.anchor,
+                            focus: target,
+                        }
+                    } else {
+                        Selection::caret(target)
+                    }),
+                    commands: Vec::new(),
+                    scroll: true,
+                });
+            }
             let lines = body_lines(doc);
             let target = caret_line_index(&lines, caret).and_then(|idx| {
                 let to = if key == Key::ArrowUp {
@@ -1055,6 +1189,25 @@ fn key_action(
                     scroll: true,
                 });
             }
+            if mods.command || mods.alt {
+                let from = if mods.command {
+                    if caret.ch > 0 {
+                        Pos { ch: 0, ..caret }
+                    } else {
+                        prev_pos(blocks, caret).unwrap_or(caret)
+                    }
+                } else {
+                    word_left(blocks, caret)
+                };
+                if from == caret {
+                    return Some(KeyAction::caret_at(caret));
+                }
+                return Some(KeyAction {
+                    selection: Some(Selection::caret(from)),
+                    commands: delete_selection_cmds(blocks, from, caret),
+                    scroll: true,
+                });
+            }
             let (commands, target) = backspace_cmds(blocks, hidden, caret);
             Some(KeyAction {
                 selection: Some(Selection::caret(target.unwrap_or(caret))),
@@ -1067,6 +1220,26 @@ fn key_action(
                 return Some(KeyAction {
                     selection: Some(Selection::caret(a)),
                     commands: delete_selection_cmds(blocks, a, f),
+                    scroll: true,
+                });
+            }
+            if mods.command || mods.alt {
+                let to = if mods.command {
+                    let len = paragraph_len(blocks, caret.bi, caret.para);
+                    if caret.ch < len {
+                        Pos { ch: len, ..caret }
+                    } else {
+                        next_pos(blocks, caret).unwrap_or(caret)
+                    }
+                } else {
+                    word_right(blocks, caret)
+                };
+                if to == caret {
+                    return Some(KeyAction::caret_at(caret));
+                }
+                return Some(KeyAction {
+                    selection: Some(Selection::caret(caret)),
+                    commands: delete_selection_cmds(blocks, caret, to),
                     scroll: true,
                 });
             }
@@ -1155,6 +1328,125 @@ fn paragraph_count(blocks: &[ScriptBlock], bi: usize) -> usize {
         .get(bi)
         .map(|b| b.text.split('\n').count())
         .unwrap_or(0)
+}
+
+/// True for characters that stick together as a word for Option-arrow
+/// movement. Accented and Cyrillic letters are alphanumeric, so this works
+/// for every language the editor supports.
+fn is_word_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
+}
+
+fn paragraph_chars(blocks: &[ScriptBlock], p: Pos) -> Vec<char> {
+    blocks
+        .get(p.bi)
+        .and_then(|b| b.text.split('\n').nth(p.para))
+        .map(|s| s.chars().collect())
+        .unwrap_or_default()
+}
+
+/// Start of the word to the left of `p`, or the end of the previous
+/// paragraph when `p` sits at the very beginning of its own.
+fn word_left(blocks: &[ScriptBlock], p: Pos) -> Pos {
+    let chars = paragraph_chars(blocks, p);
+    let mut i = p.ch.min(chars.len());
+    while i > 0 && !is_word_char(chars[i - 1]) {
+        i -= 1;
+    }
+    while i > 0 && is_word_char(chars[i - 1]) {
+        i -= 1;
+    }
+    if i == p.ch {
+        return prev_pos(blocks, p).unwrap_or(p);
+    }
+    Pos { ch: i, ..p }
+}
+
+/// End of the word to the right of `p`, or the start of the next paragraph
+/// at the end of the current one.
+fn word_right(blocks: &[ScriptBlock], p: Pos) -> Pos {
+    let chars = paragraph_chars(blocks, p);
+    let len = chars.len();
+    let mut i = p.ch.min(len);
+    while i < len && !is_word_char(chars[i]) {
+        i += 1;
+    }
+    while i < len && is_word_char(chars[i]) {
+        i += 1;
+    }
+    if i == p.ch {
+        return next_pos(blocks, p).unwrap_or(p);
+    }
+    Pos { ch: i, ..p }
+}
+
+/// Start (or end) of the paragraph holding `p`; a second press crosses to
+/// the neighbouring paragraph, matching macOS Option+Up/Down.
+fn paragraph_edge(blocks: &[ScriptBlock], p: Pos, to_end: bool) -> Pos {
+    let len = paragraph_len(blocks, p.bi, p.para);
+    if to_end {
+        let end = Pos { ch: len, ..p };
+        if end != p {
+            return end;
+        }
+        return next_pos(blocks, end)
+            .map(|q| Pos {
+                ch: paragraph_len(blocks, q.bi, q.para),
+                ..q
+            })
+            .unwrap_or(end);
+    }
+    let start = Pos { ch: 0, ..p };
+    if start != p {
+        return start;
+    }
+    prev_pos(blocks, start)
+        .map(|q| Pos { ch: 0, ..q })
+        .unwrap_or(start)
+}
+
+/// Start or end of the visual (wrapped) line holding `caret`. At a line
+/// boundary the motion crosses to the neighbouring line, like macOS.
+fn line_boundary(doc: &DocLayout, blocks: &[ScriptBlock], caret: Pos, to_end: bool) -> Pos {
+    let lines = body_lines(doc);
+    let Some(idx) = caret_line_index(&lines, caret) else {
+        return Pos {
+            ch: if to_end {
+                paragraph_len(blocks, caret.bi, caret.para)
+            } else {
+                0
+            },
+            ..caret
+        };
+    };
+    let span = lines[idx].span.expect("body lines always carry a span");
+    if to_end {
+        if caret.ch < span.end || idx + 1 >= lines.len() {
+            Pos {
+                ch: span.end,
+                ..caret
+            }
+        } else {
+            let next = lines[idx + 1].span.expect("body lines always carry a span");
+            Pos {
+                bi: next.bi,
+                para: next.para,
+                ch: next.end,
+            }
+        }
+    } else if caret.ch > span.start || idx == 0 {
+        Pos {
+            ch: span.start,
+            ..caret
+        }
+    } else {
+        let prev = lines[idx - 1].span.expect("body lines always carry a span");
+        Pos {
+            bi: prev.bi,
+            para: prev.para,
+            ch: prev.start,
+        }
+    }
 }
 
 fn prev_pos(blocks: &[ScriptBlock], p: Pos) -> Option<Pos> {
@@ -1249,6 +1541,148 @@ fn advance_pos(at: Pos, text: &str) -> Pos {
             ..at
         }
     }
+}
+
+/// KIT's smart quotes: a straight quote after whitespace, an opening bracket
+/// or another opening quote becomes typographic; an apostrophe inside a word
+/// becomes the right single quote.
+fn smart_quotes(typed: &str, prefix: &str) -> String {
+    let mut out = String::with_capacity(typed.len());
+    let mut prev = prefix.chars().last();
+    for c in typed.chars() {
+        let c = match c {
+            '"' => {
+                if opens_quote(prev) {
+                    '“'
+                } else {
+                    '”'
+                }
+            }
+            '\'' => {
+                if prev.is_some_and(|p| p.is_alphanumeric()) {
+                    '’'
+                } else if opens_quote(prev) {
+                    '‘'
+                } else {
+                    '’'
+                }
+            }
+            _ => c,
+        };
+        out.push(c);
+        prev = Some(c);
+    }
+    out
+}
+
+fn opens_quote(prev: Option<char>) -> bool {
+    match prev {
+        None => true,
+        Some(c) => c.is_whitespace() || "([{—–-\"'“‘".contains(c),
+    }
+}
+
+/// KIT's "Capitalize first word": uppercase the first letter typed at the
+/// beginning of a paragraph or after `.`, `!`, `?` or an ellipsis.
+fn capitalize_sentence_start(typed: &str, prefix: &str) -> String {
+    if !at_sentence_start(prefix) {
+        return typed.to_string();
+    }
+    let mut out = String::with_capacity(typed.len());
+    let mut chars = typed.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c.is_alphabetic() {
+            out.extend(c.to_uppercase());
+            out.extend(chars);
+            return out;
+        }
+        out.push(c);
+        if !(c.is_whitespace() || "([{\"'“‘—–-".contains(c)) {
+            // Something that is not opening punctuation came first; do not
+            // capitalize later words in the same insertion.
+            out.extend(chars);
+            return out;
+        }
+    }
+    out
+}
+
+fn at_sentence_start(prefix: &str) -> bool {
+    let mut chars = prefix.chars().rev();
+    let Some(last) = chars.next() else {
+        return true;
+    };
+    if last == '\n' {
+        return true;
+    }
+    if last.is_whitespace() {
+        for c in chars {
+            if c == '\n' {
+                return true;
+            }
+            if !c.is_whitespace() {
+                return matches!(c, '.' | '!' | '?' | '…');
+            }
+        }
+        return true;
+    }
+    matches!(last, '.' | '!' | '?' | '…')
+}
+
+/// Replace three typed dots with an ellipsis when the run touches the caret.
+fn replace_ellipsis(text: &str, caret: usize) -> Option<(String, usize)> {
+    let chars: Vec<char> = text.chars().collect();
+    let lo = caret.saturating_sub(3);
+    let mut out = Vec::with_capacity(chars.len());
+    let mut i = 0;
+    let mut caret_out = caret;
+    let mut changed = false;
+    while i < chars.len() {
+        let near_caret = i >= lo && i <= caret + 2;
+        if near_caret
+            && i + 2 < chars.len()
+            && chars[i] == '.'
+            && chars[i + 1] == '.'
+            && chars[i + 2] == '.'
+        {
+            out.push('…');
+            if caret > i + 2 {
+                caret_out -= 2;
+            } else if caret >= i {
+                caret_out = out.len();
+            }
+            i += 3;
+            changed = true;
+        } else {
+            out.push(chars[i]);
+            i += 1;
+        }
+    }
+    changed.then(|| (out.into_iter().collect(), caret_out))
+}
+
+/// KIT's "Correct DOuble CApitals": lowercase the second capital of a word
+/// like `DOuble` as soon as the first lowercase letter follows it.
+fn correct_double_capitals(text: &str, caret: usize) -> Option<(String, usize)> {
+    let mut chars: Vec<char> = text.chars().collect();
+    let caret = caret.min(chars.len());
+    let mut start = caret;
+    while start > 0 && is_word_char(chars[start - 1]) {
+        start -= 1;
+    }
+    let mut end = caret;
+    while end < chars.len() && is_word_char(chars[end]) {
+        end += 1;
+    }
+    if end.saturating_sub(start) >= 3
+        && chars[start].is_uppercase()
+        && chars[start + 1].is_uppercase()
+        && chars[start + 2].is_lowercase()
+    {
+        chars[start + 1] = chars[start + 1].to_lowercase().next()?;
+        return Some((chars.into_iter().collect(), caret));
+    }
+    None
 }
 
 fn paras_of(text: &str) -> Vec<&str> {
@@ -2306,5 +2740,265 @@ mod tests {
                 ch: 3
             }
         );
+    }
+
+    #[test]
+    fn command_arrows_move_to_line_and_document_edges() {
+        let blocks = sample();
+        let labels: Vec<String> = Vec::new();
+        let doc = document_layout(&blocks, &RUSSIAN, &labels);
+        let caret = |bi, ch| Some(Selection::caret(Pos { bi, para: 0, ch }));
+
+        let end = key_action(
+            &blocks,
+            &doc,
+            caret(1, 3),
+            egui::Key::ArrowRight,
+            egui::Modifiers::COMMAND,
+            &[],
+            &[],
+        )
+        .unwrap();
+        assert_eq!(
+            end.selection.unwrap().focus,
+            Pos {
+                bi: 1,
+                para: 0,
+                ch: 10
+            },
+            "⌘→ goes to the end of the visual line"
+        );
+
+        let start = key_action(
+            &blocks,
+            &doc,
+            caret(1, 10),
+            egui::Key::ArrowLeft,
+            egui::Modifiers::COMMAND,
+            &[],
+            &[],
+        )
+        .unwrap();
+        assert_eq!(
+            start.selection.unwrap().focus,
+            Pos {
+                bi: 1,
+                para: 0,
+                ch: 0
+            },
+            "⌘← goes to the start of the visual line"
+        );
+
+        // Shift+Command extends the selection instead of moving the caret.
+        let selected = key_action(
+            &blocks,
+            &doc,
+            caret(1, 4),
+            egui::Key::ArrowLeft,
+            egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+            &[],
+            &[],
+        )
+        .unwrap();
+        let selection = selected.selection.unwrap();
+        assert_eq!(
+            selection.anchor,
+            Pos {
+                bi: 1,
+                para: 0,
+                ch: 4
+            }
+        );
+        assert_eq!(
+            selection.focus,
+            Pos {
+                bi: 1,
+                para: 0,
+                ch: 0
+            }
+        );
+
+        // Command+Up/Down jump to the visible document bounds.
+        let top = key_action(
+            &blocks,
+            &doc,
+            caret(3, 3),
+            egui::Key::ArrowUp,
+            egui::Modifiers::COMMAND,
+            &[],
+            &[],
+        )
+        .unwrap();
+        assert_eq!(
+            top.selection.unwrap().focus,
+            Pos {
+                bi: 0,
+                para: 0,
+                ch: 0
+            }
+        );
+        let bottom = key_action(
+            &blocks,
+            &doc,
+            caret(0, 0),
+            egui::Key::ArrowDown,
+            egui::Modifiers::COMMAND,
+            &[],
+            &[],
+        )
+        .unwrap();
+        assert_eq!(
+            bottom.selection.unwrap().focus,
+            Pos {
+                bi: 4,
+                para: 0,
+                ch: 7
+            }
+        );
+    }
+
+    #[test]
+    fn option_arrows_move_and_select_words() {
+        let blocks = sample();
+        let labels: Vec<String> = Vec::new();
+        let doc = document_layout(&blocks, &RUSSIAN, &labels);
+        let caret = |ch| Some(Selection::caret(Pos { bi: 0, para: 0, ch }));
+
+        // "INT. СТАЯ - ДЕН" → "INT" ends at 3, "СТАЯ" spans 5..9.
+        let first = key_action(
+            &blocks,
+            &doc,
+            caret(0),
+            egui::Key::ArrowRight,
+            egui::Modifiers::ALT,
+            &[],
+            &[],
+        )
+        .unwrap();
+        assert_eq!(first.selection.unwrap().focus.ch, 3);
+
+        let second = key_action(
+            &blocks,
+            &doc,
+            caret(3),
+            egui::Key::ArrowRight,
+            egui::Modifiers::ALT,
+            &[],
+            &[],
+        )
+        .unwrap();
+        assert_eq!(second.selection.unwrap().focus.ch, 9);
+
+        let back = key_action(
+            &blocks,
+            &doc,
+            caret(6),
+            egui::Key::ArrowLeft,
+            egui::Modifiers::ALT,
+            &[],
+            &[],
+        )
+        .unwrap();
+        assert_eq!(back.selection.unwrap().focus.ch, 5);
+
+        let selected = key_action(
+            &blocks,
+            &doc,
+            caret(0),
+            egui::Key::ArrowRight,
+            egui::Modifiers::ALT | egui::Modifiers::SHIFT,
+            &[],
+            &[],
+        )
+        .unwrap();
+        let selection = selected.selection.unwrap();
+        assert_eq!(selection.anchor.ch, 0);
+        assert_eq!(selection.focus.ch, 3);
+    }
+
+    #[test]
+    fn smart_typography_applies_quote_dot_and_capital_rules() {
+        let mut blocks = vec![
+            ScriptBlock::new(ElementType::Action, String::new()),
+            ScriptBlock::new(ElementType::Action, "Wait..".into()),
+        ];
+        let opts = EditorOptions {
+            smart_quotes: true,
+            replace_three_dots: true,
+            correct_double_capitals: true,
+            capitalize_first_word: true,
+            ..EditorOptions::default()
+        };
+        let caret = |bi, ch| Some(Selection::caret(Pos { bi, para: 0, ch }));
+
+        let mut ed = Editor::with_options(&blocks, caret(0, 0), opts);
+        ed.insert("\"Hello\" it's");
+        apply_all(&mut blocks, &ed.cmds);
+        assert_eq!(blocks[0].text, "“Hello” it’s");
+
+        // The third typed dot becomes one ellipsis character.
+        let mut ed = Editor::with_options(&blocks, caret(1, 6), opts);
+        ed.insert(".");
+        apply_all(&mut blocks, &ed.cmds);
+        assert_eq!(blocks[1].text, "Wait…");
+
+        // Second capital lowercased once a lowercase letter follows it.
+        let mut ed = Editor::with_options(&blocks, caret(0, 0), opts);
+        ed.insert("DO");
+        apply_all(&mut blocks, &ed.cmds);
+        let mut ed = Editor::with_options(&blocks, caret(0, 2), opts);
+        ed.insert("u");
+        apply_all(&mut blocks, &ed.cmds);
+        assert!(blocks[0].text.starts_with("Dou"));
+
+        // First word of a paragraph and of a new sentence is capitalized.
+        let mut cap = vec![ScriptBlock::new(ElementType::Action, String::new())];
+        let mut ed = Editor::with_options(&cap, caret(0, 0), opts);
+        ed.insert("hello");
+        apply_all(&mut cap, &ed.cmds);
+        assert_eq!(cap[0].text, "Hello");
+        let mut ed = Editor::with_options(&cap, caret(0, 5), opts);
+        ed.insert(".");
+        apply_all(&mut cap, &ed.cmds);
+        let mut ed = Editor::with_options(&cap, caret(0, 6), opts);
+        ed.insert(" next");
+        apply_all(&mut cap, &ed.cmds);
+        assert_eq!(cap[0].text, "Hello. Next");
+    }
+
+    #[test]
+    fn command_and_option_delete_remove_whole_units() {
+        let blocks = sample();
+        let labels: Vec<String> = Vec::new();
+        let doc = document_layout(&blocks, &RUSSIAN, &labels);
+        let caret = |ch| Some(Selection::caret(Pos { bi: 0, para: 0, ch }));
+        let mut edited = blocks.clone();
+        let action = key_action(
+            &edited,
+            &doc,
+            caret(9),
+            egui::Key::Backspace,
+            egui::Modifiers::COMMAND,
+            &[],
+            &[],
+        )
+        .unwrap();
+        apply_all(&mut edited, &action.commands);
+        assert_eq!(edited[0].text, " - ДЕН");
+        assert_eq!(action.selection.unwrap().focus.ch, 0);
+
+        let mut edited = blocks.clone();
+        let action = key_action(
+            &edited,
+            &doc,
+            caret(0),
+            egui::Key::Delete,
+            egui::Modifiers::ALT,
+            &[],
+            &[],
+        )
+        .unwrap();
+        apply_all(&mut edited, &action.commands);
+        assert_eq!(edited[0].text, ". СТАЯ - ДЕН");
     }
 }

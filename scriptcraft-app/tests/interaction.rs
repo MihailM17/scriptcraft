@@ -2,7 +2,7 @@
 
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
-use scriptcraft_app::app::{self, ScriptCraftApp, SideTab};
+use scriptcraft_app::app::{self, ResearchPane, ScriptCraftApp, SideTab};
 
 fn harness(tab: SideTab) -> Harness<'static, ScriptCraftApp> {
     Harness::builder()
@@ -15,6 +15,13 @@ fn harness(tab: SideTab) -> Harness<'static, ScriptCraftApp> {
             a.goto_tab(tab);
             a
         })
+}
+
+/// Show Research ▸ Versions, where KIT-style revisions now live.
+fn open_research_versions(h: &mut Harness<'static, ScriptCraftApp>) {
+    h.state_mut().goto_tab(SideTab::Research);
+    h.state_mut().set_research_pane(ResearchPane::Versions);
+    h.run();
 }
 
 /// Click into the first page so the script widget owns keyboard focus.
@@ -281,6 +288,65 @@ fn recovery_bar_restores_and_discards() {
         "banner must clear after discarding"
     );
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Settings pages apply their choices to the editor and navigator.
+#[test]
+fn settings_pages_apply_navigator_and_typography_options() {
+    use scriptcraft_core::ElementType;
+
+    let mut h = harness(SideTab::Settings);
+    h.run();
+    h.get_by_label("Scenario Editor").click();
+    h.run();
+    assert!(
+        h.query_by_label("Smart quotes").is_some(),
+        "the Scenario Editor page must expose its typing options"
+    );
+    h.get_by_label("Smart quotes").click();
+    h.run();
+
+    h.get_by_label("Navigator").click();
+    h.run();
+    h.get_by_label("Show scene numbers").click();
+    h.get_by_label("Show scene description").click();
+    h.run();
+
+    let heading_bi = h.state().scene_heading_block_for_test(0).expect("heading");
+    let heading_text = h.state().block_text(heading_bi).expect("heading text");
+    h.state_mut().goto_tab(SideTab::Script);
+    h.run();
+    click_editor2_page(&mut h);
+    let row = h.get_by_label_contains(&heading_text);
+    let label = row
+        .accesskit_node()
+        .label()
+        .expect("scene rows expose their text to assistive tech");
+    assert!(
+        !label.contains(" — "),
+        "scene description must be hidden: {label}"
+    );
+    assert_eq!(
+        label.trim(),
+        heading_text.trim(),
+        "scene numbers must be hidden"
+    );
+
+    let action_bi = (0..h.state().block_count())
+        .find(|&bi| h.state().block_element_type(bi) == Some(ElementType::Action))
+        .expect("A95 has action blocks");
+    h.state_mut().set_block_text_for_test(action_bi, "");
+    h.state_mut().focus_block_at(action_bi, 0);
+    h.run_steps(2);
+    h.input_mut()
+        .events
+        .push(egui::Event::Text("\"Hi\"".into()));
+    h.run();
+    assert_eq!(
+        h.state().block_text(action_bi).as_deref(),
+        Some("“Hi”"),
+        "Settings ▸ Smart quotes must change typed text"
+    );
 }
 
 /// Settings ▸ Theme switches the whole palette between Midnight and Light.
@@ -1022,13 +1088,12 @@ fn revision_marks_track_edits_and_override_colors() {
 
 /// The Menu popup offers the next revision colour and starts it.
 #[test]
-fn revision_menu_starts_next_color() {
+fn revision_controls_in_research_versions_start_next_color() {
     use scriptcraft_core::revision::RevisionColor;
 
     let mut h = harness(SideTab::Script);
     h.run();
-    h.get_by_label("Menu").click();
-    h.run();
+    open_research_versions(&mut h);
     assert!(
         h.query_by_label("Start Blue Revision").is_some(),
         "first revision must be offered as Blue"
@@ -1037,7 +1102,8 @@ fn revision_menu_starts_next_color() {
     h.run();
     assert_eq!(h.state().latest_revision_color(), Some(RevisionColor::Blue));
 
-    h.get_by_label("Menu").click();
+    h.state_mut().goto_tab(SideTab::Research);
+    h.state_mut().set_research_pane(ResearchPane::Versions);
     h.run();
     assert!(
         h.query_by_label("Start Pink Revision").is_some(),
@@ -1053,8 +1119,7 @@ fn revision_history_window_lists_sets_and_toggles_mode() {
     h.state_mut().start_revision();
     h.run();
 
-    h.get_by_label("Menu").click();
-    h.run();
+    open_research_versions(&mut h);
     h.get_by_label("Revision History…").click();
     h.run();
     assert!(h.query_by_label("Revision History").is_some());
@@ -1062,7 +1127,9 @@ fn revision_history_window_lists_sets_and_toggles_mode() {
     assert!(h.query_by_label("current").is_some());
     assert!(h.query_by_label("Restore as copy…").is_some());
 
-    h.get_by_label("Show current revision only").click();
+    let toggles: Vec<_> = h.get_all_by_label("Show current revision only").collect();
+    assert!(!toggles.is_empty(), "the filter toggle must be available");
+    toggles[0].click();
     h.run();
     assert!(h.state().current_revision_only());
 }
@@ -1284,9 +1351,8 @@ fn compare_workspace_open_filter_navigate_jump_close() {
     assert!(after_edit.ends_with("REV"), "edit must append REV");
     assert!(h.state().is_dirty());
 
-    // Open compare workspace via Menu ▸ Compare Drafts…
-    h.get_by_label("Menu").click();
-    h.run();
+    // Open compare workspace from Research ▸ Versions.
+    open_research_versions(&mut h);
     h.get_by_label("Compare Drafts…").click();
     h.run();
     // Extra frame to ensure compare workspace renders and computes diff.
@@ -1414,8 +1480,7 @@ fn compare_workspace_is_read_only() {
     let dirty_before = h.state().is_dirty();
 
     // Open compare.
-    h.get_by_label("Menu").click();
-    h.run();
+    open_research_versions(&mut h);
     h.get_by_label("Compare Drafts…").click();
     h.run();
 
@@ -1458,8 +1523,7 @@ fn compare_workspace_closes_on_project_change() {
     h.run();
 
     // Open compare.
-    h.get_by_label("Menu").click();
-    h.run();
+    open_research_versions(&mut h);
     h.get_by_label("Compare Drafts…").click();
     h.run();
     assert!(h.state().compare_open_for_test());
@@ -1473,8 +1537,7 @@ fn compare_workspace_closes_on_project_change() {
     );
 
     // Re-open compare.
-    h.get_by_label("Menu").click();
-    h.run();
+    open_research_versions(&mut h);
     h.get_by_label("Compare Drafts…").click();
     h.run();
     assert!(h.state().compare_open_for_test());
@@ -1584,8 +1647,8 @@ fn restore_revision_as_copy_leaves_original_and_opens_copy() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// Menu ▸ Omit Scene hides the body from pages and statistics while the
-/// heading, scene number and identity stay; Restore Scene brings it back.
+/// The scene context menu hides the body from pages and statistics while the
+/// heading, scene number and identity stay; Restore scene brings it back.
 /// FDX/Fountain exports name the unsupported omission instead of silently
 /// dropping the scene.
 #[test]
@@ -1598,14 +1661,15 @@ fn omitted_scene_menu_hides_body_stats_and_reports_export_loss() {
     let blocks_before = h.state().stats_for_test().blocks;
     let scenes_before = h.state().stats_for_test().scenes;
     let heading = h.state().scene_heading_block_for_test(0).expect("heading");
+    let heading_text = h.state().block_text(heading).expect("heading text");
 
-    h.get_by_label("Menu").click();
+    h.get_by_label_contains(&heading_text).click_secondary();
     h.run();
     assert!(
-        h.query_by_label("Omit Scene").is_some(),
-        "the Menu must offer Omit Scene"
+        h.query_by_label("Omit scene").is_some(),
+        "the scene context menu must offer Omit scene"
     );
-    h.get_by_label("Omit Scene").click();
+    h.get_by_label("Omit scene").click();
     h.run();
 
     assert!(h.state().scene_omitted_for_test(0));
@@ -1652,13 +1716,13 @@ fn omitted_scene_menu_hides_body_stats_and_reports_export_loss() {
     let fountain = h.state().omission_export_note_for_test("Fountain");
     assert!(fountain.contains("Omission is unsupported in Fountain"));
 
-    h.get_by_label("Menu").click();
+    h.get_by_label_contains(&heading_text).click_secondary();
     h.run();
     assert!(
-        h.query_by_label("Restore Scene").is_some(),
-        "the Menu must offer Restore Scene while the scene is omitted"
+        h.query_by_label("Restore scene").is_some(),
+        "the scene context menu must offer Restore scene while omitted"
     );
-    h.get_by_label("Restore Scene").click();
+    h.get_by_label("Restore scene").click();
     h.run();
 
     assert!(!h.state().scene_omitted_for_test(0));

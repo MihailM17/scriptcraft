@@ -95,6 +95,26 @@ fn snap_07_settings() {
 }
 
 #[test]
+fn snap_16_settings_editor() {
+    use egui_kittest::kittest::Queryable;
+    let mut h = harness(SideTab::Settings, None);
+    h.run();
+    h.get_by_label("Scenario Editor").click();
+    h.run();
+    h.snapshot("16_settings_editor");
+}
+
+#[test]
+fn snap_17_settings_navigator() {
+    use egui_kittest::kittest::Queryable;
+    let mut h = harness(SideTab::Settings, None);
+    h.run();
+    h.get_by_label("Navigator").click();
+    h.run();
+    h.snapshot("17_settings_navigator");
+}
+
+#[test]
 fn snap_08_export_dialog() {
     use egui_kittest::kittest::Queryable;
     let mut h = harness(SideTab::Script, None);

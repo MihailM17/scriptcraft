@@ -461,7 +461,18 @@ pub fn scene_row(
             right - preview_x,
         );
     }
-    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+    let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+    let mut label = if number.is_empty() {
+        heading.to_owned()
+    } else {
+        format!("{number} {heading}")
+    };
+    if !preview.is_empty() {
+        label.push_str(" — ");
+        label.push_str(preview);
+    }
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label.clone()));
+    resp
 }
 
 /// Toolbar "Menu" trigger: hamburger glyph plus label in a soft button.

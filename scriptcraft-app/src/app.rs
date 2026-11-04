@@ -341,6 +341,34 @@ fn menu_check(
     menu_row(ui, label, shortcut, enabled, Some(checked))
 }
 
+/// Left-hand page row in Settings, mirroring KIT's preferences list.
+fn settings_nav_row(ui: &mut egui::Ui, label: &str, selected: bool) -> egui::Response {
+    let (rect, resp) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 32.0), egui::Sense::click());
+    if selected {
+        ui.painter().rect_filled(rect, 6.0, kit().accent_soft);
+    } else if resp.hovered() {
+        ui.painter().rect_filled(rect, 6.0, kit().hover_light);
+    }
+    ui.painter().text(
+        egui::pos2(rect.left() + 12.0, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        label,
+        egui::FontId::proportional(13.0),
+        if selected {
+            kit().accent_text
+        } else {
+            kit().text
+        },
+    );
+    let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+    let text = label.to_owned();
+    resp.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, text.clone())
+    });
+    resp
+}
+
 #[derive(Default, PartialEq, Eq, Clone, Copy, Debug)]
 pub enum SideTab {
     #[default]
@@ -350,6 +378,25 @@ pub enum SideTab {
     Cards,
     Statistics,
     Settings,
+}
+
+/// Selected page in Settings, mirroring KIT's Preferences list.
+#[derive(Default, PartialEq, Eq, Clone, Copy, Debug)]
+pub enum SettingsPage {
+    #[default]
+    Application,
+    ScenarioEditor,
+    Navigator,
+}
+
+impl SettingsPage {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Application => "Application",
+            Self::ScenarioEditor => "Scenario Editor",
+            Self::Navigator => "Navigator",
+        }
+    }
 }
 
 /// Export dialog modules, mirroring KIT's Research / Outline / Script tabs.
@@ -388,6 +435,17 @@ struct AppSettings {
     backups: bool,
     backups_dir: String,
     theme: Theme,
+    /// KIT's Scenario Editor toggles. Defaults preserve the editor's
+    /// previous behaviour: scene numbers and a preview in the navigator on,
+    /// automatic typography off until the writer asks for it.
+    show_scene_numbers: bool,
+    highlight_current_line: bool,
+    capitalize_first_word: bool,
+    correct_double_capitals: bool,
+    replace_three_dots: bool,
+    smart_quotes: bool,
+    navigator_preview: bool,
+    navigator_show_numbers: bool,
 }
 
 impl Default for AppSettings {
@@ -398,6 +456,27 @@ impl Default for AppSettings {
             backups: true,
             backups_dir: default_backups_dir(),
             theme: Theme::Midnight,
+            show_scene_numbers: true,
+            highlight_current_line: false,
+            capitalize_first_word: false,
+            correct_double_capitals: false,
+            replace_three_dots: false,
+            smart_quotes: false,
+            navigator_preview: true,
+            navigator_show_numbers: true,
+        }
+    }
+}
+
+impl AppSettings {
+    fn editor_options(&self) -> crate::script_view::EditorOptions {
+        crate::script_view::EditorOptions {
+            show_scene_numbers: self.show_scene_numbers,
+            highlight_current_line: self.highlight_current_line,
+            capitalize_first_word: self.capitalize_first_word,
+            correct_double_capitals: self.correct_double_capitals,
+            replace_three_dots: self.replace_three_dots,
+            smart_quotes: self.smart_quotes,
         }
     }
 }
@@ -512,6 +591,7 @@ pub struct ScriptCraftApp {
     /// Recent projects (path, "dd.mm.yyyy HH:MM"); persisted in recent.txt.
     recent: Vec<(String, String)>,
     settings: AppSettings,
+    settings_page: SettingsPage,
     /// Disk persistence armed (real app only; tests never touch the disk).
     persist: bool,
     last_autosave: std::time::Instant,
@@ -610,6 +690,7 @@ impl Default for ScriptCraftApp {
             side_tab: SideTab::default(),
             recent: Vec::new(),
             settings: AppSettings::default(),
+            settings_page: SettingsPage::Application,
             persist: false,
             last_autosave: std::time::Instant::now(),
             recovery: Vec::new(),
@@ -2116,10 +2197,7 @@ impl ScriptCraftApp {
                 version.name
             );
         } else {
-            self.status = format!(
-                "Saved version \"{}\" to {} (KIT will see it in Script Versions).",
-                version.name, self.path
-            );
+            self.status = format!("Saved version \"{}\" to {}.", version.name, self.path);
         }
         true
     }
@@ -2955,15 +3033,6 @@ impl ScriptCraftApp {
         self.selected_block = Some(at);
     }
 
-    fn current_scene_omitted(&self) -> bool {
-        let Some(p) = &self.project else {
-            return false;
-        };
-        p.scenes()
-            .get(self.selected_scene)
-            .is_some_and(|scene| p.scene_is_omitted(scene))
-    }
-
     /// Omit a scene (keep its heading, number and identity; hide its body)
     /// or restore it. The state lives in the versioned scene sidecar.
     fn set_scene_omitted(&mut self, index: usize, omitted: bool) {
@@ -3005,10 +3074,6 @@ impl ScriptCraftApp {
                 .is_some_and(|scene| p.scene_is_omitted(scene));
             self.set_scene_omitted(index, !omitted);
         }
-    }
-
-    fn toggle_current_scene_omitted(&mut self) {
-        self.toggle_scene_omitted(self.selected_scene);
     }
 
     /// KIT sees the complete script: omission is ScriptCraft metadata only.
@@ -3991,6 +4056,14 @@ fn load_settings() -> AppSettings {
                         s.backups_dir = v.to_string();
                     }
                 }
+                "show_scene_numbers" => s.show_scene_numbers = v != "0",
+                "highlight_current_line" => s.highlight_current_line = v == "1",
+                "capitalize_first_word" => s.capitalize_first_word = v == "1",
+                "correct_double_capitals" => s.correct_double_capitals = v == "1",
+                "replace_three_dots" => s.replace_three_dots = v == "1",
+                "smart_quotes" => s.smart_quotes = v == "1",
+                "navigator_preview" => s.navigator_preview = v != "0",
+                "navigator_show_numbers" => s.navigator_show_numbers = v != "0",
                 "theme" => {
                     s.theme = match v {
                         "light" => Theme::Light,
@@ -4017,12 +4090,23 @@ fn load_settings() -> AppSettings {
 fn save_settings(s: &AppSettings) {
     let _ = std::fs::create_dir_all(config_dir());
     let text = format!(
-        "autosave={}\nautosave_minutes={}\nbackups={}\nbackups_dir={}\ntheme={}\n",
+        "autosave={}\nautosave_minutes={}\nbackups={}\nbackups_dir={}\ntheme={}\n\
+         show_scene_numbers={}\nhighlight_current_line={}\ncapitalize_first_word={}\n\
+         correct_double_capitals={}\nreplace_three_dots={}\nsmart_quotes={}\nnavigator_preview={}\n\
+         navigator_show_numbers={}\n",
         s.autosave as u8,
         s.autosave_minutes.clamp(1, 60),
         s.backups as u8,
         s.backups_dir,
         s.theme.key(),
+        s.show_scene_numbers as u8,
+        s.highlight_current_line as u8,
+        s.capitalize_first_word as u8,
+        s.correct_double_capitals as u8,
+        s.replace_three_dots as u8,
+        s.smart_quotes as u8,
+        s.navigator_preview as u8,
+        s.navigator_show_numbers as u8,
     );
     let _ = std::fs::write(config_dir().join("settings.conf"), text);
 }
@@ -4646,7 +4730,9 @@ impl ScriptCraftApp {
             });
     }
 
-    /// Contents of the Menu popup: File / Edit / View / Help sections.
+    /// Contents of the toolbar Menu popup: KIT's compact script-file menu.
+    /// Editing, view and revision commands live in the native menu bar,
+    /// the toolbar, Research ▸ Versions and keyboard shortcuts instead.
     fn menu_contents(&mut self, ui: &mut egui::Ui) {
         enum M {
             New,
@@ -4657,33 +4743,16 @@ impl ScriptCraftApp {
             ImportFdx,
             Export,
             Preview,
-            Undo,
-            Redo,
-            Find,
-            ToggleOmit,
-            StartRevision,
-            ClearRevisions,
-            Revisions,
-            Compare,
-            CurrentRevision,
-            Nav,
-            Fmt,
-            Typew,
-            ZoomIn,
-            ZoomOut,
-            ZoomReset,
-            ZoomFitPage,
-            ZoomFitWidth,
-            About,
+            Version,
+            Settings,
             Help,
+            About,
         }
         let mut action: Option<M> = None;
         ui.set_min_width(250.0);
         ui.spacing_mut().item_spacing.y = 2.0;
         {
             let has = self.project.is_some();
-            let can_undo = has && self.editor2.history.can_undo();
-            let can_redo = has && self.editor2.history.can_redo();
 
             if menu_item(ui, "New", None, true) {
                 action = Some(M::New);
@@ -4694,16 +4763,22 @@ impl ScriptCraftApp {
             if menu_item(ui, "Save", Some("⌘S"), true) {
                 action = Some(M::Save);
             }
-            if menu_item(ui, "Save as…", Some("Shift+⌘S"), true) {
+            if menu_item(ui, "Save as…", Some("⇧⌘S"), true) {
                 action = Some(M::SaveAs);
             }
             ui.separator();
-            if menu_item(ui, "Import Fountain…", None, true) {
-                action = Some(M::Import);
+            if menu_item(ui, "New Script Version…", None, has) {
+                action = Some(M::Version);
             }
-            if menu_item(ui, "Import Final Draft (.fdx)…", None, true) {
-                action = Some(M::ImportFdx);
-            }
+            ui.menu_button("Import", |ui| {
+                ui.set_min_width(220.0);
+                if menu_item(ui, "Fountain…", None, true) {
+                    action = Some(M::Import);
+                }
+                if menu_item(ui, "Final Draft (.fdx)…", None, true) {
+                    action = Some(M::ImportFdx);
+                }
+            });
             if menu_item(ui, "Export…", None, has) {
                 action = Some(M::Export);
             }
@@ -4711,93 +4786,19 @@ impl ScriptCraftApp {
                 action = Some(M::Preview);
             }
             ui.separator();
-            if menu_item(ui, "Undo", Some("⌘Z"), can_undo) {
-                action = Some(M::Undo);
-            }
-            if menu_item(ui, "Redo", Some("Shift+⌘Z"), can_redo) {
-                action = Some(M::Redo);
-            }
-            if menu_item(ui, "Find…", Some("⌘F"), has) {
-                action = Some(M::Find);
-            }
-            let omit_label = if self.current_scene_omitted() {
-                "Restore Scene"
-            } else {
-                "Omit Scene"
-            };
-            if menu_item(ui, omit_label, None, has) {
-                action = Some(M::ToggleOmit);
+            if menu_item(ui, "Settings…", Some("⌘,"), true) {
+                action = Some(M::Settings);
             }
             ui.separator();
-            let next_color = self.revisions.next_color();
-            if menu_item(
-                ui,
-                &format!("Start {} Revision", next_color.label()),
-                None,
-                has,
-            ) {
-                action = Some(M::StartRevision);
-            }
-            if menu_item(
-                ui,
-                "Clear Revision History…",
-                None,
-                has && !self.revisions.is_empty(),
-            ) {
-                action = Some(M::ClearRevisions);
-            }
-            if menu_item(ui, "Revision History…", None, has) {
-                action = Some(M::Revisions);
-            }
-            if menu_item(
-                ui,
-                "Compare Drafts…",
-                None,
-                has && !self.revisions.is_empty(),
-            ) {
-                action = Some(M::Compare);
-            }
-            if menu_check(
-                ui,
-                "Show Current Revision Only",
-                self.show_current_revision,
-                None,
-                has && !self.revisions.is_empty(),
-            ) {
-                action = Some(M::CurrentRevision);
-            }
-            ui.separator();
-            if menu_check(ui, "Navigator", self.show_left_panel, None, true) {
-                action = Some(M::Nav);
-            }
-            if menu_check(ui, "Format panel", self.show_format_panel, None, true) {
-                action = Some(M::Fmt);
-            }
-            if menu_check(ui, "Typewriter scrolling", self.typewriter, None, true) {
-                action = Some(M::Typew);
-            }
-            if menu_item(ui, "Zoom In", None, true) {
-                action = Some(M::ZoomIn);
-            }
-            if menu_item(ui, "Zoom Out", None, true) {
-                action = Some(M::ZoomOut);
-            }
-            if menu_item(ui, "Zoom 100%", None, true) {
-                action = Some(M::ZoomReset);
-            }
-            if menu_item(ui, "Fit Page", None, true) {
-                action = Some(M::ZoomFitPage);
-            }
-            if menu_item(ui, "Fit Width", None, true) {
-                action = Some(M::ZoomFitWidth);
-            }
-            ui.separator();
-            if menu_item(ui, "About ScriptCraft", None, true) {
-                action = Some(M::About);
-            }
             if menu_item(ui, "Help", None, true) {
                 action = Some(M::Help);
             }
+            if menu_item(ui, "About ScriptCraft", None, true) {
+                action = Some(M::About);
+            }
+        }
+        if action.is_some() {
+            egui::Popup::close_all(ui.ctx());
         }
         match action {
             None => {}
@@ -4815,48 +4816,24 @@ impl ScriptCraftApp {
                 self.close_compare();
                 self.preview_pdf();
             }
-            Some(M::Undo) => self.do_undo(),
-            Some(M::Redo) => self.do_redo(),
-            Some(M::Find) => {
-                if self.project.is_some() {
-                    self.close_compare();
-                    self.show_find = true;
+            Some(M::Version) => {
+                self.close_compare();
+                self.side_tab = SideTab::Research;
+                self.research_pane = ResearchPane::Versions;
+                if self.path.is_empty() || Self::is_fixture_path(&self.path) {
+                    self.status = "Save the project first to create a version.".to_string();
+                } else {
+                    self.version_name =
+                        format!("Draft {}", chrono::Local::now().format("%Y-%m-%d %H:%M"));
+                    self.version_description.clear();
+                    self.version_error.clear();
+                    self.show_version_dialog = true;
                 }
             }
-            Some(M::ToggleOmit) => self.toggle_current_scene_omitted(),
-            Some(M::StartRevision) => self.start_revision(),
-            Some(M::ClearRevisions) => {
+            Some(M::Settings) => {
                 self.close_compare();
-                self.show_clear_revisions = true;
+                self.side_tab = SideTab::Settings;
             }
-            Some(M::Revisions) => {
-                self.close_compare();
-                self.show_revisions = true;
-            }
-            Some(M::Compare) => {
-                self.open_compare();
-            }
-            Some(M::CurrentRevision) => {
-                self.show_current_revision = !self.show_current_revision;
-                self.revision_marks_dirty = true;
-            }
-            Some(M::Nav) => self.show_left_panel = !self.show_left_panel,
-            Some(M::Fmt) => self.show_format_panel = !self.show_format_panel,
-            Some(M::Typew) => self.typewriter = !self.typewriter,
-            Some(M::ZoomIn) => {
-                self.fit = FitMode::Off;
-                self.zoom = (self.zoom * 1.1).min(4.0);
-            }
-            Some(M::ZoomOut) => {
-                self.fit = FitMode::Off;
-                self.zoom = (self.zoom / 1.1).max(0.25);
-            }
-            Some(M::ZoomReset) => {
-                self.fit = FitMode::Off;
-                self.zoom = 1.0;
-            }
-            Some(M::ZoomFitPage) => self.fit = FitMode::Page,
-            Some(M::ZoomFitWidth) => self.fit = FitMode::Width,
             Some(M::About) => {
                 self.close_compare();
                 self.show_about = true;
@@ -4930,6 +4907,10 @@ impl ScriptCraftApp {
                 }
                 menu::ID_ZOOM_FIT_PAGE => self.fit = FitMode::Page,
                 menu::ID_ZOOM_FIT_WIDTH => self.fit = FitMode::Width,
+                menu::ID_SETTINGS => {
+                    self.close_compare();
+                    self.side_tab = SideTab::Settings;
+                }
                 menu::ID_ABOUT => {
                     self.close_compare();
                     self.show_about = true;
@@ -4976,7 +4957,7 @@ impl ScriptCraftApp {
             .default_width(400.0)
             .show(ctx, |ui| {
                 if self.revisions.is_empty() {
-                    ui.label("No revisions yet. Start one from the Menu.");
+                    ui.label("No revisions yet. Start one from Research ▸ Versions.");
                 } else {
                     if ui
                         .checkbox(
@@ -5125,8 +5106,9 @@ impl ScriptCraftApp {
             .show(ctx, |ui| {
                 ui.heading("ScriptCraft");
                 ui.label("Menu ▸ New / Open / Save / Export (Fountain, PDF).");
-                ui.label("Ctrl+S save · Ctrl+Z / Ctrl+Y undo · Ctrl+F find.");
-                ui.label("Menu ▸ Start Blue Revision marks edits; save keeps them.");
+                let p = shortcut_prefix();
+                ui.label(format!("{p}S save · {p}Z / ⇧{p}Z undo · {p}F find."));
+                ui.label("Research ▸ Versions starts a colour revision; save keeps it.");
                 ui.label("Research holds Title Page, Logline, Synopsis and notes.");
                 ui.label("Statistics reports counts, timings and speaking parts.");
                 ui.separator();
@@ -5634,6 +5616,7 @@ impl ScriptCraftApp {
         };
         // Owned rows: (scene idx, heading block, heading, preview, duration,
         // omitted).
+        let show_preview = self.settings.navigator_preview;
         let rows: Vec<(usize, usize, String, String, f64, bool)> = p
             .scenes()
             .into_iter()
@@ -5643,7 +5626,11 @@ impl ScriptCraftApp {
                     i,
                     s.blocks.first().copied().unwrap_or(0),
                     s.heading.clone(),
-                    scene_preview(p, &s),
+                    if show_preview {
+                        scene_preview(p, &s)
+                    } else {
+                        String::new()
+                    },
                     p.scene_duration_secs(Some(&s)),
                     p.scene_is_omitted(&s),
                 )
@@ -5663,9 +5650,14 @@ impl ScriptCraftApp {
                 for (i, bi, heading, preview, secs, omitted) in rows {
                     let selected = self.selected_scene == i;
                     let dur = format_duration(secs);
+                    let number = if self.settings.navigator_show_numbers {
+                        self.scene_label(i)
+                    } else {
+                        String::new()
+                    };
                     let resp = scene_row(
                         ui,
-                        &self.scene_label(i),
+                        &number,
                         &heading,
                         &preview,
                         dur.trim_matches(['(', ')']),
@@ -5673,7 +5665,7 @@ impl ScriptCraftApp {
                         selected,
                     );
                     let clicked = resp.clicked();
-                    egui::Popup::menu(&resp).show(|ui| {
+                    egui::Popup::context_menu(&resp).show(|ui| {
                         ui.set_min_width(180.0);
                         let label = if omitted {
                             "Restore scene"
@@ -5811,7 +5803,7 @@ impl ScriptCraftApp {
                             }
                         }
                     }
-                    egui::Popup::menu(&resp).show(|ui| {
+                    egui::Popup::context_menu(&resp).show(|ui| {
                         ui.set_min_width(180.0);
                         let label = if *omitted {
                             "Restore scene"
@@ -6345,6 +6337,81 @@ impl ScriptCraftApp {
                 .size(11.0)
                 .color(egui::Color32::from_gray(0xA1)),
         );
+        ui.add_space(16.0);
+        kit_section(ui, "Revisions");
+        let has = self.project.is_some();
+        let mut start = false;
+        let mut history = false;
+        let mut compare = false;
+        let mut clear = false;
+        let next_color = self.revisions.next_color();
+        if ui
+            .add_enabled(
+                has,
+                egui::Button::new(format!("Start {} Revision", next_color.label())),
+            )
+            .on_disabled_hover_text("Open a project to start a revision.")
+            .clicked()
+        {
+            start = true;
+        }
+        ui.add_space(4.0);
+        if ui
+            .add_enabled(has, egui::Button::new("Revision History…"))
+            .clicked()
+        {
+            history = true;
+        }
+        ui.add_space(4.0);
+        if ui
+            .add_enabled(
+                has && !self.revisions.is_empty(),
+                egui::Button::new("Compare Drafts…"),
+            )
+            .clicked()
+        {
+            compare = true;
+        }
+        if !self.revisions.is_empty() {
+            ui.add_space(6.0);
+            if ui
+                .checkbox(
+                    &mut self.show_current_revision,
+                    "Show current revision only",
+                )
+                .changed()
+            {
+                self.revision_marks_dirty = true;
+            }
+            ui.add_space(4.0);
+            if ui
+                .add_enabled(true, egui::Button::new("Clear Revision History…"))
+                .clicked()
+            {
+                clear = true;
+            }
+        }
+        ui.label(
+            egui::RichText::new(
+                "Revision colours mark changed lines and print in the PDF. Versions above are KIT's named snapshots.",
+            )
+            .size(11.0)
+            .color(egui::Color32::from_gray(0xA1)),
+        );
+        if start {
+            self.start_revision();
+        }
+        if history {
+            self.close_compare();
+            self.show_revisions = true;
+        }
+        if compare {
+            self.open_compare();
+        }
+        if clear {
+            self.close_compare();
+            self.show_clear_revisions = true;
+        }
     }
 
     fn research_entry_pane(&mut self, ui: &mut egui::Ui, id: i64) {
@@ -7260,33 +7327,58 @@ impl ScriptCraftApp {
     fn settings_view(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default().show(ctx, |ui| {
             let mut changed = false;
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                ui.add_space(20.0);
-                ui.horizontal(|ui| {
-                    ui.add_space(24.0);
-                    ui.vertical(|ui| {
-                        ui.set_max_width(640.0);
-                        ui.label(egui::RichText::new("Settings").size(18.0).strong());
-                        ui.add_space(4.0);
-                        ui.label(
-                            egui::RichText::new(
-                                "Application preferences. Everything here is applied and saved.",
-                            )
-                            .size(12.0)
-                            .color(kit().disabled_text),
-                        );
-                        ui.add_space(16.0);
-                        changed |= self.settings_common(ui);
-                        ui.add_space(24.0);
-                        if start_button(ui, None, "Reset Settings") {
-                            self.settings = AppSettings::default();
-                            if self.persist {
-                                save_settings(&self.settings);
-                            }
-                            self.status = "Settings reset to defaults.".to_string();
+            ui.add_space(20.0);
+            ui.horizontal_top(|ui| {
+                ui.add_space(24.0);
+                ui.vertical(|ui| {
+                    ui.set_width(186.0);
+                    ui.label(egui::RichText::new("Settings").size(18.0).strong());
+                    ui.add_space(14.0);
+                    for page in [
+                        SettingsPage::Application,
+                        SettingsPage::ScenarioEditor,
+                        SettingsPage::Navigator,
+                    ] {
+                        let selected = self.settings_page == page;
+                        if settings_nav_row(ui, page.label(), selected).clicked() {
+                            self.settings_page = page;
                         }
-                        ui.add_space(24.0);
-                    });
+                        ui.add_space(2.0);
+                    }
+                });
+                ui.add_space(10.0);
+                let (line, _) = ui.allocate_exact_size(
+                    egui::vec2(1.0, ui.available_height().max(320.0)),
+                    egui::Sense::hover(),
+                );
+                ui.painter().rect_filled(line, 0.0, kit().sep);
+                ui.add_space(24.0);
+                ui.vertical(|ui| {
+                    ui.set_max_width(640.0);
+                    ui.label(
+                        egui::RichText::new(self.settings_page.label())
+                            .size(16.0)
+                            .strong(),
+                    );
+                    ui.add_space(4.0);
+                    ui.label(
+                        egui::RichText::new(
+                            "Everything here is applied immediately and saved for the next launch.",
+                        )
+                        .size(12.0)
+                        .color(kit().disabled_text),
+                    );
+                    ui.add_space(14.0);
+                    egui::ScrollArea::vertical()
+                        .id_salt("settings_page")
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            changed |= match self.settings_page {
+                                SettingsPage::Application => self.settings_application(ui),
+                                SettingsPage::ScenarioEditor => self.settings_editor(ui),
+                                SettingsPage::Navigator => self.settings_navigator(ui),
+                            };
+                        });
                 });
             });
             if changed && self.persist {
@@ -7295,8 +7387,8 @@ impl ScriptCraftApp {
         });
     }
 
-    /// Application preference rows; returns true when something changed.
-    fn settings_common(&mut self, ui: &mut egui::Ui) -> bool {
+    /// Application page: theme, autosave, backups and the reset action.
+    fn settings_application(&mut self, ui: &mut egui::Ui) -> bool {
         let mut changed = false;
         let mut v = ui.visuals().clone();
         v.extreme_bg_color = kit().field_stroke;
@@ -7381,6 +7473,125 @@ impl ScriptCraftApp {
                 }
             }
         });
+        ui.add_space(24.0);
+        if start_button(ui, None, "Reset Settings") {
+            self.settings = AppSettings::default();
+            if self.persist {
+                save_settings(&self.settings);
+            }
+            self.status = "Settings reset to defaults.".to_string();
+            changed = true;
+        }
+        ui.add_space(24.0);
+        changed
+    }
+
+    /// Scenario Editor page: KIT's view toggles and automatic corrections.
+    fn settings_editor(&mut self, ui: &mut egui::Ui) -> bool {
+        let mut changed = false;
+        kit_section(ui, "View");
+        ui.horizontal(|ui| {
+            ui.add_space(16.0);
+            changed |= ui
+                .checkbox(&mut self.settings.show_scene_numbers, "Show scene numbers")
+                .on_hover_text("Show the scene number in the page margin while editing.")
+                .changed();
+        });
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            ui.add_space(16.0);
+            changed |= ui
+                .checkbox(
+                    &mut self.settings.highlight_current_line,
+                    "Highlight current line",
+                )
+                .on_hover_text("Tint the line holding the caret, like KIT's editor.")
+                .changed();
+        });
+        ui.add_space(20.0);
+        kit_section(ui, "Automatic corrections");
+        ui.horizontal(|ui| {
+            ui.add_space(16.0);
+            changed |= ui
+                .checkbox(
+                    &mut self.settings.capitalize_first_word,
+                    "Capitalize first word",
+                )
+                .on_hover_text("Uppercase the first letter typed at the start of a sentence.")
+                .changed();
+        });
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            ui.add_space(16.0);
+            changed |= ui
+                .checkbox(
+                    &mut self.settings.correct_double_capitals,
+                    "Correct DOuble CApitals",
+                )
+                .on_hover_text("Fix a second capital in a word: DOuble becomes Double.")
+                .changed();
+        });
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            ui.add_space(16.0);
+            changed |= ui
+                .checkbox(
+                    &mut self.settings.replace_three_dots,
+                    "Replace three dots with …",
+                )
+                .on_hover_text("Typing ... inserts the single ellipsis character.")
+                .changed();
+        });
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            ui.add_space(16.0);
+            changed |= ui
+                .checkbox(&mut self.settings.smart_quotes, "Smart quotes")
+                .on_hover_text("Straight quotes become typographic quotes and apostrophes.")
+                .changed();
+        });
+        ui.add_space(20.0);
+        ui.label(
+            egui::RichText::new(
+                "Corrections apply as you type. Existing text is never rewritten in bulk.",
+            )
+            .size(11.0)
+            .color(kit().disabled_text),
+        );
+        changed
+    }
+
+    /// Navigator page: what each scene row shows.
+    fn settings_navigator(&mut self, ui: &mut egui::Ui) -> bool {
+        let mut changed = false;
+        kit_section(ui, "Scene list");
+        ui.horizontal(|ui| {
+            ui.add_space(16.0);
+            changed |= ui
+                .checkbox(
+                    &mut self.settings.navigator_show_numbers,
+                    "Show scene numbers",
+                )
+                .on_hover_text("Show each scene's number in the navigator.")
+                .changed();
+        });
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            ui.add_space(16.0);
+            changed |= ui
+                .checkbox(
+                    &mut self.settings.navigator_preview,
+                    "Show scene description",
+                )
+                .on_hover_text("The first action line under each heading.")
+                .changed();
+        });
+        ui.add_space(20.0);
+        ui.label(
+            egui::RichText::new("Scene rows always show the heading and estimated duration.")
+                .size(11.0)
+                .color(kit().disabled_text),
+        );
         changed
     }
 
@@ -7438,6 +7649,7 @@ impl ScriptCraftApp {
                             revision_colors,
                             hidden_blocks: &self.hidden_block_ids,
                             omitted_headings: &self.omitted_heading_ids,
+                            options: self.settings.editor_options(),
                         },
                         &mut self.editor2,
                     ),

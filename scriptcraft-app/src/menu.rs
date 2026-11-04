@@ -1,7 +1,8 @@
-//! Native macOS menu bar, matching KIT's File/Edit menus.
+//! Native macOS menu bar, matching KIT's File/Edit menus and Script revisions.
 //!
 //! Built with `muda`; menu events are polled from the global channel in
-//! `ScriptCraftApp::update`. The in-app "Menu" popup mirrors the same items.
+//! `ScriptCraftApp::update`. The in-app "Menu" popup stays compact and
+//! mirrors the file commands; editing, view and revision commands live here.
 
 use muda::accelerator::Accelerator;
 use muda::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
@@ -35,6 +36,7 @@ pub const ID_ZOOM_FIT_PAGE: &str = "kit.zoom_fit_page";
 pub const ID_ZOOM_FIT_WIDTH: &str = "kit.zoom_fit_width";
 pub const ID_ABOUT: &str = "kit.about";
 pub const ID_HELP: &str = "kit.help";
+pub const ID_SETTINGS: &str = "kit.settings";
 pub const ID_QUIT: &str = "kit.quit";
 
 pub struct NativeMenu {
@@ -58,6 +60,7 @@ impl NativeMenu {
 
         // The first submenu is the macOS application menu (app name).
         let app_about = MenuItem::with_id(ID_ABOUT, "About ScriptCraft", true, None);
+        let app_settings = MenuItem::with_id(ID_SETTINGS, "Settings...", true, acc("CmdOrCtrl+,"));
         let app_sep_a = PredefinedMenuItem::separator();
         let services = PredefinedMenuItem::services(None);
         let app_sep_b = PredefinedMenuItem::separator();
@@ -71,6 +74,7 @@ impl NativeMenu {
             true,
             &[
                 &app_about,
+                &app_settings,
                 &app_sep_a,
                 &services,
                 &app_sep_b,
@@ -105,25 +109,23 @@ impl NativeMenu {
         let redo = MenuItem::with_id(ID_REDO, "Redo", true, acc("Shift+CmdOrCtrl+Z"));
         let find = MenuItem::with_id(ID_FIND, "Find...", true, acc("CmdOrCtrl+F"));
         let sep_c = PredefinedMenuItem::separator();
+        let edit = Submenu::with_items("Edit", true, &[&undo, &redo, &sep_c, &find])?;
+
         let start_revision = MenuItem::with_id(ID_START_REVISION, "Start Revision", true, None);
-        let clear_revisions =
-            MenuItem::with_id(ID_CLEAR_REVISIONS, "Clear Revision History...", true, None);
         let revisions = MenuItem::with_id(ID_REVISIONS, "Revision History...", true, None);
         let compare_drafts = MenuItem::with_id(ID_COMPARE_DRAFTS, "Compare Drafts...", true, None);
         let sep_rev = PredefinedMenuItem::separator();
-        let edit = Submenu::with_items(
-            "Edit",
+        let clear_revisions =
+            MenuItem::with_id(ID_CLEAR_REVISIONS, "Clear Revision History...", true, None);
+        let script = Submenu::with_items(
+            "Script",
             true,
             &[
-                &undo,
-                &redo,
-                &sep_c,
-                &find,
-                &sep_rev,
                 &start_revision,
-                &clear_revisions,
                 &revisions,
                 &compare_drafts,
+                &sep_rev,
+                &clear_revisions,
             ],
         )?;
 
@@ -164,7 +166,7 @@ impl NativeMenu {
         let help = MenuItem::with_id(ID_HELP, "ScriptCraft Help", true, acc("F1"));
         let help_menu = Submenu::with_items("Help", true, &[&about, &help])?;
 
-        let menu = Menu::with_items(&[&app_menu, &file, &edit, &view, &help_menu])?;
+        let menu = Menu::with_items(&[&app_menu, &file, &edit, &script, &view, &help_menu])?;
         #[cfg(target_os = "macos")]
         menu.init_for_nsapp();
 
