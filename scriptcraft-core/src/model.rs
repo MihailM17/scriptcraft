@@ -54,6 +54,22 @@ impl ElementType {
     }
 }
 
+/// Which half of a dual-dialogue pair a character block owns.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DualSide {
+    Left,
+    Right,
+}
+
+/// ScriptCraft-only pairing marker stored on the two character blocks.
+/// Persisted in the `scriptcraft_dual_groups` sidecar row; KIT never sees it
+/// and continues to edit the underlying blocks as ordinary text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DualMark {
+    pub group: Uuid,
+    pub side: DualSide,
+}
+
 /// One screenplay block.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ScriptBlock {
@@ -62,6 +78,9 @@ pub struct ScriptBlock {
     pub kit_uuid: Option<String>,
     pub element_type: ElementType,
     pub text: String,
+    /// Dual-dialogue pairing marker (character blocks only).
+    #[serde(default)]
+    pub dual: Option<DualMark>,
 }
 
 impl ScriptBlock {
@@ -71,8 +90,113 @@ impl ScriptBlock {
             kit_uuid: None,
             element_type,
             text,
+            dual: None,
         }
     }
+}
+
+/// A validated dual pair: two adjacent speech units. Each unit is a
+/// `Character` block plus any following `Parenthetical`/`Dialogue`/`Lyrics`
+/// blocks; `left_end`/`right_end` are exclusive block indices.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DualPair {
+    pub left: usize,
+    pub right: usize,
+    pub left_end: usize,
+    pub right_end: usize,
+}
+
+/// Exclusive end of the speech unit starting at `start`, or `None` when
+/// `start` is not a character cue. A unit is the cue plus following
+/// parenthetical/dialogue/lyrics blocks.
+pub fn speech_unit_end(blocks: &[ScriptBlock], start: usize) -> Option<usize> {
+    if blocks.get(start)?.element_type != ElementType::Character {
+        return None;
+    }
+    let mut end = start + 1;
+    while end < blocks.len()
+        && matches!(
+            blocks[end].element_type,
+            ElementType::Parenthetical | ElementType::Dialogue | ElementType::Lyrics
+        )
+    {
+        end += 1;
+    }
+    Some(end)
+}
+
+/// Start of the speech unit containing `bi`: the cue itself, or the nearest
+/// cue above a parenthetical/dialogue/lyrics block.
+pub fn speech_unit_start(blocks: &[ScriptBlock], bi: usize) -> Option<usize> {
+    let block = blocks.get(bi)?;
+    match block.element_type {
+        ElementType::Character => Some(bi),
+        ElementType::Parenthetical | ElementType::Dialogue | ElementType::Lyrics => {
+            let mut i = bi;
+            while i > 0 {
+                i -= 1;
+                match blocks.get(i)?.element_type {
+                    ElementType::Character => return Some(i),
+                    ElementType::Parenthetical | ElementType::Dialogue | ElementType::Lyrics => {}
+                    _ => return None,
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+/// The speech unit immediately after `start`'s unit, if it starts with a cue.
+pub fn next_speech_unit(blocks: &[ScriptBlock], start: usize) -> Option<usize> {
+    let end = speech_unit_end(blocks, start)?;
+    (blocks.get(end)?.element_type == ElementType::Character).then_some(end)
+}
+
+/// All valid dual pairs derived from block markers. A pair is valid only when
+/// both sides are character cues of the same group, the left unit ends exactly
+/// at the right cue, and each unit has at least one dialogue line. Orphaned,
+/// duplicated or reordered markers are ignored rather than guessed at.
+pub fn dual_pairs(blocks: &[ScriptBlock]) -> Vec<DualPair> {
+    use std::collections::HashMap;
+    let mut lefts: HashMap<Uuid, Vec<usize>> = HashMap::new();
+    let mut rights: HashMap<Uuid, Vec<usize>> = HashMap::new();
+    for (bi, b) in blocks.iter().enumerate() {
+        let Some(mark) = b.dual else { continue };
+        if b.element_type != ElementType::Character {
+            continue;
+        }
+        match mark.side {
+            DualSide::Left => lefts.entry(mark.group).or_default().push(bi),
+            DualSide::Right => rights.entry(mark.group).or_default().push(bi),
+        }
+    }
+    let mut out = Vec::new();
+    for (group, left) in lefts {
+        let Some(right) = rights.get(&group) else {
+            continue;
+        };
+        if left.len() != 1 || right.len() != 1 {
+            continue;
+        }
+        let (left, right) = (left[0], right[0]);
+        let Some(left_end) = speech_unit_end(blocks, left) else {
+            continue;
+        };
+        let Some(right_end) = speech_unit_end(blocks, right) else {
+            continue;
+        };
+        if left < right && left_end == right && left_end > left + 1 && right_end > right + 1 {
+            out.push(DualPair {
+                left,
+                right,
+                left_end,
+                right_end,
+            });
+        }
+    }
+    out.sort_by_key(|pair| pair.left);
+    out
 }
 
 /// A scene = heading + following blocks until the next heading.
@@ -163,6 +287,18 @@ impl Project {
 
     pub fn scene_is_omitted(&self, scene: &Scene) -> bool {
         self.scene_meta(scene.id).is_some_and(|meta| meta.omitted)
+    }
+
+    /// Valid dual-dialogue pairs in this project.
+    pub fn dual_pairs(&self) -> Vec<DualPair> {
+        dual_pairs(&self.blocks)
+    }
+
+    /// The validated pair containing block `bi`, if any.
+    pub fn dual_pair_for_block(&self, bi: usize) -> Option<DualPair> {
+        self.dual_pairs()
+            .into_iter()
+            .find(|pair| pair.left <= bi && bi < pair.right_end)
     }
 
     pub fn omitted_scene_count(&self) -> usize {
@@ -261,6 +397,7 @@ impl Project {
                     kit_uuid: None,
                     element_type: ElementType::Action,
                     text: "OMITTED".to_string(),
+                    dual: None,
                 });
                 view.sources.push(None);
                 view.omitted.push(true);

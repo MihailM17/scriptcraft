@@ -200,6 +200,7 @@ fn revision_to_script(b: &RevisionBlock) -> ScriptBlock {
         kit_uuid: b.kit_uuid.clone(),
         element_type: b.element_type,
         text: b.text.clone(),
+        dual: None,
     }
 }
 

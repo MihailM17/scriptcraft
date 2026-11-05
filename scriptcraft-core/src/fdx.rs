@@ -7,11 +7,12 @@
 //! written for other tools; importing it is deferred.
 
 use crate::kitsp::Metadata;
-use crate::model::{ElementType, Project, ScriptBlock};
+use crate::model::{speech_unit_end, DualMark, DualSide, ElementType, Project, ScriptBlock};
 use crate::revision::{RevisionColor, RevisionSet};
 use quick_xml::events::Event;
 use quick_xml::{Reader, XmlVersion};
 use thiserror::Error;
+use uuid::Uuid;
 
 #[derive(Debug, Error)]
 pub enum FdxError {
@@ -190,8 +191,33 @@ pub fn to_fdx_with_revisions_and_latest(
          <FinalDraft DocumentType=\"Script\" Template=\"No\" Version=\"1\">\n\
          <Content>\n",
     );
+    let pairs = crate::model::dual_pairs(&p.blocks);
+    let mut pair_at = vec![None; p.blocks.len()];
+    for pair in &pairs {
+        pair_at[pair.left] = Some(*pair);
+    }
     let mut scene_i = 0usize;
-    for (i, b) in p.blocks.iter().enumerate() {
+    let mut i = 0usize;
+    while i < p.blocks.len() {
+        if let Some(pair) = pair_at[i] {
+            // Final Draft's dual shape: one General wrapper around two
+            // consecutive dialogue columns.
+            out.push_str("<Paragraph Type=\"General\">\n<DualDialogue>\n");
+            for bi in pair.left..pair.right_end {
+                let b = &p.blocks[bi];
+                push_paragraph(
+                    &mut out,
+                    fdx_type(b.element_type),
+                    None,
+                    marks.get(bi).copied().flatten(),
+                    &b.text,
+                );
+            }
+            out.push_str("</DualDialogue>\n</Paragraph>\n");
+            i = pair.right_end;
+            continue;
+        }
+        let b = &p.blocks[i];
         let mut number = None;
         if b.element_type == ElementType::SceneHeading {
             number = Some(scene_number(meta, scene_i));
@@ -204,6 +230,7 @@ pub fn to_fdx_with_revisions_and_latest(
             marks.get(i).copied().flatten(),
             &b.text,
         );
+        i += 1;
     }
     out.push_str("</Content>\n<TitlePage>\n<Content>\n");
     let title = if meta.title.trim().is_empty() {
@@ -286,9 +313,11 @@ pub fn from_fdx(xml: &str) -> Result<(Project, Metadata), FdxError> {
     let mut in_title_page = false;
     let mut in_text = false;
     let mut in_note = false;
+    let mut in_dual = false;
 
     let mut para: Option<Para> = None;
     let mut note_buf = String::new();
+    let mut dual_blocks: Vec<usize> = Vec::new();
 
     let mut blocks: Vec<ScriptBlock> = Vec::new();
     let mut title_paras: Vec<(String, String)> = Vec::new();
@@ -308,6 +337,10 @@ pub fn from_fdx(xml: &str) -> Result<(Project, Metadata), FdxError> {
                 }
                 match name.as_str() {
                     "TitlePage" => in_title_page = true,
+                    "DualDialogue" if !in_title_page => {
+                        in_dual = true;
+                        dual_blocks.clear();
+                    }
                     "Paragraph" => {
                         let mut p = Para::default();
                         for key in ["Type", "Number", "Alignment"] {
@@ -420,12 +453,46 @@ pub fn from_fdx(xml: &str) -> Result<(Project, Metadata), FdxError> {
                         if el == ElementType::SceneHeading && !p.number.trim().is_empty() {
                             scene_numbers.push(p.number.trim().to_string());
                         }
+                        let first_new = blocks.len();
                         if !text.is_empty() {
                             blocks.push(ScriptBlock::new(el, text));
                         }
                         for note in p.notes {
                             blocks.push(ScriptBlock::new(ElementType::NonPrintable, note));
                         }
+                        if in_dual {
+                            dual_blocks.extend(first_new..blocks.len());
+                        }
+                    }
+                    "DualDialogue" if in_dual => {
+                        in_dual = false;
+                        let cues: Vec<usize> = dual_blocks
+                            .iter()
+                            .copied()
+                            .filter(|bi| {
+                                blocks
+                                    .get(*bi)
+                                    .is_some_and(|b| b.element_type == ElementType::Character)
+                            })
+                            .collect();
+                        if cues.len() == 2 {
+                            let (left, right) = (cues[0], cues[1]);
+                            if speech_unit_end(&blocks, left) == Some(right)
+                                && speech_unit_end(&blocks, right)
+                                    .is_some_and(|end| end > right + 1)
+                            {
+                                let group = Uuid::new_v4();
+                                blocks[left].dual = Some(DualMark {
+                                    group,
+                                    side: DualSide::Left,
+                                });
+                                blocks[right].dual = Some(DualMark {
+                                    group,
+                                    side: DualSide::Right,
+                                });
+                            }
+                        }
+                        dual_blocks.clear();
                     }
                     _ => {}
                 }

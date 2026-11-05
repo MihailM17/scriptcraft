@@ -283,3 +283,24 @@ fn snap_15_compare_side_by_side() {
     h.run();
     h.snapshot("15_compare_side_by_side");
 }
+
+/// A real dual-dialogue pair rendered side by side in the editor.
+#[test]
+fn snap_18_dual_dialogue() {
+    let mut h = Harness::builder()
+        .with_size(egui::Vec2::new(1360.0, 880.0))
+        .build_eframe(|cc| {
+            app::apply_theme(&cc.egui_ctx);
+            app::install_fonts(&cc.egui_ctx);
+            let mut a = ScriptCraftApp::default();
+            assert!(a.open_fixture(), "A95 fixture not found");
+            a.goto_tab(SideTab::Script);
+            a.focus_first_dual_candidate_for_test()
+                .expect("A95 contains two adjacent speech units");
+            a
+        });
+    h.run();
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::D);
+    h.run_steps(2);
+    h.snapshot("18_dual_dialogue");
+}

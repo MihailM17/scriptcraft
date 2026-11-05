@@ -13,12 +13,13 @@
 //! engine on the A95 fixture and a synthetic corpus, so no line break or page
 //! break can drift while the editor is being rebuilt.
 
+pub mod dual;
 pub mod paginate;
 pub mod pdf;
 pub mod place;
 pub mod wrap;
 
-pub use paginate::{paginate, paginate_lines, Chunk, Page};
+pub use paginate::{paginate, paginate_lines, Chunk, DualChunk, Page};
 pub use place::{
     layout, layout_document_view, layout_with_page_lock, relayout_from, DocLayout, LineRole,
     PageLayout, PlacedLine, SourceSpan, TemplateGeometry, MM_PER_CELL, ROW_MM, RUSSIAN_GEOMETRY,

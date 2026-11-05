@@ -16,9 +16,10 @@
 //! stops as soon as a freshly built page equals the old layout's page — from
 //! there on the old pages are provably unchanged.
 
+use crate::dual;
 use crate::wrap;
 use scriptcraft_core::editing::TemplateMetrics;
-use scriptcraft_core::model::{ElementType, ScriptBlock};
+use scriptcraft_core::model::{dual_pairs, DualPair, ElementType, ScriptBlock};
 use scriptcraft_core::page_lock::ResolvedAnchor;
 
 /// One rendered slice of a block: paragraphs `[start..end]`.
@@ -34,6 +35,25 @@ pub struct Chunk {
     pub more: bool,
     pub contd: bool,
     pub top: usize,
+    /// Present for a dual-dialogue segment; `bi` is then the left cue and
+    /// `start`/`end` carry the row range in [`DualChunk::start_row`] /
+    /// [`DualChunk::end_row`].
+    pub dual: Option<DualChunk>,
+}
+
+/// One page slice of a dual pair. The pair itself is described by the left
+/// and right cue block indices; rows index the aligned two-column grid.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DualChunk {
+    pub pair: DualPair,
+    pub start_row: usize,
+    pub end_row: usize,
+    /// The left/right column still has rows at the top of this segment, so
+    /// its cue is repeated with `(CONT'D)`.
+    pub contd_left: bool,
+    pub contd_right: bool,
+    pub more_left: bool,
+    pub more_right: bool,
 }
 
 /// One fixed-size page: the chunks that landed on it, in order.
@@ -135,10 +155,18 @@ pub fn paginate_with_breaks(
 }
 
 /// Page starts as `(block index, paragraph offset)`; used to capture locks.
+/// A dual pair is anchored at its left cue: continuation pages inside the
+/// pair cannot be expressed as a paragraph offset, so they are labelled as
+/// inserted pages (`3A`, `3B`, …) by the lock.
 pub fn page_starts(blocks: &[ScriptBlock], m: &TemplateMetrics) -> Vec<(usize, usize)> {
     paginate(blocks, m)
         .iter()
-        .filter_map(|p| p.chunks.first().map(|c| (c.bi, c.start)))
+        .filter_map(|p| {
+            p.chunks.first().map(|c| match &c.dual {
+                Some(dual) => (dual.pair.left, 0),
+                None => (c.bi, c.start),
+            })
+        })
         .collect()
 }
 
@@ -185,9 +213,13 @@ pub fn page_labels(pages: &[Page], anchors: &[ResolvedAnchor]) -> Vec<String> {
 
 fn page_of(pages: &[Page], bi: usize, para: usize) -> Option<usize> {
     pages.iter().position(|p| {
-        p.chunks
-            .iter()
-            .any(|c| c.bi == bi && c.start <= para && para < c.end)
+        p.chunks.iter().any(|c| {
+            if let Some(dual) = &c.dual {
+                bi >= dual.pair.left && bi < dual.pair.right_end
+            } else {
+                c.bi == bi && c.start <= para && para < c.end
+            }
+        })
     })
 }
 
@@ -221,6 +253,20 @@ pub(crate) struct Pager<'a> {
     /// Forced page starts `(block index, paragraph offset)`.
     breaks: Vec<(usize, usize)>,
     break_i: usize,
+    /// Validated dual pairs in this block list.
+    dual_pairs: Vec<DualPair>,
+    /// Active pair and the next aligned row to place.
+    dual_state: Option<DualState>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct DualState {
+    pair: DualPair,
+    next_row: usize,
+    started: bool,
+    total_rows: usize,
+    left_len: usize,
+    right_len: usize,
 }
 
 impl<'a> Pager<'a> {
@@ -236,6 +282,8 @@ impl<'a> Pager<'a> {
             rows: Vec::new(),
             breaks: Vec::new(),
             break_i: 0,
+            dual_pairs: dual_pairs(blocks),
+            dual_state: None,
         }
     }
 
@@ -291,6 +339,15 @@ impl<'a> Pager<'a> {
                 self.used = 0;
             }
         }
+        if self.dual_state.is_some() {
+            self.step_dual();
+            return true;
+        }
+        if let Some(pair) = self.dual_pairs.iter().find(|pair| pair.left == self.bi) {
+            self.begin_dual(*pair);
+            self.step_dual();
+            return true;
+        }
         let t = b.element_type;
         if self.rows.is_empty() || self.start == 0 && self.first_chunk {
             let cpl = self.m.col_chars(t);
@@ -306,6 +363,110 @@ impl<'a> Pager<'a> {
             self.step_splittable(t);
         }
         true
+    }
+
+    fn begin_dual(&mut self, pair: DualPair) {
+        let rows = dual::build_rows(self.blocks, pair, self.m);
+        self.dual_state = Some(DualState {
+            pair,
+            next_row: 0,
+            started: false,
+            total_rows: rows.rows.len(),
+            left_len: rows.left_len,
+            right_len: rows.right_len,
+        });
+        self.rows.clear();
+    }
+
+    /// Place one page slice of the active dual pair. A pair taller than a page
+    /// splits between aligned rows; continuation pages repeat each continuing
+    /// cue with `(CONT'D)` and reserve a `(MORE)` row for each open column.
+    fn step_dual(&mut self) {
+        let Some(state) = self.dual_state else { return };
+        let page_empty = self.page_empty();
+        let top_here = if !state.started && !page_empty {
+            self.m.top_space_lines(ElementType::Character)
+        } else {
+            0
+        };
+        let cue_here = usize::from(state.started);
+        let remaining = state.total_rows.saturating_sub(state.next_row);
+        if remaining == 0 {
+            self.finish_dual(state.pair);
+            return;
+        }
+        let capacity = self
+            .m
+            .lines_per_page
+            .saturating_sub(self.used + top_here + cue_here);
+        // Keep a pair that fits on a fresh page whole rather than stranding
+        // one row at the bottom of the current one.
+        if !state.started
+            && !page_empty
+            && remaining > capacity
+            && state.total_rows + self.m.top_space_lines(ElementType::Character)
+                <= self.m.lines_per_page
+        {
+            self.pages.push(Page::default());
+            self.used = 0;
+            return;
+        }
+        if capacity == 0 && !page_empty {
+            self.pages.push(Page::default());
+            self.used = 0;
+            return;
+        }
+        // An oversized single row on an empty page is placed anyway.
+        let mut fit = remaining.min(capacity.max(1));
+        let mut more = fit < remaining;
+        if more {
+            fit = capacity.saturating_sub(1);
+            if fit == 0 {
+                if !page_empty {
+                    self.pages.push(Page::default());
+                    self.used = 0;
+                    return;
+                }
+                fit = 1;
+            }
+            more = fit < remaining;
+        }
+        let end_row = state.next_row + fit;
+        let more_left = more && end_row < state.left_len;
+        let more_right = more && end_row < state.right_len;
+        let any_more = more_left || more_right;
+        self.used += top_here + cue_here + fit + usize::from(any_more);
+        self.pages.last_mut().unwrap().chunks.push(Chunk {
+            bi: state.pair.left,
+            start: state.next_row,
+            end: end_row,
+            more: false,
+            contd: false,
+            top: top_here,
+            dual: Some(DualChunk {
+                pair: state.pair,
+                start_row: state.next_row,
+                end_row,
+                contd_left: state.started && state.next_row < state.left_len,
+                contd_right: state.started && state.next_row < state.right_len,
+                more_left,
+                more_right,
+            }),
+        });
+        if end_row >= state.total_rows {
+            self.finish_dual(state.pair);
+        } else if let Some(state) = self.dual_state.as_mut() {
+            state.next_row = end_row;
+            state.started = true;
+        }
+    }
+
+    fn finish_dual(&mut self, pair: DualPair) {
+        self.dual_state = None;
+        self.bi = pair.right_end;
+        self.start = 0;
+        self.first_chunk = true;
+        self.rows.clear();
     }
 
     fn step_atomic(&mut self, t: ElementType) {
@@ -346,6 +507,7 @@ impl<'a> Pager<'a> {
             more: false,
             contd: false,
             top: if skip_top { 0 } else { m.top_space_lines(t) },
+            dual: None,
         });
         self.bi += 1;
         self.start = 0;
@@ -426,6 +588,7 @@ impl<'a> Pager<'a> {
             } else {
                 0
             },
+            dual: None,
         });
         self.start = end;
         if end == self.rows.len() {

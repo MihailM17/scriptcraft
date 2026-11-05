@@ -1,4 +1,6 @@
-use crate::model::{ElementType, Project, SceneMeta, ScriptBlock};
+use crate::model::{
+    speech_unit_end, DualMark, DualSide, ElementType, Project, SceneMeta, ScriptBlock,
+};
 use crate::page_lock::PageLock;
 use crate::revision::{RevisionHistory, RevisionSet, STORAGE_KEY as REVISIONS_KEY};
 use quick_xml::events::Event;
@@ -112,9 +114,13 @@ pub const IDENTITY_KEY: &str = "scriptcraft_ids";
 /// scene-level properties), keyed by the heading block's stable id. KIT
 /// ignores this key.
 pub const SCENE_META_KEY: &str = "scriptcraft_scene_meta";
+/// ScriptCraft extension: versioned JSON dual-dialogue groups keyed by the two
+/// stable character-block ids. KIT ignores this key.
+pub const DUAL_GROUPS_KEY: &str = "scriptcraft_dual_groups";
 
 const IDENTITY_SCHEMA: u32 = 1;
 const SCENE_META_SCHEMA: u32 = 1;
+const DUAL_GROUPS_SCHEMA: u32 = 1;
 
 /// Result of opening a `.kitsp`: the project plus non-fatal compatibility
 /// warnings, for example an external KIT edit whose block identity could not
@@ -160,6 +166,7 @@ fn load_conn(conn: &Connection) -> Result<LoadReport, KitspError> {
     project.title = title;
     let mut warnings = Vec::new();
     let identity = apply_saved_identity(conn, &mut project, &mut warnings);
+    apply_saved_dual_groups(conn, &mut project, &identity, &mut warnings);
     apply_saved_scene_meta(conn, &mut project, &identity, &mut warnings);
     Ok(LoadReport { project, warnings })
 }
@@ -196,12 +203,32 @@ struct SceneMetaRow {
     scenes: Vec<SceneMeta>,
 }
 
+/// Versioned JSON persisted in `scenario_data.scriptcraft_dual_groups`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct DualGroupRow {
+    #[serde(default = "dual_groups_schema")]
+    schema: u32,
+    #[serde(default)]
+    groups: Vec<DualGroupRecord>,
+}
+
+/// One pairing: the stable ids of the two character cues.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+struct DualGroupRecord {
+    left: Uuid,
+    right: Uuid,
+}
+
 fn identity_schema() -> u32 {
     IDENTITY_SCHEMA
 }
 
 fn scene_meta_schema() -> u32 {
     SCENE_META_SCHEMA
+}
+
+fn dual_groups_schema() -> u32 {
+    DUAL_GROUPS_SCHEMA
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -477,6 +504,83 @@ fn apply_saved_scene_meta(
     project.scene_meta = kept;
 }
 
+/// Apply `scriptcraft_dual_groups` after block identity is settled. Both ids
+/// must resolve to adjacent speech units; otherwise the pairing is ignored
+/// with a warning instead of attaching to unrelated text.
+fn apply_saved_dual_groups(
+    conn: &Connection,
+    project: &mut Project,
+    identity: &IdentityLoad,
+    warnings: &mut Vec<String>,
+) {
+    let json = get_data(conn, DUAL_GROUPS_KEY);
+    if json.trim().is_empty() {
+        return;
+    }
+    let row: DualGroupRow = match serde_json::from_str(&json) {
+        Ok(row) => row,
+        Err(err) => {
+            warnings.push(format!(
+                "Dual-dialogue metadata could not be read ({err}); it was ignored."
+            ));
+            return;
+        }
+    };
+    if row.schema > DUAL_GROUPS_SCHEMA {
+        warnings.push(format!(
+            "Dual-dialogue metadata uses newer schema {}; it was ignored.",
+            row.schema
+        ));
+        return;
+    }
+    if !identity.usable && !row.groups.is_empty() {
+        warnings.push(
+            "Dual-dialogue metadata was ignored because block identities are unavailable.".into(),
+        );
+        return;
+    }
+    let by_id: HashMap<Uuid, usize> = project
+        .blocks
+        .iter()
+        .enumerate()
+        .map(|(bi, block)| (block.id, bi))
+        .collect();
+    let before = row.groups.len();
+    let mut kept = 0usize;
+    for record in row.groups {
+        let (Some(&left), Some(&right)) = (by_id.get(&record.left), by_id.get(&record.right))
+        else {
+            continue;
+        };
+        if left >= right
+            || project.blocks[left].element_type != ElementType::Character
+            || project.blocks[right].element_type != ElementType::Character
+            || project.blocks[left].dual.is_some()
+            || project.blocks[right].dual.is_some()
+            || speech_unit_end(&project.blocks, left) != Some(right)
+            || speech_unit_end(&project.blocks, right).is_none_or(|end| end <= right + 1)
+        {
+            continue;
+        }
+        let group = Uuid::new_v4();
+        project.blocks[left].dual = Some(DualMark {
+            group,
+            side: DualSide::Left,
+        });
+        project.blocks[right].dual = Some(DualMark {
+            group,
+            side: DualSide::Right,
+        });
+        kept += 1;
+    }
+    let dropped = before - kept;
+    if dropped > 0 {
+        warnings.push(format!(
+            "{dropped} dual-dialogue group(s) no longer matched adjacent dialogue and were ignored."
+        ));
+    }
+}
+
 /// Save `scriptcraft_ids`, aligned with `scenario` order.
 fn write_identity(conn: &Connection, project: &Project) -> Result<(), KitspError> {
     if !row_writable(conn, IDENTITY_KEY, IDENTITY_SCHEMA)? {
@@ -528,6 +632,33 @@ fn write_scene_meta(conn: &Connection, project: &Project) -> Result<(), KitspErr
         scenes,
     };
     upsert_data(conn, SCENE_META_KEY, &serde_json::to_string(&row)?)
+}
+
+/// Save validated dual-dialogue pairs, dropping orphaned markers.
+fn write_dual_groups(conn: &Connection, project: &Project) -> Result<(), KitspError> {
+    if !row_writable(conn, DUAL_GROUPS_KEY, DUAL_GROUPS_SCHEMA)? {
+        return Ok(());
+    }
+    let groups: Vec<DualGroupRecord> = project
+        .dual_pairs()
+        .into_iter()
+        .map(|pair| DualGroupRecord {
+            left: project.blocks[pair.left].id,
+            right: project.blocks[pair.right].id,
+        })
+        .collect();
+    if groups.is_empty() {
+        conn.execute(
+            "DELETE FROM scenario_data WHERE data_name=?1",
+            params![DUAL_GROUPS_KEY],
+        )?;
+        return Ok(());
+    }
+    let row = DualGroupRow {
+        schema: DUAL_GROUPS_SCHEMA,
+        groups,
+    };
+    upsert_data(conn, DUAL_GROUPS_KEY, &serde_json::to_string(&row)?)
 }
 
 /// A row written by a newer ScriptCraft must not be silently downgraded.
@@ -665,6 +796,7 @@ fn save_file_inner(
         let conn = Connection::open(&tmp)?;
         conn.execute("UPDATE scenario SET text=?1 WHERE id=1", params![xml])?;
         write_identity(&conn, p)?;
+        write_dual_groups(&conn, p)?;
         write_scene_meta(&conn, p)?;
         if let Some(revisions) = revisions {
             write_revisions(&conn, revisions)?;
@@ -930,6 +1062,7 @@ pub fn restore_revision_as_copy(
         let conn = Connection::open(&tmp)?;
         conn.execute("UPDATE scenario SET text=?1 WHERE id=1", params![xml])?;
         write_identity(&conn, &project)?;
+        write_dual_groups(&conn, &project)?;
         write_scene_meta(&conn, &project)?;
         if restored_index.is_some() {
             write_revisions(&conn, &restored_history)?;
@@ -1025,6 +1158,7 @@ fn project_from_baseline(set: &RevisionSet, source: &Project) -> Project {
             kit_uuid,
             element_type: baseline.element_type,
             text: baseline.text.clone(),
+            dual: None,
         });
     }
 

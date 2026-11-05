@@ -19,7 +19,7 @@
 //! never touches `kit_uuid` — assigning it for new scene headings stays a
 //! caller concern until the app migrates to commands (M4/M5).
 
-use crate::model::{ElementType, ScriptBlock};
+use crate::model::{DualMark, ElementType, ScriptBlock};
 use thiserror::Error;
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -133,6 +133,9 @@ pub enum EditCommand {
     /// paragraph and the lower block's first fuse into one (the reverse of a
     /// mid-paragraph [`EditCommand::SplitBlock`]).
     MergeBlocks { bi: usize, fuse: bool },
+    /// Set or clear a dual-dialogue marker on one character block. The app
+    /// applies two of these as one user step, so undo restores both sides.
+    SetDual { bi: usize, mark: Option<DualMark> },
     /// Swap in a whole new block list. Used for structural edits (scene
     /// reordering, bulk operations) where composing per-block commands would
     /// be noisy; the inverse carries the previous list, so undo restores it
@@ -159,6 +162,7 @@ impl EditCommand {
                 apply_split_block(blocks, at, new_type, fuse)
             }
             EditCommand::MergeBlocks { bi, fuse } => apply_merge_blocks(blocks, bi, fuse),
+            EditCommand::SetDual { bi, mark } => Ok(vec![apply_set_dual(blocks, bi, mark)?]),
             EditCommand::ReplaceAll { blocks: new } => {
                 let old = std::mem::replace(blocks, new);
                 Ok(vec![EditCommand::ReplaceAll { blocks: old }])
@@ -463,6 +467,17 @@ fn apply_set_text(
     let old = b.text.clone();
     set_paras(b, text_paras(&text));
     Ok(EditCommand::SetText { bi, text: old })
+}
+
+fn apply_set_dual(
+    blocks: &mut [ScriptBlock],
+    bi: usize,
+    mark: Option<DualMark>,
+) -> Result<EditCommand, EditError> {
+    let b = blocks.get_mut(bi).ok_or(EditError::InvalidBlock(bi))?;
+    let old = b.dual;
+    b.dual = mark;
+    Ok(EditCommand::SetDual { bi, mark: old })
 }
 
 fn apply_insert_block(

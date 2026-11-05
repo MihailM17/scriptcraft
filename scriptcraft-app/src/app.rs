@@ -1135,6 +1135,37 @@ impl ScriptCraftApp {
             .position(|b| b.element_type == ElementType::SceneHeading)
     }
 
+    /// First valid dual-dialogue pair `(left, right)` (interaction tests).
+    #[doc(hidden)]
+    pub fn first_dual_pair_for_test(&self) -> Option<(usize, usize)> {
+        self.project
+            .as_ref()?
+            .dual_pairs()
+            .first()
+            .map(|pair| (pair.left, pair.right))
+    }
+
+    /// Whether the current selection can pair or unpair (interaction tests).
+    #[doc(hidden)]
+    pub fn dual_target_for_test(&self) -> Option<(usize, usize, bool)> {
+        self.dual_dialogue_target()
+    }
+
+    /// Focus the first cue that has a second speech unit below it
+    /// (interaction tests).
+    #[doc(hidden)]
+    pub fn focus_first_dual_candidate_for_test(&mut self) -> Option<(usize, usize)> {
+        let n = self.project.as_ref()?.blocks.len();
+        for bi in 0..n {
+            self.editor2_set_caret((bi, 0, 0));
+            if let Some((left, right, false)) = self.dual_dialogue_target() {
+                self.scroll_to_block(left);
+                return Some((left, right));
+            }
+        }
+        None
+    }
+
     /// Text of a block (interaction tests).
     #[doc(hidden)]
     pub fn block_text(&self, bi: usize) -> Option<String> {
@@ -1523,6 +1554,16 @@ impl ScriptCraftApp {
     }
 
     #[doc(hidden)]
+    pub fn dual_save_note_for_test(&self) -> String {
+        self.dual_save_note()
+    }
+
+    #[doc(hidden)]
+    pub fn dual_export_note_for_test(&self, target: &str) -> String {
+        self.dual_export_note(target)
+    }
+
+    #[doc(hidden)]
     pub fn latest_revision_color(&self) -> Option<RevisionColor> {
         self.revisions.latest().map(|s| s.color)
     }
@@ -1746,9 +1787,9 @@ impl ScriptCraftApp {
             match c {
                 edit::EditCommand::InsertText { at, .. } => at.bi,
                 edit::EditCommand::DeleteRange { start, .. } => start.bi,
-                edit::EditCommand::SetText { bi, .. } | edit::EditCommand::SetType { bi, .. } => {
-                    *bi
-                }
+                edit::EditCommand::SetText { bi, .. }
+                | edit::EditCommand::SetType { bi, .. }
+                | edit::EditCommand::SetDual { bi, .. } => *bi,
                 edit::EditCommand::SplitBlock { at, .. } => at.bi,
                 edit::EditCommand::MergeBlocks { bi, .. } => *bi,
                 // The block inserted at `at` lands after block `at - 1`, and
@@ -1914,9 +1955,9 @@ impl ScriptCraftApp {
             edit::EditCommand::DeleteRange { start, end } => {
                 (start.bi.min(end.bi)..=start.bi.max(end.bi)).any(is_hidden)
             }
-            edit::EditCommand::SetText { bi, .. } | edit::EditCommand::SetType { bi, .. } => {
-                is_hidden(*bi)
-            }
+            edit::EditCommand::SetText { bi, .. }
+            | edit::EditCommand::SetType { bi, .. }
+            | edit::EditCommand::SetDual { bi, .. } => is_hidden(*bi),
             edit::EditCommand::SplitBlock { at, .. } => is_hidden(at.bi) || is_heading(at.bi),
             edit::EditCommand::MergeBlocks { bi, .. } => {
                 is_hidden(*bi) || is_hidden(bi.saturating_sub(1))
@@ -1952,6 +1993,7 @@ impl ScriptCraftApp {
                 edit::EditCommand::DeleteRange { start, .. } => Some(start.bi),
                 edit::EditCommand::SetType { bi, .. } => Some(*bi),
                 edit::EditCommand::SetText { bi, .. } => Some(*bi),
+                edit::EditCommand::SetDual { bi, .. } => Some(*bi),
                 edit::EditCommand::InsertBlock { at, .. } => Some(*at),
                 _ => None,
             })
@@ -2164,7 +2206,7 @@ impl ScriptCraftApp {
                 self.last_autosave = std::time::Instant::now();
                 self.write_backup();
                 self.clear_recovery_files();
-                let note = self.omission_save_note();
+                let note = format!("{}{}", self.omission_save_note(), self.dual_save_note());
                 self.status = match meta {
                     Ok(()) => format!("Saved to {} (.bak backup kept){note}", self.path),
                     Err(e) => format!("Script saved, but title page failed: {e}"),
@@ -2454,7 +2496,7 @@ impl ScriptCraftApp {
         self.clear_recovery_files();
         let p = self.path.clone();
         self.push_recent(&p);
-        let note = self.omission_save_note();
+        let note = format!("{}{}", self.omission_save_note(), self.dual_save_note());
         self.status = format!("Saved to {}{note}", self.path);
     }
 
@@ -2697,7 +2739,11 @@ impl ScriptCraftApp {
     fn save_fountain(&mut self, dst: &std::path::Path) {
         let Some(p) = &self.project else { return };
         let text = scriptcraft_core::fountain::to_fountain(p, &self.meta);
-        let note = self.omission_export_note("Fountain");
+        let note = format!(
+            "{}{}",
+            self.omission_export_note("Fountain"),
+            self.dual_export_note("Fountain")
+        );
         match std::fs::write(dst, text) {
             Ok(()) => self.status = format!("Exported to {}{note}", dst.to_string_lossy()),
             Err(e) => self.status = format!("Export failed: {e}"),
@@ -2961,6 +3007,95 @@ impl ScriptCraftApp {
         self.editor2.scroll_caret = true;
     }
 
+    /// The pair a Cmd/Ctrl+D would create or remove, if the current selection
+    /// names two adjacent speech units (or lies inside an existing pair).
+    fn dual_dialogue_target(&self) -> Option<(usize, usize, bool)> {
+        let p = self.project.as_ref()?;
+        let (a, b) = match self.editor2.selection {
+            Some(sel) => {
+                if sel.anchor <= sel.focus {
+                    (sel.anchor.bi, sel.focus.bi)
+                } else {
+                    (sel.focus.bi, sel.anchor.bi)
+                }
+            }
+            None => {
+                let bi = self.selected_block?;
+                (bi, bi)
+            }
+        };
+        let focus = self.editor2.selection.map(|s| s.focus.bi).unwrap_or(a);
+        if let Some(pair) = p.dual_pair_for_block(focus) {
+            return Some((pair.left, pair.right, true));
+        }
+        let left = scriptcraft_core::model::speech_unit_start(&p.blocks, a)
+            .or_else(|| scriptcraft_core::model::speech_unit_start(&p.blocks, focus))?;
+        let right = scriptcraft_core::model::next_speech_unit(&p.blocks, left)?;
+        let left_end = scriptcraft_core::model::speech_unit_end(&p.blocks, left)?;
+        let right_end = scriptcraft_core::model::speech_unit_end(&p.blocks, right)?;
+        let has_line = |start: usize, end: usize| {
+            p.blocks[start + 1..end].iter().any(|block| {
+                matches!(
+                    block.element_type,
+                    ElementType::Dialogue | ElementType::Parenthetical | ElementType::Lyrics
+                )
+            })
+        };
+        if a < left || b >= right_end || left_end <= left + 1 || right_end <= right + 1 {
+            return None;
+        }
+        (has_line(left, left_end) && has_line(right, right_end)).then_some((left, right, false))
+    }
+
+    /// Join the current/next speech units into a dual pair, or remove the pair
+    /// the caret is in. Both marker changes are one undo step.
+    fn toggle_dual_dialogue(&mut self) {
+        let Some((left, right, paired)) = self.dual_dialogue_target() else {
+            self.status = "Put the caret in a character/dialogue unit with a second unit below it."
+                .to_string();
+            return;
+        };
+        let commands = if paired {
+            vec![
+                edit::EditCommand::SetDual {
+                    bi: left,
+                    mark: None,
+                },
+                edit::EditCommand::SetDual {
+                    bi: right,
+                    mark: None,
+                },
+            ]
+        } else {
+            let group = uuid::Uuid::new_v4();
+            vec![
+                edit::EditCommand::SetDual {
+                    bi: left,
+                    mark: Some(scriptcraft_core::model::DualMark {
+                        group,
+                        side: scriptcraft_core::model::DualSide::Left,
+                    }),
+                },
+                edit::EditCommand::SetDual {
+                    bi: right,
+                    mark: Some(scriptcraft_core::model::DualMark {
+                        group,
+                        side: scriptcraft_core::model::DualSide::Right,
+                    }),
+                },
+            ]
+        };
+        self.apply_editor2_output(crate::script_view::ScriptViewOutput {
+            commands,
+            ..Default::default()
+        });
+        self.status = if paired {
+            "Dual dialogue removed.".to_string()
+        } else {
+            "Dual dialogue: the two speeches now print side by side.".to_string()
+        };
+    }
+
     /// Set the element type of every selected block (Format bar, toolbar
     /// combo and Cmd/Ctrl+digit shortcuts).
     fn set_selected_type(&mut self, t: ElementType) {
@@ -3088,6 +3223,45 @@ impl ScriptCraftApp {
         } else {
             format!(
                 " {n} omitted scene{} stored in ScriptCraft metadata; KIT will show their body.",
+                if n == 1 { "" } else { "s" }
+            )
+        }
+    }
+
+    /// KIT sees the complete script: omission and dual pairing are ScriptCraft
+    /// metadata only. KIT shows an omitted scene's body and a dual pair as two
+    /// ordinary consecutive speeches.
+    fn dual_save_note(&self) -> String {
+        let n = self
+            .project
+            .as_ref()
+            .map(|p| p.dual_pairs().len())
+            .unwrap_or(0);
+        if n == 0 {
+            String::new()
+        } else {
+            format!(
+                " {n} dual-dialogue pair{} stored in ScriptCraft metadata; KIT will show them as ordinary dialogue.",
+                if n == 1 { "" } else { "s" }
+            )
+        }
+    }
+
+    /// FDX carries dual dialogue natively; Fountain has no pairing syntax.
+    fn dual_export_note(&self, target: &str) -> String {
+        if target == "FDX" {
+            return String::new();
+        }
+        let n = self
+            .project
+            .as_ref()
+            .map(|p| p.dual_pairs().len())
+            .unwrap_or(0);
+        if n == 0 {
+            String::new()
+        } else {
+            format!(
+                " {n} dual-dialogue pair{} not represented in {target}; exported as consecutive dialogue.",
                 if n == 1 { "" } else { "s" }
             )
         }
@@ -3294,6 +3468,27 @@ fn draw_minus(painter: &egui::Painter, center: egui::Pos2, size: f32, color: egu
     painter.line_segment(
         [center - egui::vec2(s, 0.0), center + egui::vec2(s, 0.0)],
         egui::Stroke::new(1.6_f32, color),
+    );
+}
+
+/// Two speech columns with a divider, for the dual-dialogue toolbar action.
+fn draw_dual(painter: &egui::Painter, center: egui::Pos2, size: f32, color: egui::Color32) {
+    let w = size * 0.16;
+    let h = size * 0.30;
+    for dx in [-size * 0.22, size * 0.22] {
+        painter.rect_stroke(
+            egui::Rect::from_center_size(center + egui::vec2(dx, 0.0), egui::vec2(w, h)),
+            1.0,
+            egui::Stroke::new(1.4_f32, color),
+            egui::StrokeKind::Inside,
+        );
+    }
+    painter.line_segment(
+        [
+            center - egui::vec2(0.0, h * 0.55),
+            center + egui::vec2(0.0, h * 0.55),
+        ],
+        egui::Stroke::new(1.2_f32, color),
     );
 }
 
@@ -4403,6 +4598,17 @@ impl eframe::App for ScriptCraftApp {
                 if redo {
                     self.do_redo();
                 }
+                // With the native menu installed, its Script ▸ Dual Dialogue
+                // accelerator owns Cmd+D; consuming it here as well would
+                // toggle the pair twice.
+                if self.side_tab == SideTab::Script
+                    && self.pending_save.is_none()
+                    && !self.show_find
+                    && self.menu.is_none()
+                    && ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::D))
+                {
+                    self.toggle_dual_dialogue();
+                }
                 // FastFormat: Cmd/Ctrl+1…0 retypes the selected blocks.
                 if self.side_tab == SideTab::Script
                     && self.pending_save.is_none()
@@ -4589,6 +4795,11 @@ impl ScriptCraftApp {
                     if toolbar_icon_button(ui, can_redo, "Redo (⇧⌘Z)", draw_redo_arrow).clicked()
                     {
                         self.do_redo();
+                    }
+                    let can_dual = editing && self.dual_dialogue_target().is_some();
+                    if toolbar_icon_button(ui, can_dual, "Dual dialogue (⌘D)", draw_dual).clicked()
+                    {
+                        self.toggle_dual_dialogue();
                     }
                     toolbar_sep(ui);
                     let current = self.selected_block.and_then(|bi| {
@@ -4874,6 +5085,11 @@ impl ScriptCraftApp {
                     if self.project.is_some() {
                         self.close_compare();
                         self.show_find = true;
+                    }
+                }
+                menu::ID_DUAL_DIALOGUE => {
+                    if self.side_tab == SideTab::Script && self.compare.is_none() {
+                        self.toggle_dual_dialogue();
                     }
                 }
                 menu::ID_START_REVISION => self.start_revision(),

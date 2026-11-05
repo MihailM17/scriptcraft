@@ -64,13 +64,46 @@ Questions:
 - What happens to `(CONT'D)`, parentheticals and page breaks inside a pair?
 - Does the pairing survive a `.fdx` round-trip through Final Draft?
 
-Sample: `fixtures/real/dual-dialogue.fdx` + `fixtures/real/dual-dialogue.kitsp`.
+Sample: `fixtures/dual-dialogue.fdx` (synthesized from the exact shape used by
+the Final Draft templates bundled with KIT; not a real-production fixture).
 
-Findings:
+Findings (2026-11-04):
 
-- FDX: _to fill_
-- KIT: _to fill_
-- Decision for ScriptCraft: _to fill_
+- FDX: a dual pair is one wrapper paragraph whose child list is two dialogue
+  columns:
+
+  ```xml
+  <Paragraph Type="General">
+    <DualDialogue>
+      <Paragraph Type="Character"><Text>ADA</Text></Paragraph>
+      <Paragraph Type="Parenthetical"><Text>(quietly)</Text></Paragraph>
+      <Paragraph Type="Dialogue"><Text>It is still moving.</Text></Paragraph>
+      <Paragraph Type="Character"><Text>GRACE</Text></Paragraph>
+      <Paragraph Type="Dialogue"><Text>Then we stop it together.</Text></Paragraph>
+    </DualDialogue>
+  </Paragraph>
+  ```
+
+  The wrapper is `Type="General"`; each column starts with a `Character`
+  paragraph and may include `Parenthetical` and `Dialogue` paragraphs. The
+  examined Final Draft templates (KIT's `other/Final Draft templates`, fd9 and
+  fd10) always contain exactly two columns. Character names may already carry
+  `(CONT'D)`; dialogue text can be split across multiple `<Text>` runs.
+  No wrapper-level attribute identifies the pair.
+- KIT: no dual-dialogue representation. Searching KIT Scenarist 0.7.2 rc15
+  source and UI found no `DualDialogue` reader/writer and no pairing command;
+  the only occurrences are inside the bundled Final Draft templates. A KIT
+  import therefore sees the wrapper as an empty `General` paragraph and the
+  two columns as ordinary consecutive dialogue; the pairing is lost. KIT must
+  not be treated as a round-trip carrier for dual dialogue.
+- Decision for ScriptCraft: store the pairing in a versioned
+  `scenario_data.scriptcraft_dual_groups` sidecar keyed by the two stable
+  character-block IDs. KIT ignores the row and still edits the script text
+  normally; reopening in ScriptCraft restores the pairing when both IDs still
+  resolve to adjacent character/dialogue units. FDX import/export maps the
+  sidecar to the `<DualDialogue>` wrapper above. Fountain export keeps the text
+  and reports that pairing is not represented. KIT save warns that KIT will
+  show the pair as ordinary dialogue.
 
 ## Spike 3 — FDX revision metadata
 

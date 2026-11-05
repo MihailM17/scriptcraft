@@ -505,8 +505,123 @@ fn editor2_click_typing_and_undo() {
     );
 }
 
-/// Enter at a block end splits with the KIT continuation type; Backspace at
-/// the new block's start merges it straight back.
+/// Cmd/Ctrl+D pairs the current speech unit with the next one, removes the
+/// pair when pressed again, and both sides undo/redo as one step.
+#[test]
+fn dual_dialogue_shortcut_pairs_unpairs_and_undoes() {
+    let mut h = focused_harness();
+    let (left, right) = h
+        .state_mut()
+        .focus_first_dual_candidate_for_test()
+        .expect("A95 should contain two adjacent speech units");
+    h.run();
+
+    let (target_left, target_right, paired) = h
+        .state()
+        .dual_target_for_test()
+        .expect("the focused cue is pair-able");
+    assert_eq!((target_left, target_right), (left, right));
+    assert!(!paired, "the fixture starts unpaired");
+
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::D);
+    h.run();
+    assert_eq!(
+        h.state().first_dual_pair_for_test(),
+        Some((left, right)),
+        "Cmd+D pairs the selected unit with the next one"
+    );
+    assert!(
+        h.state().status_for_test().contains("side by side"),
+        "status must explain the pairing: {}",
+        h.state().status_for_test()
+    );
+
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::D);
+    h.run();
+    assert_eq!(
+        h.state().first_dual_pair_for_test(),
+        None,
+        "Cmd+D on a pair removes it"
+    );
+    assert!(h.state().status_for_test().contains("removed"));
+
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::D);
+    h.run();
+    assert!(h.state().first_dual_pair_for_test().is_some());
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
+    h.run();
+    assert_eq!(
+        h.state().first_dual_pair_for_test(),
+        None,
+        "one undo removes both markers"
+    );
+    h.key_press_modifiers(
+        egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
+        egui::Key::Z,
+    );
+    h.run();
+    assert_eq!(
+        h.state().first_dual_pair_for_test(),
+        Some((left, right)),
+        "redo restores both markers"
+    );
+}
+
+/// A pairing survives Save and reopening in KIT's sidecar.
+#[test]
+fn dual_dialogue_persists_across_save_and_reopen() {
+    let fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/../fixtures/A95.kitsp");
+    let dir = std::env::temp_dir().join(format!("scriptcraft-dual-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("Dual.kitsp");
+    std::fs::copy(fixture, &path).unwrap();
+    let path_str = path.to_string_lossy().into_owned();
+
+    let mut h = harness(SideTab::Script);
+    h.run();
+    h.state_mut().open_path(&path_str);
+    h.run();
+    let (left, right) = h
+        .state_mut()
+        .focus_first_dual_candidate_for_test()
+        .expect("cue pair");
+    h.run();
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::D);
+    h.run();
+    let paired = h.state().first_dual_pair_for_test().expect("paired");
+    assert_eq!(paired, (left, right));
+    assert!(
+        h.state()
+            .dual_save_note_for_test()
+            .contains("KIT will show"),
+        "saving to KIT must explain that pairing is ScriptCraft-only"
+    );
+    assert!(h
+        .state()
+        .dual_export_note_for_test("Fountain")
+        .contains("not represented"));
+    assert!(h.state().dual_export_note_for_test("FDX").is_empty());
+
+    h.get_by_label("Menu").click();
+    h.run();
+    h.get_by_label("Save").click();
+    h.run();
+    assert!(!h.state().is_dirty());
+
+    let mut reopened = harness(SideTab::Script);
+    reopened.run();
+    reopened.state_mut().open_path(&path_str);
+    reopened.run();
+    assert_eq!(
+        reopened.state().first_dual_pair_for_test(),
+        Some(paired),
+        "the sidecar re-pairs the same two cues"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn editor2_enter_splits_and_backspace_merges() {
     use scriptcraft_core::editing::enter_next;

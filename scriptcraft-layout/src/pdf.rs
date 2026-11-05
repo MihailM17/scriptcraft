@@ -1,3 +1,4 @@
+use crate::dual;
 use crate::paginate::{page_labels, paginate, paginate_with_breaks};
 use crate::place::{ROW_MM, RUSSIAN_GEOMETRY, TEXT_W_MM};
 use crate::wrap::wrap_lines;
@@ -383,11 +384,61 @@ pub fn layout_pages_with_marks_and_latest(
             lines.push(margin_line(footer, MarginBand::Footer));
         }
         for chunk in &page.chunks {
-            let b = &renum[chunk.bi];
-            let revision = revisions[chunk.bi];
             for _ in 0..chunk.top {
                 lines.push(PrintLine::blank());
             }
+            if let Some(dual_chunk) = &chunk.dual {
+                let rows = dual::build_rows(&renum, dual_chunk.pair, &RUSSIAN);
+                if dual_chunk.contd_left || dual_chunk.contd_right {
+                    for (right, cue_bi, contd) in [
+                        (false, dual_chunk.pair.left, dual_chunk.contd_left),
+                        (true, dual_chunk.pair.right, dual_chunk.contd_right),
+                    ] {
+                        if !contd {
+                            continue;
+                        }
+                        if let Some(cue) = cue_name_for(&renum, cue_bi + 1) {
+                            let text = format!("{cue} (CONT'D)");
+                            let mut line = PrintLine::text_line(
+                                MARGIN_L + dual::cue_x_mm(&text, right),
+                                text,
+                                true,
+                            );
+                            line.revision = revisions[cue_bi];
+                            lines.push(line);
+                        }
+                    }
+                }
+                let start = dual_chunk.start_row.min(rows.rows.len());
+                let end = dual_chunk.end_row.min(rows.rows.len());
+                for row in &rows.rows[start..end] {
+                    for cell in [&row.left, &row.right].into_iter().flatten() {
+                        let mut line = PrintLine::text_line(
+                            MARGIN_L + cell.x_mm,
+                            cell.text.clone(),
+                            cell.bold,
+                        );
+                        line.revision = cell.span.map(|span| revisions[span.bi]).unwrap_or(None);
+                        lines.push(line);
+                    }
+                }
+                let mut more = |right: bool, cue_bi: usize| {
+                    let text = "(MORE)".to_string();
+                    let x = MARGIN_L + dual::more_x_mm(right) - 6.0 * CHAR_MM;
+                    let mut line = PrintLine::text_line(x, text, false);
+                    line.revision = revisions[cue_bi];
+                    lines.push(line);
+                };
+                if dual_chunk.more_left {
+                    more(false, dual_chunk.pair.left);
+                }
+                if dual_chunk.more_right {
+                    more(true, dual_chunk.pair.right);
+                }
+                continue;
+            }
+            let b = &renum[chunk.bi];
+            let revision = revisions[chunk.bi];
             let (x, bold) = match b.element_type {
                 ElementType::SceneHeading => (MARGIN_L, true),
                 ElementType::SceneCharacters => (MARGIN_L, false),

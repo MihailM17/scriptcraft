@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+<FinalDraft DocumentType="Script" Template="No" Version="1">
+<Content>
+<Paragraph Type="Scene Heading" Number="1">
+<Text>INT. CONTROL ROOM - NIGHT</Text>
+</Paragraph>
+<Paragraph Type="Action">
+<Text>Two operators watch the same screen.</Text>
+</Paragraph>
+<Paragraph Type="General">
+<DualDialogue>
+<Paragraph Type="Character">
+<Text>ADA</Text>
+</Paragraph>
+<Paragraph Type="Parenthetical">
+<Text>(quietly)</Text>
+</Paragraph>
+<Paragraph Type="Dialogue">
+<Text>It is still moving.</Text>
+</Paragraph>
+<Paragraph Type="Character">
+<Text>GRACE</Text>
+</Paragraph>
+<Paragraph Type="Dialogue">
+<Text>Then we stop it together.</Text>
+</Paragraph>
+</DualDialogue>
+</Paragraph>
+<Paragraph Type="Action">
+<Text>They reach for the same switch.</Text>
+</Paragraph>
+</Content>
+</FinalDraft>

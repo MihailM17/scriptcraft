@@ -286,6 +286,7 @@ fn duplicate_headings_keep_distinct_ids_across_reorder() {
             kit_uuid: Some("{duplicate-one}".into()),
             element_type: ElementType::SceneHeading,
             text: "INT. ROOM - DAY".into(),
+            dual: None,
         },
         ScriptBlock::new(ElementType::Action, "First scene.".into()),
         ScriptBlock {
@@ -293,6 +294,7 @@ fn duplicate_headings_keep_distinct_ids_across_reorder() {
             kit_uuid: Some("{duplicate-two}".into()),
             element_type: ElementType::SceneHeading,
             text: "INT. ROOM - DAY".into(),
+            dual: None,
         },
         ScriptBlock::new(ElementType::Action, "Second scene.".into()),
     ];
@@ -447,6 +449,7 @@ fn retain_scene_meta_drops_unknown_and_duplicate_ids() {
             kit_uuid: None,
             element_type: ElementType::SceneHeading,
             text: "INT. ROOM - DAY".into(),
+            dual: None,
         }],
         ..Default::default()
     };

@@ -11,11 +11,14 @@
 //! edge of the template's text column. Painters multiply by the current zoom;
 //! zoom can therefore never change a single line break.
 
+use crate::dual;
 use crate::paginate;
 use crate::wrap;
 use scriptcraft_core::editing::{cue_name_for, TemplateMetrics};
-use scriptcraft_core::model::{DocumentView, ElementType, ScriptBlock};
+use scriptcraft_core::model::{dual_pairs, DocumentView, ElementType, ScriptBlock};
 use scriptcraft_core::page_lock::PageLock;
+
+pub use crate::dual::SourceSpan;
 
 /// Millimetres per character cell (0.6 em at 12 pt).
 pub const MM_PER_CELL: f32 = 2.54;
@@ -65,16 +68,6 @@ pub enum LineRole {
     SceneNumber,
     /// The synthetic `OMITTED` line that replaces an omitted scene's body.
     Omitted,
-}
-
-/// Char range of a body line within its source paragraph.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SourceSpan {
-    pub bi: usize,
-    pub para: usize,
-    /// Char offset (not bytes) into the paragraph.
-    pub start: usize,
-    pub end: usize,
 }
 
 /// One paintable grid row.
@@ -264,6 +257,23 @@ pub fn relayout_from(
         .iter()
         .filter_map(|l| l.span.map(|s| s.bi))
         .min()?;
+    // The resume page may start inside a dual pair (the first affected block
+    // is the one after it). Rebuild from the pair's left cue, or the pager
+    // would see only the right half and drop the columns.
+    let mut bi0 = bi0;
+    if let Some(pair) = dual_pairs(blocks)
+        .into_iter()
+        .find(|pair| pair.left < bi0 && bi0 < pair.right_end)
+    {
+        bi0 = pair.left;
+        if let Some(first_pair_page) = old.pages.iter().position(|page| {
+            page.lines
+                .iter()
+                .any(|l| l.span.is_some_and(|s| s.bi == pair.left))
+        }) {
+            p0 = p0.min(first_pair_page);
+        }
+    }
 
     let heading_ordinals = heading_ordinals(blocks);
     let mut pager = paginate::Pager::new(&blocks[bi0..], m);
@@ -283,6 +293,12 @@ pub fn relayout_from(
         let mut page = pager.pages()[i].clone();
         for c in &mut page.chunks {
             c.bi += bi0;
+            if let Some(dual) = &mut c.dual {
+                dual.pair.left += bi0;
+                dual.pair.right += bi0;
+                dual.pair.left_end += bi0;
+                dual.pair.right_end += bi0;
+            }
         }
         let label = if p0 + i > 0 {
             Some((p0 + i + 1).to_string())
@@ -353,6 +369,100 @@ fn layout_page(
     let mut row = 0usize;
     for chunk in &page.chunks {
         row += chunk.top;
+        if let Some(dual_chunk) = &chunk.dual {
+            let rows = dual::build_rows(blocks, dual_chunk.pair, m);
+            let base = row;
+            let mut offset = 0usize;
+            if dual_chunk.contd_left || dual_chunk.contd_right {
+                for (right, cue_bi, contd) in [
+                    (false, dual_chunk.pair.left, dual_chunk.contd_left),
+                    (true, dual_chunk.pair.right, dual_chunk.contd_right),
+                ] {
+                    if !contd {
+                        continue;
+                    }
+                    if let Some(cue) = cue_name_for(blocks, cue_bi + 1) {
+                        let text = format!("{cue} (CONT'D)");
+                        let revision_bi = view
+                            .and_then(|v| v.revision_sources.get(cue_bi).copied().flatten())
+                            .or(if view.is_none() { Some(cue_bi) } else { None });
+                        lines.push(PlacedLine {
+                            row: base,
+                            x_mm: dual::cue_x_mm(&text, right),
+                            text,
+                            role: LineRole::ContdCue,
+                            bold: true,
+                            italic: false,
+                            right_aligned: false,
+                            span: None,
+                            source_bi: revision_bi,
+                        });
+                    }
+                }
+                offset = 1;
+            }
+            let start = dual_chunk.start_row.min(rows.rows.len());
+            let end = dual_chunk.end_row.min(rows.rows.len());
+            for (k, dual_row) in rows.rows[start..end].iter().enumerate() {
+                let line_row = base + offset + k;
+                for cell in [&dual_row.left, &dual_row.right].into_iter().flatten() {
+                    let revision_bi = cell.span.and_then(|s| revision_source(view, s.bi));
+                    let span = cell.span.map(|s| SourceSpan {
+                        bi: view
+                            .and_then(|v| v.sources.get(s.bi).copied().flatten())
+                            .unwrap_or(s.bi),
+                        ..s
+                    });
+                    lines.push(PlacedLine {
+                        row: line_row,
+                        x_mm: cell.x_mm,
+                        text: cell.text.clone(),
+                        role: LineRole::Body,
+                        bold: cell.bold,
+                        italic: cell.italic,
+                        right_aligned: false,
+                        span,
+                        source_bi: revision_bi,
+                    });
+                }
+            }
+            if dual_chunk.more_left || dual_chunk.more_right {
+                let more_row = base + offset + (end - start);
+                if dual_chunk.more_left {
+                    let cue_bi = dual_chunk.pair.left;
+                    lines.push(PlacedLine {
+                        row: more_row,
+                        x_mm: dual::more_x_mm(false),
+                        text: "(MORE)".to_string(),
+                        role: LineRole::More,
+                        bold: false,
+                        italic: false,
+                        right_aligned: true,
+                        span: None,
+                        source_bi: revision_source(view, cue_bi),
+                    });
+                }
+                if dual_chunk.more_right {
+                    let cue_bi = dual_chunk.pair.right;
+                    lines.push(PlacedLine {
+                        row: more_row,
+                        x_mm: dual::more_x_mm(true),
+                        text: "(MORE)".to_string(),
+                        role: LineRole::More,
+                        bold: false,
+                        italic: false,
+                        right_aligned: true,
+                        span: None,
+                        source_bi: revision_source(view, cue_bi),
+                    });
+                }
+            }
+            row = base
+                + offset
+                + (end - start)
+                + usize::from(dual_chunk.more_left || dual_chunk.more_right);
+            continue;
+        }
         let Some(block) = blocks.get(chunk.bi) else {
             continue;
         };
@@ -470,6 +580,11 @@ fn heading_ordinals(blocks: &[ScriptBlock]) -> Vec<Option<usize>> {
             }
         })
         .collect()
+}
+
+fn revision_source(view: Option<&DocumentView>, bi: usize) -> Option<usize> {
+    view.and_then(|v| v.revision_sources.get(bi).copied().flatten())
+        .or(if view.is_none() { Some(bi) } else { None })
 }
 
 fn indent_mm(t: ElementType, g: &TemplateGeometry) -> f32 {

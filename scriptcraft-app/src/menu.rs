@@ -22,6 +22,7 @@ pub const ID_PREVIEW: &str = "kit.preview";
 pub const ID_UNDO: &str = "kit.undo";
 pub const ID_REDO: &str = "kit.redo";
 pub const ID_FIND: &str = "kit.find";
+pub const ID_DUAL_DIALOGUE: &str = "kit.dual_dialogue";
 pub const ID_START_REVISION: &str = "kit.start_revision";
 pub const ID_CLEAR_REVISIONS: &str = "kit.clear_revisions";
 pub const ID_REVISIONS: &str = "kit.revisions";
@@ -111,6 +112,9 @@ impl NativeMenu {
         let sep_c = PredefinedMenuItem::separator();
         let edit = Submenu::with_items("Edit", true, &[&undo, &redo, &sep_c, &find])?;
 
+        let dual_dialogue =
+            MenuItem::with_id(ID_DUAL_DIALOGUE, "Dual Dialogue", true, acc("CmdOrCtrl+D"));
+        let sep_dual = PredefinedMenuItem::separator();
         let start_revision = MenuItem::with_id(ID_START_REVISION, "Start Revision", true, None);
         let revisions = MenuItem::with_id(ID_REVISIONS, "Revision History...", true, None);
         let compare_drafts = MenuItem::with_id(ID_COMPARE_DRAFTS, "Compare Drafts...", true, None);
@@ -121,6 +125,8 @@ impl NativeMenu {
             "Script",
             true,
             &[
+                &dual_dialogue,
+                &sep_dual,
                 &start_revision,
                 &revisions,
                 &compare_drafts,
