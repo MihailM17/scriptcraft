@@ -18,15 +18,15 @@ Status legend: `[ ]` to do `[-]` in progress `[x]` done `[!]` blocked
 
 | Field | Value |
 |---|---|
-| Date | 2026-11-04 |
+| Date | 2026-11-05 |
 | Project | ScriptCraft — free, open-source, revision-first screenwriting studio |
 | Repo | `/Users/mihailmihaylov/Documents/Dev_work/scriptcraft` |
-| Branch / commit | `main` after the v0.8 settings/menu/shortcut polish; tags `v0.7.0` at `9ce2e0e`, `v0.7.1` at `d8b17de` (maintenance) and `v0.7.2` at `8b75f9a`; v0.8 M0 at `9bd4839`, M1 at `1948c62`, M2 at `b660219`, M3 at `2708838`, M4 at `e840a67`; UI polish at `41ea7d5`. |
+| Branch / commit | `main` after v0.8 M5; tags `v0.7.0` at `9ce2e0e`, `v0.7.1` at `d8b17de` (maintenance) and `v0.7.2` at `8b75f9a`; v0.8 M0 at `9bd4839`, M1 at `1948c62`, M2 at `b660219`, M3 at `2708838`, M4 at `e840a67`; UI polish at `41ea7d5`; M5 at `b52b512`. |
 | Rust workspace | `scriptcraft-core`, `scriptcraft-app`, `scriptcraft-layout` (`Cargo.toml`, resolver 2) |
 | App crate version | `scriptcraft-app 0.7.2` at tag `v0.7.2`; `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
 | Distribution | **v0.7.2 released 2026-11-02** — <https://github.com/MihailM17/scriptcraft/releases/tag/v0.7.2> packages v0.8 M0–M4, KIT version writing, the Settings cleanup and the Dock-quit fix. Last published release: v0.7.2. |
-| Current one-liner | Free, open-source, revision-first studio: one screenplay engine (Editor 2.0), crash-safe saves + recovery, revision colours/marks/pages, compare/restore, omitted scenes, smart screenplay paste, KIT version write/import, revision headers/title-page fields, production page locks with A/B page numbers and FDX revision metadata, KIT-style editor/navigator settings, macOS standard selection keys, a compact file-focused Menu, OFL fonts, FDX/Fountain import/export; PDF export paginates exactly like the editor. |
-| Next release | **v0.8 revision-complete** — dual dialogue, title-page editor and revision summary remain (M5–M7); signed builds and runtime CI (M8). See `docs/v0.8-plan.md`. |
+| Current one-liner | Free, open-source, revision-first studio: one screenplay engine (Editor 2.0), crash-safe saves + recovery, revision colours/marks/pages, compare/restore, omitted scenes, smart screenplay paste, KIT version write/import, revision headers/title-page fields, production page locks with A/B page numbers and FDX revision metadata, dual dialogue side by side in editor/PDF with FDX interchange, KIT-style editor/navigator settings, macOS standard selection keys, a compact file-focused Menu, OFL fonts, FDX/Fountain import/export; PDF export paginates exactly like the editor. |
+| Next release | **v0.8 revision-complete** — title-page editor and revision summary remain (M6–M7); signed builds and runtime CI (M8). See `docs/v0.8-plan.md`. |
 
 **Positioning (locked 2026-10-26):** the free, open-source, revision-first
 screenwriting studio. Moat = the production revision workflow (colours, locked
@@ -78,16 +78,17 @@ writing features.
   - `wrap.rs` — greedy wrap ported 1:1 from `editing` + source char spans (ranges tile each paragraph); `row_count` is the count-only twin used on hot paths.
   - `paginate.rs` — page breaker ported 1:1 from `editing::paginate_m`; `Chunk`/`Page`; stepwise `Pager` state machine (M5 perf) so `place::relayout_from` can replay pagination from any page.
   - `place.rs` — `PlacedLine`s in document units (rows × `ROW_MM`; x in mm): body lines with `SourceSpan`, `(CONT'D)` cues, `(MORE)` rows, margin scene numbers, page numbers. `relayout_from` rebuilds only the pages an edit can have affected and splices the rest (differentially fuzzed against `layout` in `tests/relayout.rs`).
+  - `dual.rs` — one aligned two-column row model (67.5 mm + 12.5 mm gap + 67.5 mm) shared by the editor, incremental relayout and PDF.
   - `pdf.rs` — print layout + `printpdf` renderer (title page, scene/page numbers, watermarks, current-revision margin bars/pages).
   - `tests/` — `parity.rs` (golden hashes), `pagination.rs`, `place.rs`, `pdf_export.rs`, `scale.rs` (500-page timings).
 - `scriptcraft-app/src/`
-  - `app.rs` — 7,983-line monolith: all state, IO, views, editor, export dialog. v0.8 extracts compare, title page and revision summary into their own modules.
+  - `app.rs` — 8,195-line monolith: all state, IO, views, editor, export dialog. v0.8 extracts compare, title page and revision summary into their own modules.
   - `script_view.rs` — Editor 2.0 `ScriptView` (the only editor since M5): paints `DocLayout` pages (visible pages only; zoom scales geometry, never breaks) and edits by emitting `core::edit` commands — selection/caret, keyboard/pointer, cross-block clipboard, IME, command-history undo/redo.
   - `theme.rs` — palette + egui style. `menu.rs` — native macOS menu. `main.rs`, `lib.rs`.
   - `assets/fonts/` — Courier Prime (Regular/Bold/Italic), PT Sans, IBM Plex Mono; all OFL, license texts in `assets/fonts/licenses/`.
 - `scriptcraft-app/tests/` — `ui_snapshots.rs` (kittest snapshots), `interaction.rs` (end-to-end clicks/keys), `snapshots/*.png`.
 - `scriptcraft-core/tests/test_a95.rs` — fixture tests (21 scenes, 352 blocks).
-- `fixtures/A95.kitsp` — 21-scene Bulgarian project, the compatibility fixture; `fixtures/example.fdx` — small Final Draft sample for the FDX tests.
+- `fixtures/A95.kitsp` — 21-scene Bulgarian project, the compatibility fixture; `fixtures/example.fdx` — small Final Draft sample for the FDX tests; `fixtures/dual-dialogue.fdx` — synthesized `<DualDialogue>` wrapper fixture.
 - `fixtures/real/` — permission-cleared real-world compatibility corpus; policy and provenance template in `fixtures/real/README.md` (empty until a file is cleared).
 - `docs/kit-design.md`, `docs/kitsp-format.md` — reverse-engineered KIT notes;
   `docs/v0.7-plan.md` — revision-workflow milestones; `docs/v0.8-plan.md` —
@@ -176,7 +177,7 @@ direct workspace dependencies. There is still no benchmark harness.
 - [x] **Proprietary fonts bundled.** Fixed 2026-10-19: `cour*.ttf` removed;
   editor and PDF now use Courier Prime (OFL), OFL license texts added for all
   bundled fonts, root `LICENSE` (Apache-2.0) and `NOTICE` added.
-- [ ] **Monolith.** `app.rs` is 7,039 lines; state, IO, layout and UI are entangled. v0.8 extracts views one at a time; no big-bang rewrite.
+- [ ] **Monolith.** `app.rs` is 8,195 lines; state, IO, layout and UI are entangled. v0.8 extracts views one at a time; no big-bang rewrite.
 - [ ] **No revision summary.** The diff engine, compare workspace and restore-as-copy exist (v0.8 M1–M3), but the revision summary is still pending. Planned: v0.8 M7.
 - [x] **Stable block/scene identity now survives `.kitsp` reopen.** Fixed
   2026-10-26 (v0.8 M0): versioned `scenario_data.scriptcraft_ids` and
@@ -188,10 +189,10 @@ direct workspace dependencies. There is still no benchmark harness.
 - [-] **Production layer is partial.** Revision sets/colours/marks, revision
   pages, FDX metadata, KIT version import, header/footer labels and Revised
   title-page fields and page locks with A/B page numbers shipped 2026-10-21.
-  Compare/restore and sidecar-only omitted scenes shipped in v0.8 M1–M4. Still
-  open: FDX revision-ID import, dual dialogue, title-page editor, revision
+  Compare/restore, sidecar-only omitted scenes and dual dialogue shipped in
+  v0.8 M1–M5. Still open: FDX revision-ID import, title-page editor, revision
   summary, spellcheck, and an FDX omission mapping (waiting on a real Final
-  Draft fixture). Planned: v0.8 M5–M7.
+  Draft fixture). Planned: v0.8 M6–M7.
 - [ ] **No signed/notarised builds or auto-update.** macOS is ad-hoc signed;
   Windows/Linux packages are unsigned, and Windows/Linux have no GUI smoke
   test. Planned: v0.8 M8.
@@ -255,7 +256,8 @@ Source of truth: `docs/v0.8-plan.md`.
   marker; body excluded from pages/stats; page labels carried across the gap.
   Sidecar-only; FDX mapping deferred until a real Final Draft fixture. Shipped
   2026-10-30.
-- [ ] **M5 Dual dialogue** — two-column layout, editor/PDF parity, FDX.
+- [x] **M5 Dual dialogue** — two-column layout, editor/PDF parity, FDX.
+  Shipped 2026-11-05.
 - [ ] **M6 Title-page editor** — form + live preview, PDF/FDX parity.
 - [ ] **M7 Revision summary** — scene/page/block counts, CSV + printable view.
 - [ ] **M8 Release engineering** — signing/notarisation, auto-update, runtime
@@ -316,8 +318,9 @@ gate**. M8 runs in parallel; M9 is continuous.
 - [x] Smart screenplay paste — plain text from chat/other editors is split
       into headings, action, cues, parentheticals, dialogue and transitions;
       prose without screenplay structure keeps plain paste. Shipped 2026-10-30.
-- [ ] M5 — dual dialogue: two-column layout, editor/PDF parity, FDX, undo.
-      Gate at week 8; move to v0.8.1 if pagination is at risk.
+- [x] M5 — dual dialogue: two-column layout, editor/PDF parity, FDX, undo.
+      Shipped 2026-11-05 (`b52b512`); page locks anchor split pairs at the
+      left cue and label continuation pages as inserted pages.
 - [ ] M6 — title-page editor with live PDF-matched preview.
 - [ ] M7 — revision summary (scene/page/block counts, CSV, printable view).
 - [-] M8 — Dock/AppleScript quit fixed 2026-11-02 (native `terminate:`
@@ -1421,6 +1424,46 @@ Newest entries at the bottom. Each entry: date — what changed / what was found
     `git diff --check` green.
   - Next: v0.8 M5 dual dialogue (FDX/KIT representation spike first), then M6
     title-page editor and M7 revision summary.
+
+- **2026-11-05** — v0.8 M5 done: **dual dialogue** in the editor, PDF and FDX.
+  - Format spike: Final Draft's wrapper is one
+    `<Paragraph Type="General"><DualDialogue>…</DualDialogue></Paragraph>`
+    whose children are two column runs (`Character`, optional
+    `Parenthetical`, `Dialogue`). KIT Scenarist 0.7.2 rc15 has no dual-dialogue
+    reader/writer or command; a KIT import sees the wrapper as an empty
+    `General` paragraph and two ordinary consecutive speeches. Decision:
+    Sidecar-only pairing in versioned `scenario_data.scriptcraft_dual_groups`,
+    keyed by both stable character-block IDs; FDX carries it natively, Fountain
+    and KIT keep the text and report the loss. Synthetic fixture:
+    `fixtures/dual-dialogue.fdx`.
+  - Model/edit: `ScriptBlock.dual: Option<DualMark { group, side }>`,
+    `DualSide`, `DualPair`, speech-unit helpers and `Project::dual_pairs`.
+    `EditCommand::SetDual` pairs/unpairs both markers as one undo step.
+  - Layout: shared `scriptcraft-layout/src/dual.rs` row model (67.5 mm
+    columns, 12.5 mm gap, 4.5 mm dialogue inset, 3.0 mm parenthetical inset).
+    Pagination splits between rows, repeats `(CONT'D)` only for columns that
+    continue, and reserves `(MORE)` per open column. The editor, incremental
+    relayout and PDF all consume the same rows. `relayout_from` rewinds a
+    resume point inside a pair to its left cue; page locks anchor a split pair
+    at `(pair.left, 0)` and label continuation pages `3A`, `3B`, ….
+  - App: Cmd/Ctrl+D, toolbar button and native `Script ▸ Dual Dialogue`
+    pair/unpair the unit at the caret. The in-app Cmd+D handler is skipped
+    when the native menu owns the accelerator, so the pair cannot toggle
+    twice. KIT saves warn that KIT shows the pair as ordinary dialogue;
+    Fountain export warns that pairing is not represented; FDX exports the
+    native wrapper.
+  - Tests: `scriptcraft-core/tests/test_dual.rs` (6),
+    `scriptcraft-layout/tests/dual.rs` (4: side-by-side editor/PDF parity,
+    long split with `(MORE)`/`(CONT'D)`, dual edit relayout, block-after-pair
+    relayout), 2 interaction tests (pair/unpair/undo/redo + save/reopen
+    persistence and warnings), new `18_dual_dialogue.png`; all 17 UI snapshots
+    pass.
+  - Gate: `cargo fmt --check`, `cargo clippy --workspace --all-targets --
+    -D warnings`, `cargo test --workspace` (43 interaction + 17 snapshots;
+    core 94 lib + 6 dual + identity/a95; layout 22 unit + dual/parity/
+    pagination/place/pdf/relayout/scale), `cargo deny check` and
+    `git diff --check` green. Commit `b52b512`.
+  - Next: v0.8 M6 title-page editor, then M7 revision summary.
 
 ---
 
