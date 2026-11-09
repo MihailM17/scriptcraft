@@ -18,15 +18,15 @@ Status legend: `[ ]` to do `[-]` in progress `[x]` done `[!]` blocked
 
 | Field | Value |
 |---|---|
-| Date | 2026-11-05 |
+| Date | 2026-11-09 |
 | Project | ScriptCraft — free, open-source, revision-first screenwriting studio |
 | Repo | `/Users/mihailmihaylov/Documents/Dev_work/scriptcraft` |
-| Branch / commit | `main` after v0.8 M5; tags `v0.7.0` at `9ce2e0e`, `v0.7.1` at `d8b17de` (maintenance) and `v0.7.2` at `8b75f9a`; v0.8 M0 at `9bd4839`, M1 at `1948c62`, M2 at `b660219`, M3 at `2708838`, M4 at `e840a67`; UI polish at `41ea7d5`; M5 at `b52b512`. |
+| Branch / commit | `main` after v0.8 M6; tags `v0.7.0` at `9ce2e0e`, `v0.7.1` at `d8b17de` (maintenance) and `v0.7.2` at `8b75f9a`; v0.8 M0 at `9bd4839`, M1 at `1948c62`, M2 at `b660219`, M3 at `2708838`, M4 at `e840a67`; UI polish at `41ea7d5`; M5 at `b52b512`; dependency refresh at `c1990ca`; M6 at `c80c50c`. |
 | Rust workspace | `scriptcraft-core`, `scriptcraft-app`, `scriptcraft-layout` (`Cargo.toml`, resolver 2) |
 | App crate version | `scriptcraft-app 0.7.2` at tag `v0.7.2`; `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
 | Distribution | **v0.7.2 released 2026-11-02** — <https://github.com/MihailM17/scriptcraft/releases/tag/v0.7.2> packages v0.8 M0–M4, KIT version writing, the Settings cleanup and the Dock-quit fix. Last published release: v0.7.2. |
-| Current one-liner | Free, open-source, revision-first studio: one screenplay engine (Editor 2.0), crash-safe saves + recovery, revision colours/marks/pages, compare/restore, omitted scenes, smart screenplay paste, KIT version write/import, revision headers/title-page fields, production page locks with A/B page numbers and FDX revision metadata, dual dialogue side by side in editor/PDF with FDX interchange, KIT-style editor/navigator settings, macOS standard selection keys, a compact file-focused Menu, OFL fonts, FDX/Fountain import/export; PDF export paginates exactly like the editor. |
-| Next release | **v0.8 revision-complete** — title-page editor and revision summary remain (M6–M7); signed builds and runtime CI (M8). See `docs/v0.8-plan.md`. |
+| Current one-liner | Free, open-source, revision-first studio: one screenplay engine (Editor 2.0), crash-safe saves + recovery, revision colours/marks/pages, compare/restore, omitted scenes, smart screenplay paste, KIT version write/import, revision headers/title-page fields, production page locks with A/B page numbers and FDX revision metadata, dual dialogue side by side in editor/PDF with FDX interchange, a title-page editor whose A4 preview is the exporter's own layout, KIT-style editor/navigator settings, macOS standard selection keys, a compact file-focused Menu, OFL fonts, FDX/Fountain import/export; PDF export paginates exactly like the editor. |
+| Next release | **v0.8 revision-complete** — revision summary remains (M7); signed builds and runtime CI (M8). See `docs/v0.8-plan.md`. |
 
 **Positioning (locked 2026-10-26):** the free, open-source, revision-first
 screenwriting studio. Moat = the production revision workflow (colours, locked
@@ -82,7 +82,7 @@ writing features.
   - `pdf.rs` — print layout + `printpdf` renderer (title page, scene/page numbers, watermarks, current-revision margin bars/pages).
   - `tests/` — `parity.rs` (golden hashes), `pagination.rs`, `place.rs`, `pdf_export.rs`, `scale.rs` (500-page timings).
 - `scriptcraft-app/src/`
-  - `app.rs` — 8,195-line monolith: all state, IO, views, editor, export dialog. v0.8 extracts compare, title page and revision summary into their own modules.
+  - `app.rs` — 8,284-line monolith: all state, IO, views, editor, export dialog. `title_page.rs` holds the M6 form and PDF-matched preview; the revision summary (M7) will be its own module.
   - `script_view.rs` — Editor 2.0 `ScriptView` (the only editor since M5): paints `DocLayout` pages (visible pages only; zoom scales geometry, never breaks) and edits by emitting `core::edit` commands — selection/caret, keyboard/pointer, cross-block clipboard, IME, command-history undo/redo.
   - `theme.rs` — palette + egui style. `menu.rs` — native macOS menu. `main.rs`, `lib.rs`.
   - `assets/fonts/` — Courier Prime (Regular/Bold/Italic), PT Sans, IBM Plex Mono; all OFL, license texts in `assets/fonts/licenses/`.
@@ -189,10 +189,10 @@ direct workspace dependencies. There is still no benchmark harness.
 - [-] **Production layer is partial.** Revision sets/colours/marks, revision
   pages, FDX metadata, KIT version import, header/footer labels and Revised
   title-page fields and page locks with A/B page numbers shipped 2026-10-21.
-  Compare/restore, sidecar-only omitted scenes and dual dialogue shipped in
-  v0.8 M1–M5. Still open: FDX revision-ID import, title-page editor, revision
-  summary, spellcheck, and an FDX omission mapping (waiting on a real Final
-  Draft fixture). Planned: v0.8 M6–M7.
+  Compare/restore, sidecar-only omitted scenes, dual dialogue and the
+  title-page editor shipped in v0.8 M1–M6. Still open: FDX revision-ID import,
+  revision summary, spellcheck, and an FDX omission mapping (waiting on a real
+  Final Draft fixture). Planned: v0.8 M7.
 - [ ] **No signed/notarised builds or auto-update.** macOS is ad-hoc signed;
   Windows/Linux packages are unsigned, and Windows/Linux have no GUI smoke
   test. Planned: v0.8 M8.
@@ -258,7 +258,8 @@ Source of truth: `docs/v0.8-plan.md`.
   2026-10-30.
 - [x] **M5 Dual dialogue** — two-column layout, editor/PDF parity, FDX.
   Shipped 2026-11-05.
-- [ ] **M6 Title-page editor** — form + live preview, PDF/FDX parity.
+- [x] **M6 Title-page editor** — form + live preview, PDF/FDX parity.
+  Shipped 2026-11-09.
 - [ ] **M7 Revision summary** — scene/page/block counts, CSV + printable view.
 - [ ] **M8 Release engineering** — signing/notarisation, auto-update, runtime
   CI, Dock quit, font metrics, benchmarks.
@@ -321,7 +322,8 @@ gate**. M8 runs in parallel; M9 is continuous.
 - [x] M5 — dual dialogue: two-column layout, editor/PDF parity, FDX, undo.
       Shipped 2026-11-05 (`b52b512`); page locks anchor split pairs at the
       left cue and label continuation pages as inserted pages.
-- [ ] M6 — title-page editor with live PDF-matched preview.
+- [x] M6 — title-page editor with a live preview painted from the exporter's
+      own layout. Shipped 2026-11-09 (`c80c50c`).
 - [ ] M7 — revision summary (scene/page/block counts, CSV, printable view).
 - [-] M8 — Dock/AppleScript quit fixed 2026-11-02 (native `terminate:`
       routed through the save prompt). Remaining: signing/notarisation,
@@ -1464,6 +1466,41 @@ Newest entries at the bottom. Each entry: date — what changed / what was found
     pagination/place/pdf/relayout/scale), `cargo deny check` and
     `git diff --check` green. Commit `b52b512`.
   - Next: v0.8 M6 title-page editor, then M7 revision summary.
+
+- **2026-11-09** — v0.8 M6 done: **title-page editor with a live PDF preview**.
+  - Form/preview: new `scriptcraft-app/src/title_page.rs` renders Research ▸
+    Title Page as a KIT-mapped form beside an A4 page. The preview paints
+    `layout_title_page_with_latest` — the exporter's own line list — and uses
+    shared `TITLE_PAGE_METRICS` / `title_page_line_y_mm`, so the form cannot
+    drift from the PDF. Fields: title→`name`, credit→`genre`, author,
+    director (ScriptCraft extension), source→`additional_info`,
+    contact→`contacts`, draft date→`year`; the Revision section reads the
+    latest `RevisionSet` and shows the colour/name/date printed in the Revised
+    block; header/footer are script-page tokens edited in the same form.
+  - Layout: long titles, oversized words and each contact line wrap at the
+    147.5 mm / 58-character column instead of running off the page. Short
+    fields keep KIT's measured slots (title 16, values from 20, contacts 39,
+    year 57, Revised from 60).
+  - Preservation: the app remembers the loaded logline/synopsis plain text
+    and rewrites that HTML only when the writer changed the buffer. Untouched
+    A95 Qt rich text survives save and recovery byte-for-byte; editing one
+    buffer leaves the other alone.
+  - Interchange: FDX exports source and `Draft date:` and imports both;
+    Fountain prefers `meta.title` over the project title and emits `Source:`
+    (import maps it back to `additional_info`).
+  - Tests: 4 interaction tests (all-field save/reopen, untouched rich HTML,
+    Cyrillic/empty/long fields, typing in the real widget), a PDF page-1
+    parity test (wrapped Cyrillic title, split contacts, Revised block), the
+    fountain/fdx unit tests, and `19_title_page.png`; all 18 UI snapshots
+    pass. `cargo deny` needed a dependency refresh first (`c1990ca`:
+    rusqlite 0.41.1 / libsqlite3-sys 0.39.1 for CVE-2026-119375 and
+    async-executor 1.14.1 for the yank).
+  - Gate: `cargo fmt --check`, `cargo clippy --workspace --all-targets --
+    -D warnings`, `cargo test --workspace` (47 interaction + 18 snapshots;
+    core 96 lib + 23 identity/a95/omitted/restore/dual; layout 23 unit +
+    parity/pagination/place/pdf/relayout/scale), `cargo deny check` and
+    `git diff --check` green. Commit `c80c50c`.
+  - Next: v0.8 M7 revision summary.
 
 ---
 
