@@ -7,12 +7,20 @@ use crate::model::{ElementType, Project, ScriptBlock};
 /// that would otherwise parse as scene headings.
 pub fn to_fountain(p: &Project, meta: &crate::kitsp::Metadata) -> String {
     let mut out = String::new();
-    out.push_str(&format!("Title: {}\n", p.title));
+    let title = if meta.title.trim().is_empty() {
+        p.title.trim()
+    } else {
+        meta.title.trim()
+    };
+    out.push_str(&format!("Title: {title}\n"));
     if !meta.genre.trim().is_empty() {
         out.push_str(&format!("Credit: {}\n", meta.genre.trim()));
     }
     if !meta.author.trim().is_empty() {
         out.push_str(&format!("Author: {}\n", meta.author.trim()));
+    }
+    if !meta.additional_info.trim().is_empty() {
+        out.push_str(&format!("Source: {}\n", meta.additional_info.trim()));
     }
     if !meta.year.trim().is_empty() {
         out.push_str(&format!("Draft date: {}\n", meta.year.trim()));
@@ -117,6 +125,38 @@ mod tests {
     }
 
     #[test]
+    fn title_page_edits_flow_to_fountain() {
+        let p = Project {
+            title: "Old Title".into(),
+            ..Default::default()
+        };
+        let meta = crate::kitsp::Metadata {
+            title: "New Title".into(),
+            genre: "Drama".into(),
+            author: "Me".into(),
+            additional_info: "Based on the novel".into(),
+            contacts: "me@example.com".into(),
+            year: "2026".into(),
+            ..Default::default()
+        };
+        let f = to_fountain(&p, &meta);
+        assert!(f.starts_with("Title: New Title\n"));
+        assert!(f.contains("Credit: Drama\n"));
+        assert!(f.contains("Author: Me\n"));
+        assert!(f.contains("Source: Based on the novel\n"));
+        assert!(f.contains("Draft date: 2026\n"));
+        assert!(f.contains("Contact: me@example.com\n"));
+        let (q, m) = parse_fountain(&f);
+        assert_eq!(q.title, "New Title");
+        assert_eq!(m.title, "New Title");
+        assert_eq!(m.credit, "Drama");
+        assert_eq!(m.author, "Me");
+        assert_eq!(m.source, "Based on the novel");
+        assert_eq!(m.draft_date, "2026");
+        assert_eq!(m.contact, "me@example.com");
+    }
+
+    #[test]
     fn escapes_action_lines_looking_like_scenes() {
         let p = Project {
             title: "T".into(),
@@ -210,6 +250,7 @@ pub struct FountainMeta {
     pub title: String,
     pub credit: String,
     pub author: String,
+    pub source: String,
     pub contact: String,
     pub draft_date: String,
 }
@@ -270,6 +311,7 @@ pub fn parse_fountain(text: &str) -> (Project, FountainMeta) {
                 "title" => meta.title = v.trim().to_string(),
                 "credit" => meta.credit = v.trim().to_string(),
                 "author" | "authors" => meta.author = v.trim().to_string(),
+                "source" => meta.source = v.trim().to_string(),
                 "contact" | "contacts" => {
                     if meta.contact.is_empty() {
                         meta.contact = v.trim().to_string();

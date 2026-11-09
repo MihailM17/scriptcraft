@@ -141,3 +141,75 @@ fn a95_pdf_matches_editor_layout() {
         assert_eq!(want, got, "page {} differs from the editor", pi + 1);
     }
 }
+
+/// The title-page preview is the PDF exporter's own line list: every visible
+/// line (Cyrillic, wrapped title, split contacts, Revised block) must appear
+/// on exported page 1 in the same order.
+#[test]
+fn title_page_preview_matches_exported_first_page() {
+    use scriptcraft_core::revision::RevisionHistory;
+    use scriptcraft_layout::pdf;
+
+    let p = kitsp::load_file(FIXTURE).expect("fixture must load");
+    let mut meta = kitsp::load_metadata(FIXTURE).expect("load metadata");
+    meta.title = "ЗАГЛАВИЕ НА ЕДИН МНОГО ДЪЛЪГ ФИЛМ, КОЙТО ПРОДЪЛЖАВА И ПРОДЪЛЖАВА".into();
+    meta.contacts = "ул. Примерна 1\nСофия 1000".into();
+    meta.year = "09.11.2026".into();
+
+    let read = |name: &str| {
+        std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../scriptcraft-app/assets/fonts")
+                .join(name),
+        )
+        .expect("bundled font")
+    };
+    let fonts = pdf::ExportFonts {
+        regular: &read("CourierPrime-Regular.ttf"),
+        bold: &read("CourierPrime-Bold.ttf"),
+        fallback_regular: &read("IBMPlexMono-Regular.ttf"),
+        fallback_bold: &read("IBMPlexMono-Bold.ttf"),
+    };
+
+    let mut history = RevisionHistory::default();
+    history.start(&p.blocks, "Blue".into(), "09.11.2026".into(), 0);
+    let latest = history.latest();
+    let preview = pdf::layout_title_page_with_latest(&meta, latest);
+    let underlined = preview.iter().filter(|l| l.underline).count();
+    assert_eq!(underlined, 2, "the long title must wrap");
+
+    let bytes = pdf::to_pdf_bytes_with_marks_and_latest(
+        &p,
+        &meta,
+        &pdf::ExportOptions::default(),
+        &[],
+        latest,
+        &fonts,
+    )
+    .expect("pdf renders");
+    let doc = lopdf::Document::load_mem(&bytes).expect("PDF must parse");
+    let first = *doc.get_pages().keys().next().expect("title page");
+    let text = doc.extract_text(&[first]).unwrap_or_default();
+
+    // printpdf splits a line into one text op per font run, and the
+    // fallback run boundaries show up as whitespace in extraction. Compare
+    // the characters in order, ignoring whitespace, so Cyrillic fallback
+    // text is checked just like the Latin lines.
+    let squeeze = |s: &str| -> String { s.chars().filter(|c| !c.is_whitespace()).collect() };
+    let squash = squeeze(&text);
+    let mut cursor = 0;
+    for line in preview.iter().filter(|l| !l.text.is_empty()) {
+        let want = squeeze(&line.text);
+        if want.is_empty() {
+            continue;
+        }
+        let found = squash[cursor..].find(&want).unwrap_or_else(|| {
+            panic!(
+                "page 1 is missing {:?} after offset {cursor}; page text: {squash:?}",
+                line.text
+            )
+        });
+        cursor += found + want.len();
+    }
+    assert!(squash.contains("REVISED"), "revision block missing");
+}

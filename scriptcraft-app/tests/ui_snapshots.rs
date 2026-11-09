@@ -5,7 +5,7 @@
 //! PNGs land in `scriptcraft-app/tests/snapshots/`.
 
 use egui_kittest::Harness;
-use scriptcraft_app::app::{self, ScriptCraftApp, SideTab};
+use scriptcraft_app::app::{self, ResearchPane, ScriptCraftApp, SideTab};
 
 fn harness(tab: SideTab, scroll_block: Option<usize>) -> Harness<'static, ScriptCraftApp> {
     Harness::builder()
@@ -112,6 +112,14 @@ fn snap_17_settings_navigator() {
     h.get_by_label("Navigator").click();
     h.run();
     h.snapshot("17_settings_navigator");
+}
+
+#[test]
+fn snap_19_title_page() {
+    let mut h = harness(SideTab::Research, None);
+    h.state_mut().set_research_pane(ResearchPane::TitlePage);
+    h.run();
+    h.snapshot("19_title_page");
 }
 
 #[test]

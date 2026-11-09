@@ -2029,3 +2029,217 @@ fn omitted_scene_persists_with_page_locks_and_keeps_later_numbers() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Every title-page field writes through the normal metadata path and comes
+/// back after reopening; the preview paints the PDF exporter's own lines.
+#[test]
+fn title_page_edits_save_and_reopen() {
+    let fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/../fixtures/A95.kitsp");
+    let dir = std::env::temp_dir().join(format!("scriptcraft-titlepage-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("TitlePage.kitsp");
+    std::fs::copy(fixture, &path).unwrap();
+    let path_str = path.to_string_lossy().into_owned();
+
+    let mut h = harness(SideTab::Research);
+    h.run();
+    h.state_mut().open_path(&path_str);
+    h.state_mut().goto_tab(SideTab::Research);
+    h.state_mut().set_research_pane(ResearchPane::TitlePage);
+    h.run();
+    assert!(h.query_by_label("Title Page").is_some());
+    assert!(h.query_by_label("Script Page Header / Footer").is_some());
+
+    h.state_mut()
+        .set_title_field_for_test("title", "THE LAST RUN");
+    h.state_mut().set_title_field_for_test("genre", "Thriller");
+    h.state_mut()
+        .set_title_field_for_test("author", "Mihail Mihaylov");
+    h.state_mut()
+        .set_title_field_for_test("source", "Based on a true story");
+    h.state_mut()
+        .set_title_field_for_test("contact", "writer@example.com\n+359 2 123 4567");
+    h.state_mut()
+        .set_title_field_for_test("draft_date", "09.11.2026");
+    h.state_mut()
+        .set_title_field_for_test("header", "{revision}");
+    h.state_mut().set_title_field_for_test("footer", "{page}");
+    assert!(
+        h.state().meta_dirty_for_test(),
+        "field edits mark the title page dirty before the flush"
+    );
+    h.run();
+
+    let preview = h.state().title_page_preview_for_test();
+    for text in [
+        "THE LAST RUN",
+        "Thriller",
+        "Mihail Mihaylov",
+        "Based on a true story",
+        "writer@example.com",
+        "+359 2 123 4567",
+        "09.11.2026",
+    ] {
+        assert!(
+            preview.iter().any(|l| l.text == text),
+            "preview is missing {text:?}: {preview:?}"
+        );
+    }
+
+    assert!(h.state_mut().save_meta_for_test(), "title page must save");
+    h.run();
+    assert!(!h.state().is_dirty());
+
+    let mut reopened = harness(SideTab::Research);
+    reopened.run();
+    reopened.state_mut().open_path(&path_str);
+    reopened.run();
+    let m = reopened.state().title_meta_for_test();
+    assert_eq!(m.title, "THE LAST RUN");
+    assert_eq!(m.genre, "Thriller");
+    assert_eq!(m.author, "Mihail Mihaylov");
+    assert_eq!(m.additional_info, "Based on a true story");
+    assert_eq!(m.contacts, "writer@example.com\n+359 2 123 4567");
+    assert_eq!(m.year, "09.11.2026");
+    assert_eq!(m.header, "{revision}");
+    assert_eq!(m.footer, "{page}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Untouched KIT logline/synopsis rich text must survive a save byte-for-byte;
+/// editing one buffer rewrites only that buffer (and as plain text).
+#[test]
+fn untouched_kit_rich_text_is_not_rewritten() {
+    let fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/../fixtures/A95.kitsp");
+    let dir = std::env::temp_dir().join(format!("scriptcraft-titlehtml-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("TitleHtml.kitsp");
+    std::fs::copy(fixture, &path).unwrap();
+    let path_str = path.to_string_lossy().into_owned();
+
+    let before = scriptcraft_core::kitsp::load_metadata(&path_str).unwrap();
+    assert!(
+        before.logline_html.contains("<p style="),
+        "the fixture must carry KIT's rich HTML"
+    );
+    assert!(before.synopsis_html.contains("<p style="));
+
+    let mut h = harness(SideTab::Research);
+    h.run();
+    h.state_mut().open_path(&path_str);
+    h.state_mut().goto_tab(SideTab::Research);
+    h.state_mut().set_research_pane(ResearchPane::TitlePage);
+    h.run();
+    // Change a different field only: the rich text must not be touched.
+    h.state_mut()
+        .set_title_field_for_test("title", "A95 DIRECTOR'S CUT");
+    assert!(h.state_mut().save_meta_for_test());
+    let after = scriptcraft_core::kitsp::load_metadata(&path_str).unwrap();
+    assert_eq!(after.title, "A95 DIRECTOR'S CUT");
+    assert_eq!(after.logline_html, before.logline_html);
+    assert_eq!(after.synopsis_html, before.synopsis_html);
+
+    // Editing the logline buffer rewrites that field, and only that field.
+    h.state_mut()
+        .set_title_buffer_for_test(false, "A new logline.");
+    h.run();
+    assert!(h.state_mut().save_meta_for_test());
+    let edited = scriptcraft_core::kitsp::load_metadata(&path_str).unwrap();
+    assert_eq!(
+        edited.logline_html,
+        scriptcraft_core::kitsp::text_to_html("A new logline.")
+    );
+    assert_eq!(edited.synopsis_html, before.synopsis_html);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Cyrillic, empty and over-long fields stay on the title page, and the
+/// metadata survives a save/reopen round trip.
+#[test]
+fn title_page_handles_cyrillic_empty_and_long_fields() {
+    let fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/../fixtures/A95.kitsp");
+    let dir = std::env::temp_dir().join(format!("scriptcraft-titleuni-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("TitleUnicode.kitsp");
+    std::fs::copy(fixture, &path).unwrap();
+    let path_str = path.to_string_lossy().into_owned();
+
+    let mut h = harness(SideTab::Research);
+    h.run();
+    h.state_mut().open_path(&path_str);
+    h.state_mut().goto_tab(SideTab::Research);
+    h.state_mut().set_research_pane(ResearchPane::TitlePage);
+    h.state_mut()
+        .set_title_field_for_test("title", "ЗАГЛАВИЕ НА ФИЛМ");
+    h.state_mut().set_title_field_for_test("genre", "");
+    h.state_mut().set_title_field_for_test("author", "");
+    h.state_mut().set_title_field_for_test("source", "");
+    h.state_mut()
+        .set_title_field_for_test("contact", "ул. Примерна 1\nСофия");
+    h.run();
+    let preview = h.state().title_page_preview_for_test();
+    assert!(preview.iter().any(|l| l.text == "ЗАГЛАВИЕ НА ФИЛМ"));
+    assert!(preview.iter().any(|l| l.text == "ул. Примерна 1"));
+    assert!(preview.iter().any(|l| l.text == "София"));
+    assert!(
+        preview.iter().all(|l| l.text != "Thriller/Horror"),
+        "cleared fields must leave the page"
+    );
+
+    assert!(h.state_mut().save_meta_for_test());
+    let mut reopened = harness(SideTab::Research);
+    reopened.run();
+    reopened.state_mut().open_path(&path_str);
+    reopened.run();
+    let m = reopened.state().title_meta_for_test();
+    assert_eq!(m.title, "ЗАГЛАВИЕ НА ФИЛМ");
+    assert_eq!(m.author, "");
+    assert_eq!(m.contacts, "ул. Примерна 1\nСофия");
+
+    // A title longer than the 58-character column wraps instead of running
+    // off the page, still underlined as the title.
+    reopened.state_mut().set_title_field_for_test(
+        "title",
+        "THE EXTRAORDINARILY LONG TITLE OF A FILM THAT KEEPS GOING AND GOING",
+    );
+    reopened.run();
+    let preview = reopened.state().title_page_preview_for_test();
+    let underlined = preview.iter().filter(|l| l.underline).count();
+    assert_eq!(underlined, 2, "long title must wrap in the preview too");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The form itself accepts typed text (not just the test setter).
+#[test]
+fn title_page_form_accepts_typed_text() {
+    use egui::accesskit::Role;
+
+    let mut h = harness(SideTab::Research);
+    h.run();
+    h.state_mut().set_research_pane(ResearchPane::TitlePage);
+    h.run();
+
+    let title = h
+        .get_all_by_role(Role::TextInput)
+        .find(|n| n.value().as_deref() == Some("A95"))
+        .expect("the title field should show the KIT title");
+    title.focus();
+    h.run();
+    h.get_all_by_role(Role::TextInput)
+        .find(|n| n.value().as_deref() == Some("A95"))
+        .expect("the title field should still be there")
+        .type_text("!");
+    h.run();
+
+    let title = &h.state().title_meta_for_test().title;
+    assert!(
+        title.contains('!') && title.contains("A95"),
+        "typing in the form must edit the title: {title:?}"
+    );
+}

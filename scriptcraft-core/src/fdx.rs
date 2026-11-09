@@ -240,10 +240,14 @@ pub fn to_fdx_with_revisions_and_latest(
     };
     push_title_para(&mut out, "Center", title.trim());
     push_title_para(&mut out, "Center", meta.genre.trim());
-    if !meta.genre.trim().is_empty() || !meta.author.trim().is_empty() {
+    if !meta.genre.trim().is_empty()
+        || !meta.author.trim().is_empty()
+        || !meta.additional_info.trim().is_empty()
+    {
         push_title_para(&mut out, "Center", "Written by");
     }
     push_title_para(&mut out, "Center", meta.author.trim());
+    push_title_para(&mut out, "Center", meta.additional_info.trim());
     for line in meta
         .contacts
         .lines()
@@ -251,6 +255,13 @@ pub fn to_fdx_with_revisions_and_latest(
         .filter(|l| !l.is_empty())
     {
         push_title_para(&mut out, "Left", line);
+    }
+    if !meta.year.trim().is_empty() {
+        push_title_para(
+            &mut out,
+            "Center",
+            &format!("Draft date: {}", meta.year.trim()),
+        );
     }
     if let Some(set) = latest {
         push_title_para(&mut out, "Center", "Revised");
@@ -291,6 +302,18 @@ fn is_written_by(s: &str) -> bool {
         s.trim().trim_end_matches(':').to_lowercase().as_str(),
         "written by" | "by" | "a screenplay by" | "a play by" | "screenplay by" | "story by"
     )
+}
+
+/// `Draft date: 2026-11-05` on a title page; returns the value.
+fn draft_date_value(s: &str) -> Option<String> {
+    let (key, value) = s.split_once(':')?;
+    if key.trim().eq_ignore_ascii_case("draft date") {
+        let value = value.trim();
+        if !value.is_empty() {
+            return Some(value.to_string());
+        }
+    }
+    None
 }
 
 #[derive(Default)]
@@ -507,8 +530,11 @@ pub fn from_fdx(xml: &str) -> Result<(Project, Metadata), FdxError> {
     }
 
     // Title page: first centered line is the title; the marker "Written by"
-    // separates the genre/credit slot from the author; left lines are the
-    // contacts block. This matches both our export and common FD files.
+    // separates the genre/credit slot from the author; the next centered
+    // line is the source/additional line, a `Draft date:` line carries the
+    // year, and left lines are the contacts block. This matches our export
+    // and common FD files; `Revised` starts the revision trailer and is not
+    // title-page text.
     let centered: Vec<String> = title_paras
         .iter()
         .filter(|(a, _)| a.eq_ignore_ascii_case("center"))
@@ -526,18 +552,46 @@ pub fn from_fdx(xml: &str) -> Result<(Project, Metadata), FdxError> {
                     .find(|t| !t.is_empty())
                     .map(|t| t.to_string())
                     .unwrap_or_default();
-                meta.author = after[k + 1..]
-                    .iter()
-                    .find(|t| !t.is_empty())
-                    .map(|t| t.to_string())
-                    .unwrap_or_default();
+                let mut author_done = false;
+                for text in &after[k + 1..] {
+                    let text = text.trim();
+                    if text.is_empty() {
+                        continue;
+                    }
+                    if text.eq_ignore_ascii_case("revised") {
+                        break;
+                    }
+                    if let Some(date) = draft_date_value(text) {
+                        meta.year = date;
+                        continue;
+                    }
+                    if !author_done {
+                        meta.author = text.to_string();
+                        author_done = true;
+                    } else if meta.additional_info.is_empty() {
+                        meta.additional_info = text.to_string();
+                    }
+                }
             }
             None => {
-                meta.author = after
+                let mut rest = after
                     .iter()
-                    .find(|t| !t.is_empty())
-                    .map(|t| t.to_string())
-                    .unwrap_or_default();
+                    .map(|t| t.trim())
+                    .filter(|t| !t.is_empty())
+                    .peekable();
+                if let Some(author) = rest.next() {
+                    meta.author = author.to_string();
+                }
+                for text in rest {
+                    if text.eq_ignore_ascii_case("revised") {
+                        break;
+                    }
+                    if let Some(date) = draft_date_value(text) {
+                        meta.year = date;
+                    } else if meta.additional_info.is_empty() {
+                        meta.additional_info = text.to_string();
+                    }
+                }
             }
         }
     }
@@ -700,6 +754,22 @@ mod tests {
             assert_eq!(a.element_type, b.element_type, "type for {:?}", a.text);
             assert_eq!(a.text, b.text);
         }
+    }
+
+    #[test]
+    fn round_trips_source_and_draft_date() {
+        let p = sample_project();
+        let mut meta = sample_meta();
+        meta.additional_info = "Based on the novel by A. Writer".into();
+        meta.year = "Draft 2 — 05.11.2026".into();
+        let xml = to_fdx(&p, &meta);
+        assert!(xml.contains("<Text>Based on the novel by A. Writer</Text>"));
+        assert!(xml.contains("<Text>Draft date: Draft 2 — 05.11.2026</Text>"));
+        let (_, m) = from_fdx(&xml).unwrap();
+        assert_eq!(m.additional_info, meta.additional_info);
+        assert_eq!(m.year, meta.year);
+        assert_eq!(m.author, meta.author);
+        assert_eq!(m.contacts, meta.contacts);
     }
 
     #[test]

@@ -561,6 +561,11 @@ pub struct ScriptCraftApp {
     research: Vec<kitsp::ResearchEntry>,
     title_logline: String,
     title_synopsis: String,
+    /// Plain-text logline/synopsis as loaded (or last written). The HTML is
+    /// rewritten only when one of these buffers changed, so untouched KIT
+    /// rich text survives an open and save byte-for-byte.
+    title_logline_loaded: String,
+    title_synopsis_loaded: String,
     research_sel: Option<i64>,
     research_edit: Option<ResearchEdit>,
     /// Decoded picture of the open research entry (id, bytes hash, texture).
@@ -670,6 +675,8 @@ impl Default for ScriptCraftApp {
             research: Vec::new(),
             title_logline: String::new(),
             title_synopsis: String::new(),
+            title_logline_loaded: String::new(),
+            title_synopsis_loaded: String::new(),
             research_sel: None,
             research_edit: None,
             research_tex: None,
@@ -1065,6 +1072,67 @@ impl ScriptCraftApp {
     /// Test hook: select a research pane.
     pub fn set_research_pane(&mut self, pane: ResearchPane) {
         self.research_pane = pane;
+    }
+
+    /// Test hook: the title-page form's current values.
+    #[doc(hidden)]
+    pub fn title_meta_for_test(&self) -> &Metadata {
+        &self.meta
+    }
+
+    /// Test hook: unsaved title-page edits?
+    #[doc(hidden)]
+    pub fn meta_dirty_for_test(&self) -> bool {
+        self.meta_dirty
+    }
+
+    /// Test hook: set one title-page field the way typing in the Research
+    /// form would (marks the metadata dirty).
+    #[doc(hidden)]
+    pub fn set_title_field_for_test(&mut self, field: &str, value: &str) {
+        match field {
+            "title" => self.meta.title = value.to_string(),
+            "genre" => self.meta.genre = value.to_string(),
+            "author" => self.meta.author = value.to_string(),
+            "director" => self.meta.director = value.to_string(),
+            "source" => self.meta.additional_info = value.to_string(),
+            "contact" => self.meta.contacts = value.to_string(),
+            "draft_date" => self.meta.year = value.to_string(),
+            "header" => self.meta.header = value.to_string(),
+            "footer" => self.meta.footer = value.to_string(),
+            _ => panic!("unknown title-page field: {field}"),
+        }
+        self.meta_dirty = true;
+    }
+
+    /// Test hook: the plain-text logline/synopsis buffers.
+    #[doc(hidden)]
+    pub fn title_buffers_for_test(&self) -> (&str, &str) {
+        (&self.title_logline, &self.title_synopsis)
+    }
+
+    /// Test hook: edit a title-page buffer the way typing would.
+    #[doc(hidden)]
+    pub fn set_title_buffer_for_test(&mut self, synopsis: bool, value: &str) {
+        if synopsis {
+            self.title_synopsis = value.to_string();
+        } else {
+            self.title_logline = value.to_string();
+        }
+        self.meta_dirty = true;
+    }
+
+    /// Test hook: the live title-page preview (the PDF exporter's own lines).
+    #[doc(hidden)]
+    pub fn title_page_preview_for_test(&self) -> Vec<scriptcraft_layout::pdf::PrintLine> {
+        crate::title_page::preview_lines(&self.meta, self.revisions.latest())
+    }
+
+    /// Test hook: save the title page through the normal metadata path.
+    #[doc(hidden)]
+    pub fn save_meta_for_test(&mut self) -> bool {
+        self.do_save_meta();
+        !self.meta_dirty
     }
 
     /// Test hook: select a statistics pane.
@@ -2121,8 +2189,7 @@ impl ScriptCraftApp {
                 self.stats_pane = StatsPane::Summary;
                 self.stats_gen = Self::now_stamp();
                 self.meta_dirty = false;
-                self.title_logline = kitsp::html_to_text(&self.meta.logline_html.clone());
-                self.title_synopsis = kitsp::html_to_text(&self.meta.synopsis_html.clone());
+                self.reload_title_buffers();
                 self.refresh_derived();
                 let s = &self.stats;
                 let pages = self.page_count();
@@ -2337,8 +2404,12 @@ impl ScriptCraftApp {
         if kitsp::write_recovery_file_with_revisions(&dst, origin, p, &self.revisions).is_ok() {
             // Carry the title page too, including unsaved field edits.
             let mut m = self.meta.clone();
-            m.logline_html = kitsp::text_to_html(&self.title_logline);
-            m.synopsis_html = kitsp::text_to_html(&self.title_synopsis);
+            if self.title_logline != self.title_logline_loaded {
+                m.logline_html = kitsp::text_to_html(&self.title_logline);
+            }
+            if self.title_synopsis != self.title_synopsis_loaded {
+                m.synopsis_html = kitsp::text_to_html(&self.title_synopsis);
+            }
             let _ = kitsp::save_metadata(&dst, &m);
         }
     }
@@ -2489,6 +2560,7 @@ impl ScriptCraftApp {
         }
         self.cards = kitsp::load_cards(&self.path).unwrap_or_default();
         self.meta = kitsp::load_metadata(&self.path).unwrap_or_default();
+        self.reload_title_buffers();
         self.research = kitsp::load_research(&self.path).unwrap_or_default();
         self.dirty = false;
         self.last_autosave = std::time::Instant::now();
@@ -2620,6 +2692,7 @@ impl ScriptCraftApp {
             title: fmeta.title.clone(),
             genre: fmeta.credit.clone(),
             author: fmeta.author.clone(),
+            additional_info: fmeta.source.clone(),
             contacts: fmeta.contact.clone(),
             year: fmeta.draft_date.clone(),
             ..Default::default()
@@ -2668,8 +2741,7 @@ impl ScriptCraftApp {
         }
         self.project = Some(p);
         self.meta = meta;
-        self.title_logline = kitsp::html_to_text(&self.meta.logline_html);
-        self.title_synopsis = kitsp::html_to_text(&self.meta.synopsis_html);
+        self.reload_title_buffers();
         self.meta_dirty = true;
         self.path = String::new();
         self.selected_scene = 0;
@@ -2796,13 +2868,28 @@ impl ScriptCraftApp {
         }
     }
 
+    /// Reload the plain-text logline/synopsis buffers from `meta` and remember
+    /// them as the loaded baseline. Until one changes, the original KIT HTML
+    /// is kept as-is.
+    fn reload_title_buffers(&mut self) {
+        self.title_logline = kitsp::html_to_text(&self.meta.logline_html);
+        self.title_synopsis = kitsp::html_to_text(&self.meta.synopsis_html);
+        self.title_logline_loaded = self.title_logline.clone();
+        self.title_synopsis_loaded = self.title_synopsis.clone();
+    }
+
     /// Push the plain-text logline/synopsis buffers into the rich-HTML
-    /// fields. Must run before any metadata write.
+    /// fields. Must run before any metadata write. Only a buffer the user
+    /// actually changed is converted, so untouched KIT markup survives.
     fn sync_meta_buffers(&mut self) {
-        let logline = kitsp::text_to_html(&self.title_logline);
-        let synopsis = kitsp::text_to_html(&self.title_synopsis);
-        self.meta.logline_html = logline;
-        self.meta.synopsis_html = synopsis;
+        if self.title_logline != self.title_logline_loaded {
+            self.meta.logline_html = kitsp::text_to_html(&self.title_logline);
+            self.title_logline_loaded = self.title_logline.clone();
+        }
+        if self.title_synopsis != self.title_synopsis_loaded {
+            self.meta.synopsis_html = kitsp::text_to_html(&self.title_synopsis);
+            self.title_synopsis_loaded = self.title_synopsis.clone();
+        }
     }
 
     /// Write title-page metadata to the current project path (no status
@@ -3993,7 +4080,7 @@ fn kit_field_visuals(ui: &egui::Ui) -> egui::Visuals {
 }
 
 /// KIT labeled single-line field (label above, filled box below).
-fn kit_field(ui: &mut egui::Ui, label: &str, text: &mut String) -> bool {
+pub(crate) fn kit_field(ui: &mut egui::Ui, label: &str, text: &mut String) -> bool {
     ui.label(egui::RichText::new(label).size(13.0));
     ui.add_space(4.0);
     let v = kit_field_visuals(ui);
@@ -4013,7 +4100,12 @@ fn kit_field(ui: &mut egui::Ui, label: &str, text: &mut String) -> bool {
     changed
 }
 
-fn kit_field_multi(ui: &mut egui::Ui, label: &str, text: &mut String, rows: usize) -> bool {
+pub(crate) fn kit_field_multi(
+    ui: &mut egui::Ui,
+    label: &str,
+    text: &mut String,
+    rows: usize,
+) -> bool {
     ui.label(egui::RichText::new(label).size(13.0));
     ui.add_space(4.0);
     let v = kit_field_visuals(ui);
@@ -4488,7 +4580,7 @@ fn kit_report_header(ui: &mut egui::Ui, project: &str, subtitle: &str, generated
     ui.add_space(14.0);
 }
 
-fn kit_section(ui: &mut egui::Ui, text: &str) {
+pub(crate) fn kit_section(ui: &mut egui::Ui, text: &str) {
     ui.label(egui::RichText::new(text).size(15.0).strong());
     ui.add_space(6.0);
 }
@@ -6450,15 +6542,8 @@ impl ScriptCraftApp {
     }
 
     fn research_titlepage_pane(&mut self, ui: &mut egui::Ui) {
-        let mut dirty = false;
-        kit_section(ui, "Title Page");
-        dirty |= kit_field(ui, "Script Name", &mut self.meta.title);
-        dirty |= kit_field(ui, "Genre", &mut self.meta.genre);
-        dirty |= kit_field(ui, "Author", &mut self.meta.author);
-        dirty |= kit_field(ui, "Additional", &mut self.meta.additional_info);
-        dirty |= kit_field_multi(ui, "Contacts", &mut self.meta.contacts, 3);
-        dirty |= kit_field(ui, "Year", &mut self.meta.year);
-        if dirty {
+        let latest = self.revisions.latest().cloned();
+        if crate::title_page::title_page_editor(ui, &mut self.meta, latest.as_ref()) {
             self.meta_dirty = true;
         }
     }

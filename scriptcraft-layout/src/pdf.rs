@@ -65,6 +65,34 @@ const TITLE_VALUE_DY: f32 = 1.5;
 const TITLE_CONTACT_DY: f32 = 1.8;
 const TITLE_YEAR_DY: f32 = 2.6;
 
+/// Geometry the title-page editor preview needs to paint the same page as
+/// the PDF exporter. Sharing it keeps the preview from drifting.
+#[derive(Clone, Copy, Debug)]
+pub struct TitlePageMetrics {
+    pub page_w_mm: f32,
+    pub page_h_mm: f32,
+    pub margin_top_mm: f32,
+    pub baseline_off_mm: f32,
+    pub pitch_mm: f32,
+    pub char_mm: f32,
+    pub font_pt: f32,
+}
+
+pub const TITLE_PAGE_METRICS: TitlePageMetrics = TitlePageMetrics {
+    page_w_mm: PAGE_W,
+    page_h_mm: PAGE_H,
+    margin_top_mm: MARGIN_T,
+    baseline_off_mm: BASELINE_OFF,
+    pitch_mm: PITCH_MM,
+    char_mm: CHAR_MM,
+    font_pt: FONT_PT,
+};
+
+/// Baseline of title-page line `index` measured from the page bottom (mm).
+pub fn title_page_line_y_mm(index: usize, line: &PrintLine) -> f32 {
+    PAGE_H - MARGIN_T - BASELINE_OFF - index as f32 * PITCH_MM - line.dy_mm
+}
+
 /// Toggles mirrored by KIT's Export Script dialog.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExportOptions {
@@ -507,10 +535,57 @@ pub fn layout_pages_with_marks_and_latest(
     out
 }
 
+/// Greedy wrap at the title page's 58-character column width. A single
+/// oversized word is split across lines so it cannot run off the page.
+fn wrap_title_line(text: &str, max: usize) -> Vec<String> {
+    if max == 0 {
+        return vec![text.to_string()];
+    }
+    let mut out: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    for word in text.split_whitespace() {
+        let wc = word.chars().count();
+        if wc > max {
+            if !cur.is_empty() {
+                out.push(std::mem::take(&mut cur));
+            }
+            let chars: Vec<char> = word.chars().collect();
+            let chunks: Vec<String> = chars
+                .chunks(max)
+                .map(|c| c.iter().collect::<String>())
+                .collect();
+            for chunk in &chunks[..chunks.len().saturating_sub(1)] {
+                out.push(chunk.clone());
+            }
+            if let Some(last) = chunks.last() {
+                cur = last.clone();
+            }
+            continue;
+        }
+        let extra = if cur.is_empty() { wc } else { wc + 1 };
+        if cur.chars().count() + extra > max {
+            out.push(std::mem::take(&mut cur));
+        }
+        if !cur.is_empty() {
+            cur.push(' ');
+        }
+        cur.push_str(word);
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+    if out.is_empty() {
+        out.push(String::new());
+    }
+    out
+}
+
 /// Lay out the title page exactly like KIT's exporter: uppercase underlined
 /// title on slot 16, genre / author / director / additional info from slot
 /// 20 (every other slot, empties skipped), contacts on slot 39, year on
-/// slot 57 (measured nudges below used for the last two).
+/// slot 57 (measured nudges below used for the last two). Long titles and
+/// contact lines wrap at the 147.5 mm text column instead of running off the
+/// page; short fields keep KIT's exact slots.
 pub fn layout_title_page(meta: &Metadata) -> Vec<PrintLine> {
     layout_title_page_with_latest(meta, None)
 }
@@ -534,12 +609,16 @@ pub fn layout_title_page_with_latest(
             margin: None,
         }
     }
+    let max_chars = (TEXT_W_MM / CHAR_MM) as usize;
     let mut lines: Vec<PrintLine> = Vec::new();
     while lines.len() < 16 {
         lines.push(PrintLine::blank());
     }
-    lines.push(centered(meta.title.to_uppercase(), true, true, TITLE_DY));
-    let mut slot = 20usize;
+    let title_lines = wrap_title_line(&meta.title.to_uppercase(), max_chars);
+    for part in &title_lines {
+        lines.push(centered(part.clone(), true, true, TITLE_DY));
+    }
+    let mut slot = (16 + title_lines.len()).max(20);
     for value in [
         &meta.genre,
         &meta.author,
@@ -550,21 +629,34 @@ pub fn layout_title_page_with_latest(
         if v.is_empty() {
             continue;
         }
+        let parts = wrap_title_line(v, max_chars);
+        slot = slot.max(lines.len());
         while lines.len() < slot {
             lines.push(PrintLine::blank());
         }
-        lines.push(centered(v.to_string(), false, false, TITLE_VALUE_DY));
-        slot += 2;
+        for part in &parts {
+            lines.push(centered(part.clone(), false, false, TITLE_VALUE_DY));
+        }
+        slot += parts.len() + 1;
     }
     while lines.len() < 39 {
         lines.push(PrintLine::blank());
     }
-    lines.push(PrintLine {
-        text: meta.contacts.trim().to_string(),
-        dy_mm: TITLE_CONTACT_DY,
-        ..PrintLine::blank()
-    });
-    while lines.len() < 57 {
+    for raw in meta.contacts.lines() {
+        let line = raw.trim();
+        if line.is_empty() {
+            continue;
+        }
+        for part in wrap_title_line(line, max_chars) {
+            lines.push(PrintLine {
+                text: part,
+                dy_mm: TITLE_CONTACT_DY,
+                ..PrintLine::blank()
+            });
+        }
+    }
+    let year_slot = lines.len().max(57);
+    while lines.len() < year_slot {
         lines.push(PrintLine::blank());
     }
     lines.push(centered(
@@ -574,7 +666,8 @@ pub fn layout_title_page_with_latest(
         TITLE_YEAR_DY,
     ));
     if let Some(set) = latest {
-        while lines.len() < 60 {
+        let revised_slot = lines.len().max(60);
+        while lines.len() < revised_slot {
             lines.push(PrintLine::blank());
         }
         lines.push(centered("REVISED".to_string(), true, false, TITLE_DY));
@@ -1147,6 +1240,45 @@ mod tests {
             Some(&set),
         );
         assert!(!plain.iter().flatten().any(|l| l.margin.is_some()));
+    }
+
+    #[test]
+    fn title_page_wraps_long_titles_and_splits_contacts() {
+        let meta = scriptcraft_core::kitsp::Metadata {
+            title: "THE EXTRAORDINARILY LONG TITLE OF A FILM THAT KEEPS GOING AND GOING".into(),
+            contacts: "writer@example.com\n+1 555 0100".into(),
+            ..sample_meta()
+        };
+        let lines = layout_title_page(&meta);
+        let title: Vec<&PrintLine> = lines[16..].iter().take_while(|l| l.underline).collect();
+        assert!(title.len() >= 2, "long title wraps instead of running off");
+        for line in title {
+            let w = line.text.chars().count() as f32 * CHAR_MM;
+            assert!(line.x_mm >= 0.0, "wrapped title starts on the page");
+            assert!(line.x_mm + w <= PAGE_W, "wrapped title stays on the page");
+        }
+        assert_eq!(lines[39].text, "writer@example.com");
+        assert_eq!(lines[40].text, "+1 555 0100");
+        assert_eq!(lines[57].text, "2026");
+        assert_eq!(lines.len(), 58, "short page keeps KIT's one-page shape");
+    }
+
+    #[test]
+    fn title_page_edges_do_not_run_off_the_page() {
+        let meta = scriptcraft_core::kitsp::Metadata {
+            title: "SUPERCALIFRAGILISTICEXPIALIDOCIOUSSUPERCALIFRAGILISTICEXPIALIDOCIOUS".into(),
+            contacts: "x".repeat(120),
+            ..sample_meta()
+        };
+        let lines = layout_title_page(&meta);
+        for line in &lines {
+            let w = line.text.chars().count() as f32 * CHAR_MM;
+            assert!(
+                line.x_mm >= 0.0 && line.x_mm + w <= PAGE_W + 0.01,
+                "line {:?} runs off the page",
+                line.text
+            );
+        }
     }
 
     #[test]
