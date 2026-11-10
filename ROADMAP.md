@@ -18,15 +18,15 @@ Status legend: `[ ]` to do `[-]` in progress `[x]` done `[!]` blocked
 
 | Field | Value |
 |---|---|
-| Date | 2026-11-09 |
+| Date | 2026-11-10 |
 | Project | ScriptCraft — free, open-source, revision-first screenwriting studio |
 | Repo | `/Users/mihailmihaylov/Documents/Dev_work/scriptcraft` |
-| Branch / commit | `main` after v0.8 M6; tags `v0.7.0` at `9ce2e0e`, `v0.7.1` at `d8b17de` (maintenance) and `v0.7.2` at `8b75f9a`; v0.8 M0 at `9bd4839`, M1 at `1948c62`, M2 at `b660219`, M3 at `2708838`, M4 at `e840a67`; UI polish at `41ea7d5`; M5 at `b52b512`; dependency refresh at `c1990ca`; M6 at `c80c50c`. |
+| Branch / commit | `main` after v0.8 M7; tags `v0.7.0` at `9ce2e0e`, `v0.7.1` at `d8b17de` (maintenance) and `v0.7.2` at `8b75f9a`; v0.8 M0 at `9bd4839`, M1 at `1948c62`, M2 at `b660219`, M3 at `2708838`, M4 at `e840a67`; UI polish at `41ea7d5`; M5 at `b52b512`; dependency refresh at `c1990ca`; M6 at `c80c50c`; M7 at `9f4c833`. |
 | Rust workspace | `scriptcraft-core`, `scriptcraft-app`, `scriptcraft-layout` (`Cargo.toml`, resolver 2) |
 | App crate version | `scriptcraft-app 0.7.2` at tag `v0.7.2`; `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
 | Distribution | **v0.7.2 released 2026-11-02** — <https://github.com/MihailM17/scriptcraft/releases/tag/v0.7.2> packages v0.8 M0–M4, KIT version writing, the Settings cleanup and the Dock-quit fix. Last published release: v0.7.2. |
-| Current one-liner | Free, open-source, revision-first studio: one screenplay engine (Editor 2.0), crash-safe saves + recovery, revision colours/marks/pages, compare/restore, omitted scenes, smart screenplay paste, KIT version write/import, revision headers/title-page fields, production page locks with A/B page numbers and FDX revision metadata, dual dialogue side by side in editor/PDF with FDX interchange, a title-page editor whose A4 preview is the exporter's own layout, KIT-style editor/navigator settings, macOS standard selection keys, a compact file-focused Menu, OFL fonts, FDX/Fountain import/export; PDF export paginates exactly like the editor. |
-| Next release | **v0.8 revision-complete** — revision summary remains (M7); signed builds and runtime CI (M8). See `docs/v0.8-plan.md`. |
+| Current one-liner | Free, open-source, revision-first studio: one screenplay engine (Editor 2.0), crash-safe saves + recovery, revision colours/marks/pages, compare/restore, revision summary with scene counts + CSV + printable PDF, omitted scenes, smart screenplay paste, KIT version write/import, revision headers/title-page fields, production page locks with A/B page numbers and FDX revision metadata, dual dialogue side by side in editor/PDF with FDX interchange, a title-page editor whose A4 preview is the exporter's own layout, KIT-style editor/navigator settings, macOS standard selection keys, a compact file-focused Menu, OFL fonts, FDX/Fountain import/export; PDF export paginates exactly like the editor. |
+| Next release | **v0.8 revision-complete** — signing/runtime CI (M8) and the refactor/docs pass (M9) remain. See `docs/v0.8-plan.md`. |
 
 **Positioning (locked 2026-10-26):** the free, open-source, revision-first
 screenwriting studio. Moat = the production revision workflow (colours, locked
@@ -82,7 +82,7 @@ writing features.
   - `pdf.rs` — print layout + `printpdf` renderer (title page, scene/page numbers, watermarks, current-revision margin bars/pages).
   - `tests/` — `parity.rs` (golden hashes), `pagination.rs`, `place.rs`, `pdf_export.rs`, `scale.rs` (500-page timings).
 - `scriptcraft-app/src/`
-  - `app.rs` — 8,284-line monolith: all state, IO, views, editor, export dialog. `title_page.rs` holds the M6 form and PDF-matched preview; the revision summary (M7) will be its own module.
+  - `app.rs` — 8,661-line monolith: all state, IO, views, editor, export dialog. `title_page.rs` holds the M6 form and PDF-matched preview; `core::summary` derives M7 counts and this file paints the summary window.
   - `script_view.rs` — Editor 2.0 `ScriptView` (the only editor since M5): paints `DocLayout` pages (visible pages only; zoom scales geometry, never breaks) and edits by emitting `core::edit` commands — selection/caret, keyboard/pointer, cross-block clipboard, IME, command-history undo/redo.
   - `theme.rs` — palette + egui style. `menu.rs` — native macOS menu. `main.rs`, `lib.rs`.
   - `assets/fonts/` — Courier Prime (Regular/Bold/Italic), PT Sans, IBM Plex Mono; all OFL, license texts in `assets/fonts/licenses/`.
@@ -178,7 +178,10 @@ direct workspace dependencies. There is still no benchmark harness.
   editor and PDF now use Courier Prime (OFL), OFL license texts added for all
   bundled fonts, root `LICENSE` (Apache-2.0) and `NOTICE` added.
 - [ ] **Monolith.** `app.rs` is 8,195 lines; state, IO, layout and UI are entangled. v0.8 extracts views one at a time; no big-bang rewrite.
-- [ ] **No revision summary.** The diff engine, compare workspace and restore-as-copy exist (v0.8 M1–M3), but the revision summary is still pending. Planned: v0.8 M7.
+- [x] **Revision summary shipped.** Fixed 2026-11-10 (v0.8 M7): the summary
+  derives from the same `DraftDiff` as compare, groups counts by scene with a
+  totals row, and exports deterministic UTF-8 CSV (BOM for Excel) plus a
+  printable A4 PDF. See `scriptcraft-core/src/summary.rs`.
 - [x] **Stable block/scene identity now survives `.kitsp` reopen.** Fixed
   2026-10-26 (v0.8 M0): versioned `scenario_data.scriptcraft_ids` and
   `scriptcraft_scene_meta` rows persist `ScriptBlock.id` and scene identity;
@@ -189,10 +192,10 @@ direct workspace dependencies. There is still no benchmark harness.
 - [-] **Production layer is partial.** Revision sets/colours/marks, revision
   pages, FDX metadata, KIT version import, header/footer labels and Revised
   title-page fields and page locks with A/B page numbers shipped 2026-10-21.
-  Compare/restore, sidecar-only omitted scenes, dual dialogue and the
-  title-page editor shipped in v0.8 M1–M6. Still open: FDX revision-ID import,
-  revision summary, spellcheck, and an FDX omission mapping (waiting on a real
-  Final Draft fixture). Planned: v0.8 M7.
+  Compare/restore, sidecar-only omitted scenes, dual dialogue, the
+  title-page editor and the revision summary shipped in v0.8 M1–M7. Still open:
+  FDX revision-ID import, spellcheck, and an FDX omission mapping (waiting on a
+  real Final Draft fixture). Planned: v0.8 M8/M9.
 - [ ] **No signed/notarised builds or auto-update.** macOS is ad-hoc signed;
   Windows/Linux packages are unsigned, and Windows/Linux have no GUI smoke
   test. Planned: v0.8 M8.
@@ -260,7 +263,8 @@ Source of truth: `docs/v0.8-plan.md`.
   Shipped 2026-11-05.
 - [x] **M6 Title-page editor** — form + live preview, PDF/FDX parity.
   Shipped 2026-11-09.
-- [ ] **M7 Revision summary** — scene/page/block counts, CSV + printable view.
+- [x] **M7 Revision summary** — scene/page/block counts, CSV + printable view.
+  Shipped 2026-11-10.
 - [ ] **M8 Release engineering** — signing/notarisation, auto-update, runtime
   CI, Dock quit, font metrics, benchmarks.
 - [ ] **M9 Refactor + docs** — extract views, update format docs/release notes.
@@ -324,7 +328,9 @@ gate**. M8 runs in parallel; M9 is continuous.
       left cue and label continuation pages as inserted pages.
 - [x] M6 — title-page editor with a live preview painted from the exporter's
       own layout. Shipped 2026-11-09 (`c80c50c`).
-- [ ] M7 — revision summary (scene/page/block counts, CSV, printable view).
+- [x] M7 — revision summary: scene-grouped added/removed/changed counts, page
+      baseline, selectable baseline, deterministic CSV and printable A4 PDF.
+      Shipped 2026-11-10 (`9f4c833`).
 - [-] M8 — Dock/AppleScript quit fixed 2026-11-02 (native `terminate:`
       routed through the save prompt). Remaining: signing/notarisation,
       auto-update, Windows/Linux runtime CI, font metrics from TTF, benchmark
@@ -1501,6 +1507,42 @@ Newest entries at the bottom. Each entry: date — what changed / what was found
     parity/pagination/place/pdf/relayout/scale), `cargo deny check` and
     `git diff --check` green. Commit `c80c50c`.
   - Next: v0.8 M7 revision summary.
+
+### 2026-11-10 — v0.8 M7 revision summary
+
+  - `scriptcraft-core/src/summary.rs`: `RevisionSummary::from_diff` folds the
+    same `DraftDiff` compare uses into per-scene added/removed/changed counts,
+    revision colour/name/date and the page baseline; `csv()` writes
+    deterministic UTF-8 with a BOM, fixed metadata columns, RFC 4180 quoting,
+    one row per changed scene and a `TOTAL` row. An untouched revision emits
+    header + zero totals.
+  - `scriptcraft-layout/src/pdf.rs`: `to_summary_pdf_bytes` renders an A4
+    printable summary with Courier Prime + IBM Plex Mono Cyrillic fallback,
+    scene rows, totals row and `Page N of M` footers. Shared text run helper
+    `push_text` now backs script and summary output.
+  - `app.rs`/`menu.rs`: Script ▸ Revision Summary… and Research ▸ Versions ▸
+    Revision Summary… open a window with a baseline combo (default latest),
+    page delta, scene-grouped table and totals; Save CSV uses a native dialog;
+    Print Summary writes a temp PDF and opens the system viewer. The summary
+    cache is cleared by `refresh_derived`, so counts always reflect the live
+    draft.
+  - New snapshot `20_revision_summary.png`; existing 18 snapshots unchanged.
+  - Tests: core `summary` 4 unit; layout pdf export 2 (`summary_pdf_is_
+    printable_and_cyrillic_safe`, `summary_pdf_paginates`); app interaction 5
+    (`revision_summary_matches_compare_and_groups_by_scene`,
+    `revision_summary_empty_revision_is_a_zero_row`,
+    `revision_summary_csv_is_cyrillic_safe`,
+    `revision_summary_pdf_is_printable`, `revision_summary_compares_an_older_
+    baseline`).
+  - Gate: `cargo fmt --check`, `cargo clippy --workspace --all-targets --
+    -D warnings`, `cargo test --workspace` (52 interaction + 19 snapshots;
+    core 100 lib + 23 a95 + 6 dual + 12 identity + 4 omitted + 4 restore;
+    layout 24 unit + 4 dual + 3 omitted + 1 pagination + 3 parity + 5 pdf +
+    4 place + 2 relayout + 3 scale), `cargo deny check` and
+    `git diff --check` green. Commit `9f4c833`.
+  - Next: v0.8 M8 release engineering (signing/notarisation, auto-update,
+    runtime CI, remaining Dock/font-metrics/benchmark work), then M9 refactor
+    and docs, then v0.8.0.
 
 ---
 
