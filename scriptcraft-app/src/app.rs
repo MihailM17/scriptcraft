@@ -5,7 +5,8 @@ use scriptcraft_core::{
     format::{validate, Issue},
     kitsp::{self, Card, Metadata},
     model::{ElementType, Project, Scene, ScriptBlock},
-    revision::{RevisionColor, RevisionHistory, RevisionMarks, RevisionSet},
+    revision::{DraftDiff, RevisionColor, RevisionHistory, RevisionMarks, RevisionSet},
+    summary::RevisionSummary,
     Stats,
 };
 
@@ -625,6 +626,10 @@ pub struct ScriptCraftApp {
     show_current_revision: bool,
     show_clear_revisions: bool,
     show_revisions: bool,
+    /// Revision summary window and its cached scene-grouped counts.
+    show_summary: bool,
+    summary_base: usize,
+    summary: Option<RevisionSummary>,
     /// Read-only compare workspace. Takes over the module area when open.
     compare: Option<CompareState>,
     show_find: bool,
@@ -718,6 +723,9 @@ impl Default for ScriptCraftApp {
             show_current_revision: false,
             show_clear_revisions: false,
             show_revisions: false,
+            show_summary: false,
+            summary_base: 0,
+            summary: None,
             compare: None,
             show_find: false,
             find_query: String::new(),
@@ -1742,9 +1750,65 @@ impl ScriptCraftApp {
         self.revisions.latest().map(|s| s.color)
     }
 
+    /// Baseline index and cached summary (tests).
+    #[doc(hidden)]
+    pub fn summary_base_for_test(&self) -> Option<usize> {
+        if self.revisions.is_empty() || self.summary_base >= self.revisions.sets.len() {
+            None
+        } else {
+            Some(self.summary_base)
+        }
+    }
+
+    /// Whether the summary window is open (tests).
+    #[doc(hidden)]
+    pub fn summary_open_for_test(&self) -> bool {
+        self.show_summary
+    }
+
+    /// Select a different revision baseline (tests).
+    #[doc(hidden)]
+    pub fn set_summary_base_for_test(&mut self, base: usize) -> bool {
+        if base >= self.revisions.sets.len() {
+            return false;
+        }
+        self.summary_base = base;
+        self.summary = None;
+        self.ensure_summary();
+        true
+    }
+
+    /// Scene-grouped counts behind the open summary window (tests).
+    #[doc(hidden)]
+    pub fn summary_for_test(&self) -> Option<RevisionSummary> {
+        self.summary.clone()
+    }
+
+    /// CSV body for the cached summary (tests).
+    #[doc(hidden)]
+    pub fn summary_csv_for_test(&mut self) -> Option<String> {
+        self.ensure_summary();
+        self.summary.as_ref().map(RevisionSummary::csv)
+    }
+
+    /// Printable summary PDF (tests).
+    #[doc(hidden)]
+    pub fn summary_pdf_for_test(&mut self) -> Option<Vec<u8>> {
+        self.summary_pdf_bytes()
+    }
+
+    /// Write the summary CSV through the same path the Save dialog uses.
+    #[doc(hidden)]
+    pub fn write_summary_csv_for_test(&mut self, dst: &std::path::Path) -> bool {
+        self.write_summary_csv(dst)
+    }
+
     fn refresh_derived(&mut self) {
         self.revision_marks_dirty = true;
         self.invalidate_compare();
+        // Counts depend on the live draft; recompute on demand next time the
+        // summary window paints.
+        self.summary = None;
         let (omitted_headings, hidden_blocks) = match &self.project {
             Some(p) => {
                 let hidden = p.hidden_blocks();
@@ -4753,6 +4817,9 @@ impl eframe::App for ScriptCraftApp {
         if self.show_revisions {
             self.revisions_window(ctx);
         }
+        if self.show_summary {
+            self.summary_window(ctx);
+        }
         if self.show_clear_revisions {
             self.clear_revisions_window(ctx);
         }
@@ -5195,6 +5262,9 @@ impl ScriptCraftApp {
                     self.close_compare();
                     self.show_revisions = true;
                 }
+                menu::ID_REVISION_SUMMARY => {
+                    self.open_revision_summary();
+                }
                 menu::ID_COMPARE_DRAFTS => {
                     self.open_compare();
                 }
@@ -5371,6 +5441,298 @@ impl ScriptCraftApp {
         self.show_revisions = open;
         if let Some(index) = restore {
             self.restore_revision_as_copy(index);
+        }
+    }
+
+    /// Open the revision summary window against the latest baseline.
+    #[doc(hidden)]
+    pub fn open_revision_summary(&mut self) -> bool {
+        if self.project.is_none() {
+            self.status = "Open a project before summarizing revisions.".to_string();
+            return false;
+        }
+        if self.revisions.is_empty() {
+            self.status = "Start a revision before summarizing changes.".to_string();
+            return false;
+        }
+        self.summary_base = self.revisions.sets.len() - 1;
+        self.summary = None;
+        self.show_summary = true;
+        self.ensure_summary();
+        true
+    }
+
+    /// Recompute the summary from the selected baseline and the live draft.
+    /// Counts come from the same `DraftDiff` the compare view uses, so the
+    /// two surfaces can never disagree.
+    fn ensure_summary(&mut self) {
+        if self.summary.is_some() || self.revisions.is_empty() {
+            return;
+        }
+        if self.summary_base >= self.revisions.sets.len() {
+            self.summary_base = self.revisions.sets.len() - 1;
+        }
+        let Some(project) = self.project.as_ref() else {
+            return;
+        };
+        let Some(set) = self.revisions.sets.get(self.summary_base) else {
+            return;
+        };
+        let diff = DraftDiff::against_current(set, &project.blocks);
+        let target_scenes = project.scenes().len();
+        let pages = self.page_count();
+        self.summary = Some(RevisionSummary::from_diff(set, &diff, pages, target_scenes));
+    }
+
+    fn summary_window(&mut self, ctx: &egui::Context) {
+        if self.revisions.is_empty() {
+            self.show_summary = false;
+            return;
+        }
+        self.ensure_summary();
+        let mut open = self.show_summary;
+        let mut base = self.summary_base;
+        let mut save_csv = false;
+        let mut print = false;
+        let mut close = false;
+        egui::Window::new("Revision Summary")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(true)
+            .default_width(660.0)
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Baseline:");
+                    let selected = self
+                        .revisions
+                        .sets
+                        .get(base)
+                        .map(|set| {
+                            let name = if set.name.is_empty() {
+                                format!("{} Revision", set.color.label())
+                            } else {
+                                set.name.clone()
+                            };
+                            format!("{} · {}", name, set.started)
+                        })
+                        .unwrap_or_else(|| "Latest revision".to_string());
+                    egui::ComboBox::from_id_salt("summary_baseline")
+                        .selected_text(selected)
+                        .width(360.0)
+                        .show_ui(ui, |ui| {
+                            for (i, set) in self.revisions.sets.iter().enumerate().rev() {
+                                let name = if set.name.is_empty() {
+                                    format!("{} Revision", set.color.label())
+                                } else {
+                                    set.name.clone()
+                                };
+                                let label = format!("{} · {}", name, set.started);
+                                ui.selectable_value(&mut base, i, label);
+                            }
+                        });
+                });
+                let Some(summary) = self.summary.as_ref() else {
+                    ui.label("No revision data.");
+                    return;
+                };
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    let (swatch, _) =
+                        ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
+                    ui.painter()
+                        .rect_filled(swatch, 2.0, revision_color(summary.color));
+                    let name = if summary.name.trim().is_empty() {
+                        format!("{} Revision", summary.color.label())
+                    } else {
+                        summary.name.clone()
+                    };
+                    ui.label(egui::RichText::new(name).strong());
+                    if !summary.date.is_empty() {
+                        ui.label(egui::RichText::new(&summary.date).weak());
+                    }
+                });
+                let pages = if summary.base_pages == 0 {
+                    format!("Current draft: {} pages", summary.current_pages)
+                } else {
+                    format!(
+                        "{} pages to {} pages ({:+})",
+                        summary.base_pages,
+                        summary.current_pages,
+                        summary.pages_delta()
+                    )
+                };
+                ui.label(pages);
+                ui.add_space(8.0);
+                egui::ScrollArea::vertical()
+                    .max_height(360.0)
+                    .show(ui, |ui| {
+                        egui::Grid::new("summary_scene_grid")
+                            .num_columns(5)
+                            .striped(true)
+                            .spacing(egui::vec2(18.0, 6.0))
+                            .show(ui, |ui| {
+                                ui.label(egui::RichText::new("Scene").strong());
+                                ui.label(egui::RichText::new("Heading").strong());
+                                ui.label(egui::RichText::new("Added").strong());
+                                ui.label(egui::RichText::new("Removed").strong());
+                                ui.label(egui::RichText::new("Changed").strong());
+                                ui.end_row();
+                                for scene in &summary.scenes {
+                                    ui.label(summary.scene_label(scene));
+                                    ui.label(&scene.heading);
+                                    ui.label(scene.added.to_string());
+                                    ui.label(scene.removed.to_string());
+                                    ui.label(scene.changed.to_string());
+                                    ui.end_row();
+                                }
+                                ui.label(egui::RichText::new("TOTAL").strong());
+                                ui.label("");
+                                ui.label(egui::RichText::new(summary.added.to_string()).strong());
+                                ui.label(egui::RichText::new(summary.removed.to_string()).strong());
+                                ui.label(egui::RichText::new(summary.changed.to_string()).strong());
+                                ui.end_row();
+                            });
+                    });
+                if summary.scenes.is_empty() {
+                    ui.label(
+                        egui::RichText::new("No changes in this revision.")
+                            .small()
+                            .weak(),
+                    );
+                }
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Save CSV…").clicked() {
+                        save_csv = true;
+                    }
+                    if ui.button("Print Summary…").clicked() {
+                        print = true;
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("Close").clicked() {
+                            close = true;
+                        }
+                    });
+                });
+            });
+        self.show_summary = open && !close;
+        if base != self.summary_base {
+            self.summary_base = base;
+            self.summary = None;
+            self.ensure_summary();
+        }
+        if close {
+            self.show_summary = false;
+        }
+        if save_csv {
+            self.save_summary_csv();
+        }
+        if print {
+            self.print_summary();
+        }
+    }
+
+    fn summary_file_stem(&self, summary: &RevisionSummary) -> String {
+        let title = if self.title.trim().is_empty() {
+            "Script"
+        } else {
+            self.title.trim()
+        };
+        let revision = if summary.name.trim().is_empty() {
+            summary.color.label()
+        } else {
+            summary.name.trim()
+        };
+        format!("{title} - {revision} Summary")
+            .chars()
+            .map(|c| {
+                if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') {
+                    '-'
+                } else {
+                    c
+                }
+            })
+            .collect()
+    }
+
+    fn save_summary_csv(&mut self) {
+        self.ensure_summary();
+        let Some(summary) = self.summary.clone() else {
+            return;
+        };
+        let Some(dst) = rfd::FileDialog::new()
+            .add_filter("CSV", &["csv"])
+            .set_file_name(format!("{}.csv", self.summary_file_stem(&summary)))
+            .save_file()
+        else {
+            return;
+        };
+        self.write_summary_csv(&dst);
+    }
+
+    fn write_summary_csv(&mut self, dst: &std::path::Path) -> bool {
+        self.ensure_summary();
+        let Some(summary) = self.summary.clone() else {
+            return false;
+        };
+        match std::fs::write(dst, summary.csv()) {
+            Ok(()) => {
+                self.status = format!("Revision summary saved to {}", dst.to_string_lossy());
+                true
+            }
+            Err(e) => {
+                self.status = format!("Summary CSV failed: {e}");
+                false
+            }
+        }
+    }
+
+    fn summary_pdf_bytes(&mut self) -> Option<Vec<u8>> {
+        self.ensure_summary();
+        let summary = self.summary.clone()?;
+        let title = self
+            .project
+            .as_ref()
+            .map(|p| p.title.clone())
+            .unwrap_or_default();
+        let fonts = scriptcraft_layout::pdf::ExportFonts {
+            regular: include_bytes!("../assets/fonts/CourierPrime-Regular.ttf"),
+            bold: include_bytes!("../assets/fonts/CourierPrime-Bold.ttf"),
+            fallback_regular: include_bytes!("../assets/fonts/IBMPlexMono-Regular.ttf"),
+            fallback_bold: include_bytes!("../assets/fonts/IBMPlexMono-Bold.ttf"),
+        };
+        match scriptcraft_layout::pdf::to_summary_pdf_bytes(&summary, &title, &fonts) {
+            Ok(bytes) => Some(bytes),
+            Err(e) => {
+                self.status = format!("Summary PDF failed: {e}");
+                None
+            }
+        }
+    }
+
+    /// Render the printable summary to a temp file and open the system viewer.
+    fn print_summary(&mut self) {
+        let Some(summary) = self.summary.clone() else {
+            return;
+        };
+        let Some(bytes) = self.summary_pdf_bytes() else {
+            return;
+        };
+        let mut path = std::env::temp_dir();
+        path.push(format!("{}.pdf", self.summary_file_stem(&summary)));
+        match std::fs::write(&path, &bytes) {
+            Ok(()) => {
+                self.status = format!("Summary: {}", path.to_string_lossy());
+                #[cfg(target_os = "macos")]
+                let _ = std::process::Command::new("open").arg(&path).spawn();
+                #[cfg(target_os = "windows")]
+                let _ = std::process::Command::new("cmd")
+                    .args(["/C", "start", "", &path.to_string_lossy().to_string()])
+                    .spawn();
+                #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+                let _ = std::process::Command::new("xdg-open").arg(&path).spawn();
+            }
+            Err(e) => self.status = format!("Summary print failed: {e}"),
         }
     }
 
@@ -6644,6 +7006,7 @@ impl ScriptCraftApp {
         let mut start = false;
         let mut history = false;
         let mut compare = false;
+        let mut summary = false;
         let mut clear = false;
         let next_color = self.revisions.next_color();
         if ui
@@ -6672,6 +7035,17 @@ impl ScriptCraftApp {
             .clicked()
         {
             compare = true;
+        }
+        ui.add_space(4.0);
+        if ui
+            .add_enabled(
+                has && !self.revisions.is_empty(),
+                egui::Button::new("Revision Summary…"),
+            )
+            .on_disabled_hover_text("Start a revision to summarize changes.")
+            .clicked()
+        {
+            summary = true;
         }
         if !self.revisions.is_empty() {
             ui.add_space(6.0);
@@ -6708,6 +7082,9 @@ impl ScriptCraftApp {
         }
         if compare {
             self.open_compare();
+        }
+        if summary {
+            self.open_revision_summary();
         }
         if clear {
             self.close_compare();

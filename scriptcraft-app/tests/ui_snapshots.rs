@@ -122,6 +122,33 @@ fn snap_19_title_page() {
     h.snapshot("19_title_page");
 }
 
+/// Revision summary after edits in two scenes, grouped by scene with totals.
+#[test]
+fn snap_20_revision_summary() {
+    use scriptcraft_core::model::ElementType;
+
+    let mut h = harness(SideTab::Research, None);
+    h.state_mut().set_research_pane(ResearchPane::Versions);
+    h.state_mut()
+        .start_revision_at_for_test("Blue Revision", "10.11.2026 10:00");
+    let first = h
+        .state()
+        .find_first_heading_block()
+        .expect("A95 should contain a scene heading");
+    let second = (first + 1..h.state().block_count())
+        .find(|&bi| h.state().block_element_type(bi) == Some(ElementType::SceneHeading))
+        .expect("A95 has more than one scene");
+    for bi in [first, second] {
+        let text = h.state().block_text(bi).unwrap();
+        h.state_mut()
+            .set_block_text_for_test(bi, &format!("{text} — REVISED"));
+    }
+    h.run();
+    assert!(h.state_mut().open_revision_summary());
+    h.run();
+    h.snapshot("20_revision_summary");
+}
+
 #[test]
 fn snap_08_export_dialog() {
     use egui_kittest::kittest::Queryable;

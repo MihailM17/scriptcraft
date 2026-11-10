@@ -16,8 +16,9 @@ macOS, Windows and Linux.
 > rows, cleans up Settings so every control takes effect, and makes
 > Dock/AppleScript quit ask before discarding unsaved work.
 >
-> **Next — v0.8 revision-complete.** Dual dialogue (M5), a title-page editor
-> (M6) and a revision summary (M7) remain, then signing/runtime CI (M8). See
+> **Next — v0.8 revision-complete.** Dual dialogue (M5), the title-page editor
+> (M6) and the revision summary (M7) are done; signing/runtime CI (M8) and the
+> refactor/docs pass (M9) remain. See
 > [`docs/v0.8-plan.md`](docs/v0.8-plan.md).
 
 ![ScriptCraft editor](scriptcraft-app/tests/snapshots/01_script_top.png)
@@ -57,8 +58,10 @@ app on day one.
 - **Compare, restore, omit** — compare any two drafts or a draft against a
   revision baseline, restore a baseline as a new `.kitsp`, and omit a scene
   without losing its number.
-- **Still ahead (v0.8)** — dual dialogue, a title-page editor, and a revision
-  summary.
+- **Revision summary** — scene-grouped added/removed/changed counts, page
+  baseline, totals, deterministic UTF-8 CSV for Excel/Numbers and a printable
+  A4 PDF; counts come from the same diff as compare.
+- **Still ahead (v0.8)** — signed builds, auto-update and runtime CI.
 
 ## The editor
 

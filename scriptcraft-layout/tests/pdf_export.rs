@@ -213,3 +213,117 @@ fn title_page_preview_matches_exported_first_page() {
     }
     assert!(squash.contains("REVISED"), "revision block missing");
 }
+
+/// The printable revision summary is a real PDF: revision metadata, the
+/// changed scene (Cyrillic heading), counts and the totals row all extract.
+#[test]
+fn summary_pdf_is_printable_and_cyrillic_safe() {
+    use scriptcraft_core::model::ElementType;
+    use scriptcraft_core::revision::{DraftDiff, RevisionHistory};
+    use scriptcraft_core::summary::RevisionSummary;
+    use scriptcraft_layout::pdf;
+
+    let mut p = kitsp::load_file(FIXTURE).expect("fixture must load");
+    let mut history = RevisionHistory::default();
+    history.start(&p.blocks, "Синя".into(), "09.11.2026 10:00".into(), 342);
+    let set = history.latest().unwrap().clone();
+    let bi = p
+        .blocks
+        .iter()
+        .position(|b| b.element_type == ElementType::Action)
+        .expect("fixture has action blocks");
+    p.blocks[bi].text.push_str(" — промяна");
+    let diff = DraftDiff::against_current(&set, &p.blocks);
+    let summary = RevisionSummary::from_diff(&set, &diff, 343, p.scenes().len());
+    assert_eq!(summary.changed, 1);
+
+    let read = |name: &str| {
+        std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../scriptcraft-app/assets/fonts")
+                .join(name),
+        )
+        .expect("bundled font")
+    };
+    let fonts = pdf::ExportFonts {
+        regular: &read("CourierPrime-Regular.ttf"),
+        bold: &read("CourierPrime-Bold.ttf"),
+        fallback_regular: &read("IBMPlexMono-Regular.ttf"),
+        fallback_bold: &read("IBMPlexMono-Bold.ttf"),
+    };
+    let bytes = pdf::to_summary_pdf_bytes(&summary, "A95", &fonts).expect("summary renders");
+    assert!(bytes.starts_with(b"%PDF-"));
+    let doc = lopdf::Document::load_mem(&bytes).expect("summary PDF must parse");
+    assert_eq!(doc.get_pages().len(), 1);
+    let text = doc.extract_text(&[1]).unwrap_or_default();
+    let squash: String = text.chars().filter(|c| !c.is_whitespace()).collect();
+    for want in [
+        "REVISIONSUMMARY",
+        "BlueRevision-Синя",
+        "ПАРКИНГ",
+        "TOTAL",
+        "Page1of1",
+    ] {
+        let want: String = want.chars().filter(|c| !c.is_whitespace()).collect();
+        assert!(squash.contains(&want), "missing {want:?}: {squash:?}");
+    }
+    assert!(
+        squash.contains("342pagesto343pages(+1)"),
+        "page baseline is missing: {squash:?}"
+    );
+}
+
+/// Long summaries paginate instead of running past A4, and the totals row
+/// stays on the last page.
+#[test]
+fn summary_pdf_paginates() {
+    use scriptcraft_core::revision::RevisionColor;
+    use scriptcraft_core::summary::{RevisionSummary, SceneRevisionSummary};
+    use scriptcraft_layout::pdf;
+
+    let scenes: Vec<SceneRevisionSummary> = (0..80)
+        .map(|i| SceneRevisionSummary {
+            scene_index: i,
+            heading: format!("INT. СЦЕНА {i} - ДЕН"),
+            added: 1,
+            removed: 0,
+            changed: 2,
+        })
+        .collect();
+    let summary = RevisionSummary {
+        color: RevisionColor::Blue,
+        name: "Blue".into(),
+        date: "09.11.2026".into(),
+        base_pages: 120,
+        current_pages: 121,
+        added: 80,
+        removed: 0,
+        changed: 160,
+        target_scenes: 80,
+        scenes,
+    };
+
+    let read = |name: &str| {
+        std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../scriptcraft-app/assets/fonts")
+                .join(name),
+        )
+        .expect("bundled font")
+    };
+    let fonts = pdf::ExportFonts {
+        regular: &read("CourierPrime-Regular.ttf"),
+        bold: &read("CourierPrime-Bold.ttf"),
+        fallback_regular: &read("IBMPlexMono-Regular.ttf"),
+        fallback_bold: &read("IBMPlexMono-Bold.ttf"),
+    };
+    let bytes = pdf::to_summary_pdf_bytes(&summary, "A95", &fonts).expect("summary renders");
+    let doc = lopdf::Document::load_mem(&bytes).expect("summary PDF must parse");
+    let count = doc.get_pages().len();
+    assert!(count > 1, "80 scenes must paginate, got {count} page(s)");
+    let last = *doc.get_pages().keys().last().unwrap();
+    let text = doc.extract_text(&[last]).unwrap_or_default();
+    let squash: String = text.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(squash.contains("TOTAL"), "totals row missing: {squash:?}");
+    assert!(squash.contains("СЦЕНА79"), "last scene missing: {squash:?}");
+}

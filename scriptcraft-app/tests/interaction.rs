@@ -1666,6 +1666,243 @@ fn compare_workspace_closes_on_project_change() {
     );
 }
 
+/// Revision summary counts come from the same diff as compare, group by
+/// scene, and show the live page baseline.
+#[test]
+fn revision_summary_matches_compare_and_groups_by_scene() {
+    use scriptcraft_core::model::ElementType;
+
+    let mut h = harness(SideTab::Script);
+    h.run();
+    h.state_mut().start_revision();
+    h.run();
+    let base_pages = h
+        .state()
+        .latest_revision_pages()
+        .expect("the revision must record pages");
+
+    // Change the heading of two different scenes.
+    let headings: Vec<usize> = (0..h.state().block_count())
+        .filter(|bi| h.state().block_element_type(*bi) == Some(ElementType::SceneHeading))
+        .collect();
+    assert!(headings.len() >= 2, "A95 has 21 scenes");
+    let mut edited_headings = Vec::new();
+    for &bi in headings.iter().take(2) {
+        let original = h.state().block_text(bi).unwrap();
+        let edited = format!("{original} REV");
+        edited_headings.push(edited.clone());
+        h.state_mut().set_block_text_for_test(bi, &edited);
+    }
+    h.run();
+
+    open_research_versions(&mut h);
+    assert!(
+        h.query_by_label("Revision Summary…").is_some(),
+        "Versions must offer the summary"
+    );
+    h.get_by_label("Revision Summary…").click();
+    h.run();
+    h.run();
+
+    assert!(h.state().summary_open_for_test());
+    assert!(h.query_by_label("Revision Summary").is_some());
+    let summary = h
+        .state()
+        .summary_for_test()
+        .expect("summary must be computed");
+    assert_eq!(summary.base_pages, base_pages);
+    assert_eq!(summary.current_pages, h.state().page_count());
+    assert_eq!(
+        summary.total(),
+        summary.added + summary.removed + summary.changed
+    );
+    assert_eq!(
+        summary.scenes.iter().map(|s| s.changed).sum::<usize>(),
+        summary.changed,
+        "scene rows must account for every changed block"
+    );
+    assert!(
+        summary.changed >= 2,
+        "two heading edits must be counted: {summary:?}"
+    );
+    for heading in &edited_headings {
+        assert!(
+            summary.scenes.iter().any(|s| &s.heading == heading),
+            "summary must group by scene heading {heading:?}: {summary:?}"
+        );
+        assert!(
+            h.query_by_label(heading).is_some(),
+            "the table must show {heading:?}"
+        );
+    }
+    assert!(h.query_by_label("TOTAL").is_some());
+
+    // The compare workspace must report exactly the same counts.
+    h.state_mut().open_compare();
+    h.run();
+    let compare = h
+        .state()
+        .compare_counts_for_test()
+        .expect("compare must have counts");
+    assert_eq!(
+        compare,
+        (summary.added, summary.removed, summary.changed),
+        "summary and compare must agree by construction"
+    );
+}
+
+/// An untouched revision is a valid zero row in the sheet and the CSV.
+#[test]
+fn revision_summary_empty_revision_is_a_zero_row() {
+    let mut h = harness(SideTab::Script);
+    h.run();
+    h.state_mut().start_revision();
+    h.run();
+
+    open_research_versions(&mut h);
+    h.get_by_label("Revision Summary…").click();
+    h.run();
+    h.run();
+
+    let summary = h
+        .state()
+        .summary_for_test()
+        .expect("summary must exist even with no changes");
+    assert_eq!(summary.total(), 0);
+    assert!(summary.scenes.is_empty());
+    assert!(h.query_by_label("No changes in this revision.").is_some());
+    assert!(h.query_by_label("TOTAL").is_some());
+
+    let csv = h
+        .state_mut()
+        .summary_csv_for_test()
+        .expect("CSV must render");
+    assert!(csv.starts_with('\u{feff}'));
+    assert_eq!(csv.lines().count(), 2, "header plus TOTAL only");
+    assert!(
+        csv.contains(&format!(
+            "TOTAL,,,{},{},0,,,0,0,0",
+            summary.base_pages, summary.current_pages
+        )),
+        "empty revision must still produce a valid total row: {csv}"
+    );
+
+    let dir =
+        std::env::temp_dir().join(format!("scriptcraft-summary-empty-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("Empty Summary.csv");
+    assert!(h.state_mut().write_summary_csv_for_test(&path));
+    let bytes = std::fs::read(&path).unwrap();
+    assert_eq!(&bytes[..3], b"\xEF\xBB\xBF", "Excel needs the UTF-8 BOM");
+    let written = String::from_utf8(bytes).expect("summary CSV must be valid UTF-8");
+    assert_eq!(written, csv);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The CSV keeps Cyrillic headings intact and is deterministic.
+#[test]
+fn revision_summary_csv_is_cyrillic_safe() {
+    let mut h = harness(SideTab::Script);
+    h.run();
+    h.state_mut().start_revision();
+    h.run();
+
+    let bi = h
+        .state()
+        .find_first_heading_block()
+        .expect("A95 should contain a scene heading");
+    let original = h.state().block_text(bi).unwrap();
+    let edited = format!("{original} — ПРОМЯНА");
+    h.state_mut().set_block_text_for_test(bi, &edited);
+    h.run();
+
+    assert!(h.state_mut().open_revision_summary());
+    let csv = h
+        .state_mut()
+        .summary_csv_for_test()
+        .expect("CSV must render");
+    assert!(csv.starts_with('\u{feff}'));
+    assert!(csv.contains(
+        "Revision,Colour,Date,Base pages,Current pages,Pages delta,Scene,Heading,\
+         Added blocks,Removed blocks,Changed blocks"
+    ));
+    assert!(csv.contains("— ПРОМЯНА"), "Cyrillic heading lost: {csv}");
+    assert!(csv.contains("TOTAL"));
+    assert_eq!(
+        csv,
+        h.state_mut().summary_csv_for_test().unwrap(),
+        "the same summary must always produce the same CSV"
+    );
+}
+
+/// Print Summary builds a real PDF from the same counts.
+#[test]
+fn revision_summary_pdf_is_printable() {
+    let mut h = harness(SideTab::Script);
+    h.run();
+    h.state_mut().start_revision();
+    h.run();
+
+    let bi = h
+        .state()
+        .find_first_heading_block()
+        .expect("A95 should contain a scene heading");
+    let original = h.state().block_text(bi).unwrap();
+    h.state_mut()
+        .set_block_text_for_test(bi, &format!("{original} REV"));
+    h.run();
+
+    assert!(h.state_mut().open_revision_summary());
+    let bytes = h
+        .state_mut()
+        .summary_pdf_for_test()
+        .expect("summary PDF must render");
+    assert!(bytes.starts_with(b"%PDF-"), "not a PDF: {:?}", &bytes[..8]);
+    assert!(bytes.len() > 2_000, "summary PDF looks empty");
+}
+
+/// The baseline selector can summarize an older revision, not just the
+/// latest one.
+#[test]
+fn revision_summary_compares_an_older_baseline() {
+    use scriptcraft_core::revision::RevisionColor;
+
+    let mut h = harness(SideTab::Script);
+    h.run();
+    h.state_mut().start_revision();
+    h.run();
+    let bi = h
+        .state()
+        .find_first_heading_block()
+        .expect("A95 should contain a scene heading");
+    let original = h.state().block_text(bi).unwrap();
+    h.state_mut()
+        .set_block_text_for_test(bi, &format!("{original} BLUE"));
+    h.run();
+
+    h.state_mut().start_revision();
+    h.run();
+    let bj = bi + 1;
+    let second = h.state().block_text(bj).unwrap();
+    h.state_mut()
+        .set_block_text_for_test(bj, &format!("{second} PINK"));
+    h.run();
+
+    assert!(h.state_mut().open_revision_summary());
+    let latest = h.state().summary_for_test().expect("latest summary");
+    assert_eq!(latest.color, RevisionColor::Pink);
+    assert_eq!(latest.changed, 1, "Pink only contains the second edit");
+
+    assert!(h.state_mut().set_summary_base_for_test(0));
+    let older = h.state().summary_for_test().expect("older summary");
+    assert_eq!(older.color, RevisionColor::Blue);
+    assert!(
+        older.changed > latest.changed,
+        "Blue must include both edits: {older:?} vs {latest:?}"
+    );
+}
+
 /// Restoring a revision writes a new project without touching the current
 /// draft, then the restored copy opens with the same baseline.
 #[test]

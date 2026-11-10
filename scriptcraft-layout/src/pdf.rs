@@ -11,6 +11,7 @@ use scriptcraft_core::kitsp::Metadata;
 use scriptcraft_core::model::{ElementType, Project};
 use scriptcraft_core::page_lock::PageLock;
 use scriptcraft_core::revision::{RevisionColor, RevisionSet};
+use scriptcraft_core::summary::RevisionSummary;
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -816,21 +817,7 @@ pub fn to_pdf_bytes_with_marks_and_latest(
 
     let black = Color::Greyscale(Greyscale::new(0.0, None));
     // All coordinates in this module are millimetres; TextMatrix takes points.
-    let show =
-        |ops: &mut Vec<Op>, font: &printpdf::FontId, size: f32, x: f32, y: f32, text: &str| {
-            ops.push(Op::StartTextSection);
-            ops.push(Op::SetFont {
-                font: PdfFontHandle::External(font.clone()),
-                size: Pt(size),
-            });
-            ops.push(Op::SetTextMatrix {
-                matrix: TextMatrix::Translate(Pt(x * MM_TO_PT), Pt(y * MM_TO_PT)),
-            });
-            ops.push(Op::ShowText {
-                items: vec![TextItem::Text(text.to_string())],
-            });
-            ops.push(Op::EndTextSection);
-        };
+    let show = push_text;
 
     let mut doc_pages: Vec<PdfPage> = Vec::new();
     for lines in pages.iter() {
@@ -952,6 +939,268 @@ pub fn to_pdf_bytes_with_marks_and_latest(
         doc_pages.push(PdfPage::new(Mm(PAGE_W), Mm(PAGE_H), ops));
     }
     doc.with_pages(doc_pages);
+    let mut warnings = Vec::new();
+    let bytes = doc.save(&PdfSaveOptions::default(), &mut warnings);
+    Ok(bytes)
+}
+
+/// One text run at a millimetre position (baseline). Shared by the script
+/// and summary exporters.
+fn push_text(ops: &mut Vec<Op>, font: &printpdf::FontId, size: f32, x: f32, y: f32, text: &str) {
+    ops.push(Op::StartTextSection);
+    ops.push(Op::SetFont {
+        font: PdfFontHandle::External(font.clone()),
+        size: Pt(size),
+    });
+    ops.push(Op::SetTextMatrix {
+        matrix: TextMatrix::Translate(Pt(x * MM_TO_PT), Pt(y * MM_TO_PT)),
+    });
+    ops.push(Op::ShowText {
+        items: vec![TextItem::Text(text.to_string())],
+    });
+    ops.push(Op::EndTextSection);
+}
+
+fn draw_summary_text(
+    ops: &mut Vec<Op>,
+    face: &Face,
+    fallback: &Face,
+    size: f32,
+    x: f32,
+    y: f32,
+    text: &str,
+) {
+    let mut cx = x;
+    for (use_fb, run) in split_runs(text, &face.font, &fallback.font) {
+        let id = if use_fb { &fallback.id } else { &face.id };
+        push_text(ops, id, size, cx, y, run);
+        cx += run.chars().count() as f32 * CHAR_MM * (size / FONT_PT);
+    }
+}
+
+fn right_aligned_x(text: &str, size: f32, right: f32) -> f32 {
+    right - text.chars().count() as f32 * CHAR_MM * (size / FONT_PT)
+}
+
+const SUMMARY_MARGIN_MM: f32 = 25.0;
+const SUMMARY_LINE_MM: f32 = 6.0;
+const SUMMARY_BOTTOM_MM: f32 = 30.0;
+const SUMMARY_SCENE_X: f32 = SUMMARY_MARGIN_MM;
+const SUMMARY_HEADING_X: f32 = 57.0;
+const SUMMARY_HEADING_CHARS: usize = 42;
+const SUMMARY_ADD_RIGHT: f32 = 163.0;
+const SUMMARY_REM_RIGHT: f32 = 174.0;
+const SUMMARY_CHG_RIGHT: f32 = 185.0;
+
+/// Paginated sheet builder for the printable revision summary.
+struct SummarySheet<'a> {
+    pages: Vec<Vec<Op>>,
+    ops: Vec<Op>,
+    y: f32,
+    regular: &'a Face,
+    bold: &'a Face,
+    fallback_regular: &'a Face,
+    fallback_bold: &'a Face,
+}
+
+impl<'a> SummarySheet<'a> {
+    fn new(
+        regular: &'a Face,
+        bold: &'a Face,
+        fallback_regular: &'a Face,
+        fallback_bold: &'a Face,
+    ) -> Self {
+        Self {
+            pages: Vec::new(),
+            ops: vec![Op::SetOutlineThickness { pt: Pt(0.72) }],
+            y: PAGE_H - SUMMARY_MARGIN_MM,
+            regular,
+            bold,
+            fallback_regular,
+            fallback_bold,
+        }
+    }
+
+    /// Start a new page if `lines` would cross the bottom margin.
+    fn ensure(&mut self, lines: usize) {
+        let last = self.y - (lines.saturating_sub(1)) as f32 * SUMMARY_LINE_MM;
+        if last < SUMMARY_BOTTOM_MM {
+            self.new_page();
+        }
+    }
+
+    fn new_page(&mut self) {
+        self.pages.push(std::mem::take(&mut self.ops));
+        self.ops = vec![Op::SetOutlineThickness { pt: Pt(0.72) }];
+        self.y = PAGE_H - SUMMARY_MARGIN_MM;
+        self.text(
+            12.0,
+            SUMMARY_MARGIN_MM,
+            "REVISION SUMMARY (continued)",
+            true,
+        );
+        self.y -= 1.0;
+    }
+
+    fn text(&mut self, size: f32, x: f32, text: &str, bold: bool) {
+        self.ensure(1);
+        let (face, fallback) = if bold {
+            (self.bold, self.fallback_bold)
+        } else {
+            (self.regular, self.fallback_regular)
+        };
+        draw_summary_text(&mut self.ops, face, fallback, size, x, self.y, text);
+        self.y -= SUMMARY_LINE_MM;
+    }
+
+    fn gap(&mut self, mm: f32) {
+        self.y -= mm;
+    }
+
+    fn finish(mut self) -> Vec<Vec<Op>> {
+        if !self.ops.is_empty() {
+            self.pages.push(std::mem::take(&mut self.ops));
+        }
+        let total = self.pages.len();
+        for (index, ops) in self.pages.iter_mut().enumerate() {
+            let label = format!("Page {} of {}", index + 1, total);
+            let x = right_aligned_x(&label, 9.0, PAGE_W - SUMMARY_MARGIN_MM);
+            draw_summary_text(
+                ops,
+                self.regular,
+                self.fallback_regular,
+                9.0,
+                x,
+                15.0,
+                &label,
+            );
+        }
+        self.pages
+    }
+}
+
+/// Render the revision summary as a printable A4 PDF: revision metadata,
+/// totals, and one row per changed scene with a totals row. This is the
+/// artifact behind the summary's Print button, not a screenplay export.
+pub fn to_summary_pdf_bytes(
+    summary: &RevisionSummary,
+    project_title: &str,
+    fonts: &ExportFonts<'_>,
+) -> Result<Vec<u8>, PdfError> {
+    let mut doc = PdfDocument::new("Revision Summary");
+    let mut font_warnings = Vec::new();
+    let mut parse = |bytes: &[u8]| ParsedFont::from_bytes(bytes, 0, &mut font_warnings);
+    let regular_font = parse(fonts.regular).ok_or(PdfError::Font)?;
+    let bold_font = parse(fonts.bold).ok_or(PdfError::Font)?;
+    let fallback_regular_font = parse(fonts.fallback_regular).ok_or(PdfError::Font)?;
+    let fallback_bold_font = parse(fonts.fallback_bold).ok_or(PdfError::Font)?;
+    let regular = Face {
+        id: doc.add_font(&regular_font),
+        font: regular_font,
+    };
+    let bold = Face {
+        id: doc.add_font(&bold_font),
+        font: bold_font,
+    };
+    let fallback_regular = Face {
+        id: doc.add_font(&fallback_regular_font),
+        font: fallback_regular_font,
+    };
+    let fallback_bold = Face {
+        id: doc.add_font(&fallback_bold_font),
+        font: fallback_bold_font,
+    };
+
+    let mut sheet = SummarySheet::new(&regular, &bold, &fallback_regular, &fallback_bold);
+    sheet.text(16.0, SUMMARY_MARGIN_MM, "REVISION SUMMARY", true);
+    sheet.gap(1.0);
+    sheet.text(12.0, SUMMARY_MARGIN_MM, project_title, false);
+    sheet.gap(1.5);
+    let revision = if summary.name.trim().is_empty() {
+        format!("{} Revision", summary.color.label())
+    } else {
+        format!("{} Revision - {}", summary.color.label(), summary.name)
+    };
+    sheet.text(12.0, SUMMARY_MARGIN_MM, &revision, true);
+    let pages = format!(
+        "{} pages to {} pages ({:+})",
+        summary.base_pages,
+        summary.current_pages,
+        summary.pages_delta()
+    );
+    let date = if summary.date.is_empty() {
+        pages
+    } else {
+        format!("{}  -  {}", summary.date, pages)
+    };
+    sheet.text(10.0, SUMMARY_MARGIN_MM, &date, false);
+    sheet.gap(3.0);
+    sheet.text(
+        11.0,
+        SUMMARY_MARGIN_MM,
+        &format!(
+            "Added {}   Removed {}   Changed {}",
+            summary.added, summary.removed, summary.changed
+        ),
+        false,
+    );
+    sheet.gap(4.0);
+
+    sheet.text(10.0, SUMMARY_SCENE_X, "SCENE", true);
+    sheet.text(10.0, SUMMARY_HEADING_X, "HEADING", true);
+    for (label, right) in [
+        ("+ADD", SUMMARY_ADD_RIGHT),
+        ("-REM", SUMMARY_REM_RIGHT),
+        ("~CHG", SUMMARY_CHG_RIGHT),
+    ] {
+        sheet.text(10.0, right_aligned_x(label, 10.0, right), label, true);
+    }
+
+    if summary.scenes.is_empty() {
+        sheet.text(
+            10.0,
+            SUMMARY_MARGIN_MM,
+            "No changes in this revision.",
+            false,
+        );
+    }
+    for scene in &summary.scenes {
+        let parts = wrap_title_line(&scene.heading, SUMMARY_HEADING_CHARS);
+        sheet.ensure(parts.len());
+        let label = summary.scene_label(scene);
+        sheet.text(10.0, SUMMARY_SCENE_X, &label, false);
+        for (index, part) in parts.iter().enumerate() {
+            sheet.text(10.0, SUMMARY_HEADING_X, part, false);
+            if index == 0 {
+                let counts = [
+                    (scene.added.to_string(), SUMMARY_ADD_RIGHT),
+                    (scene.removed.to_string(), SUMMARY_REM_RIGHT),
+                    (scene.changed.to_string(), SUMMARY_CHG_RIGHT),
+                ];
+                for (count, right) in counts {
+                    sheet.text(10.0, right_aligned_x(&count, 10.0, right), &count, false);
+                }
+            }
+        }
+    }
+
+    sheet.gap(1.0);
+    sheet.ensure(1);
+    sheet.text(10.0, SUMMARY_HEADING_X, "TOTAL", true);
+    for (count, right) in [
+        (summary.added.to_string(), SUMMARY_ADD_RIGHT),
+        (summary.removed.to_string(), SUMMARY_REM_RIGHT),
+        (summary.changed.to_string(), SUMMARY_CHG_RIGHT),
+    ] {
+        sheet.text(10.0, right_aligned_x(&count, 10.0, right), &count, true);
+    }
+
+    let pages: Vec<PdfPage> = sheet
+        .finish()
+        .into_iter()
+        .map(|ops| PdfPage::new(Mm(PAGE_W), Mm(PAGE_H), ops))
+        .collect();
+    doc.with_pages(pages);
     let mut warnings = Vec::new();
     let bytes = doc.save(&PdfSaveOptions::default(), &mut warnings);
     Ok(bytes)

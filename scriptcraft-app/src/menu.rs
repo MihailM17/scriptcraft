@@ -26,6 +26,7 @@ pub const ID_DUAL_DIALOGUE: &str = "kit.dual_dialogue";
 pub const ID_START_REVISION: &str = "kit.start_revision";
 pub const ID_CLEAR_REVISIONS: &str = "kit.clear_revisions";
 pub const ID_REVISIONS: &str = "kit.revisions";
+pub const ID_REVISION_SUMMARY: &str = "kit.revision_summary";
 pub const ID_COMPARE_DRAFTS: &str = "kit.compare_drafts";
 pub const ID_NAVIGATOR: &str = "kit.navigator";
 pub const ID_FORMAT_PANEL: &str = "kit.format_panel";
@@ -117,6 +118,7 @@ impl NativeMenu {
         let sep_dual = PredefinedMenuItem::separator();
         let start_revision = MenuItem::with_id(ID_START_REVISION, "Start Revision", true, None);
         let revisions = MenuItem::with_id(ID_REVISIONS, "Revision History...", true, None);
+        let summary = MenuItem::with_id(ID_REVISION_SUMMARY, "Revision Summary...", true, None);
         let compare_drafts = MenuItem::with_id(ID_COMPARE_DRAFTS, "Compare Drafts...", true, None);
         let sep_rev = PredefinedMenuItem::separator();
         let clear_revisions =
@@ -129,6 +131,7 @@ impl NativeMenu {
                 &sep_dual,
                 &start_revision,
                 &revisions,
+                &summary,
                 &compare_drafts,
                 &sep_rev,
                 &clear_revisions,
