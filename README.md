@@ -8,17 +8,16 @@ production revisions. Open KIT projects, exchange Final Draft files, lock
 pages, issue coloured revisions, and export page-exact PDFs — offline, on
 macOS, Windows and Linux.
 
-> **Status — v0.7.2.** The current release packages the v0.8 M0–M4 work:
-> stable block/scene identity across save and external KIT edits, a
-> deterministic draft diff, a read-only compare workspace, restore-as-a-copy,
-> and omitted scenes that keep their production numbers while their bodies
-> stay out of statistics and PDF. It also writes real KIT `script_versions`
-> rows, cleans up Settings so every control takes effect, and makes
-> Dock/AppleScript quit ask before discarding unsaved work.
+> **Status — v0.8.0.** Revision-complete for the core production workflow:
+> stable block/scene identity, draft diff and compare, restore-as-copy, omitted
+> scenes, dual dialogue, title-page editor and revision summary (scene counts,
+> CSV and printable PDF). Layout metrics are derived from the bundled font,
+> `.kitsp` saves preserve unknown sidecar rows, and CI runs runtime interaction
+> smoke on macOS/Linux/Windows.
 >
-> **Next — v0.8 revision-complete.** Dual dialogue (M5), the title-page editor
-> (M6) and the revision summary (M7) are done; signing/runtime CI (M8) and the
-> refactor/docs pass (M9) remain. See
+> **Distribution note:** macOS builds in this release are ad-hoc signed (no
+> Developer ID/notarisation), Windows packages are unsigned, and auto-update is
+> deferred. See [`docs/release-checklist.md`](docs/release-checklist.md) and
 > [`docs/v0.8-plan.md`](docs/v0.8-plan.md).
 
 ![ScriptCraft editor](scriptcraft-app/tests/snapshots/01_script_top.png)
@@ -61,7 +60,9 @@ app on day one.
 - **Revision summary** — scene-grouped added/removed/changed counts, page
   baseline, totals, deterministic UTF-8 CSV for Excel/Numbers and a printable
   A4 PDF; counts come from the same diff as compare.
-- **Still ahead (v0.8)** — signed builds, auto-update and runtime CI.
+- **Release tooling:** ad-hoc macOS bundling script, Criterion benchmarks,
+  release checklist and migration notes. Signed/notarised distribution and
+  auto-update remain follow-up work.
 
 ## The editor
 
@@ -122,11 +123,11 @@ It is not yet:
 - a DOCX/RTF converter or a spellchecker;
 - a plugin platform;
 - fully signed and notarised on every platform. macOS builds are ad-hoc signed
-  for now; Windows and Linux packages are new and still need wider runtime
-  testing.
+  (no Developer ID certificate in this build pipeline), Windows packages are
+  unsigned, and auto-update is deferred.
 
 The scope is deliberate. If a feature is not needed for the revision workflow
-or the writing core, it is not in v0.8.
+or the writing core, it is not in this release.
 
 ## Install
 
@@ -153,8 +154,9 @@ cargo build --release -p scriptcraft-app
 ```
 
 Windows and Linux packages are built by `.github/workflows/packages.yml`;
-the macOS `.app`/DMG is built locally (ad-hoc signed until notarisation lands
-in v0.8).
+the macOS `.app`/DMG is built locally with `packaging/macos/bundle.sh`
+(ad-hoc signed here; Developer ID + notarisation when credentials are available). See
+[`docs/release-checklist.md`](docs/release-checklist.md).
 
 ## Tests
 
@@ -188,8 +190,11 @@ matrix.
   `fixtures/example.fdx` — small Final Draft sample for the FDX tests.
 - `fixtures/real/` — permission-cleared compatibility files; see
   `fixtures/real/README.md` before adding one.
-- `docs/` — KIT format notes, revision plans, format spikes and the v0.8
-  development plan.
+- `docs/` — format notes, plans, spikes, benchmarks, release checklist,
+  migration guide and draft release notes.
+
+Migrating from KIT Scenarist? See
+[`docs/migration-from-kit.md`](docs/migration-from-kit.md).
 
 ## Contributing
 

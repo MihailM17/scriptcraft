@@ -21,12 +21,12 @@ Status legend: `[ ]` to do `[-]` in progress `[x]` done `[!]` blocked
 | Date | 2026-11-10 |
 | Project | ScriptCraft — free, open-source, revision-first screenwriting studio |
 | Repo | `/Users/mihailmihaylov/Documents/Dev_work/scriptcraft` |
-| Branch / commit | `main` after v0.8 M8/M9 progress; tags `v0.7.0` at `9ce2e0e`, `v0.7.1` at `d8b17de` (maintenance) and `v0.7.2` at `8b75f9a`; v0.8 M0 at `9bd4839`, M1 at `1948c62`, M2 at `b660219`, M3 at `2708838`, M4 at `e840a67`; UI polish at `41ea7d5`; M5 at `b52b512`; dependency refresh at `c1990ca`; M6 at `c80c50c`; M7 at `9f4c833`; M8/M9 progress at `a44ace0`. |
+| Branch / commit | `main` preparing v0.8.0; tags `v0.7.0` at `9ce2e0e`, `v0.7.1` at `d8b17de`, `v0.7.2` at `8b75f9a`; v0.8 M0–M7 at `9bd4839`–`9f4c833`; M8/M9 progress at `a44ace0`, `1fe8c21`, `9d791a7`, `3b61227`. |
 | Rust workspace | `scriptcraft-core`, `scriptcraft-app`, `scriptcraft-layout` (`Cargo.toml`, resolver 2) |
-| App crate version | `scriptcraft-app 0.7.2` at tag `v0.7.2`; `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
-| Distribution | **v0.7.2 released 2026-11-02** — <https://github.com/MihailM17/scriptcraft/releases/tag/v0.7.2> packages v0.8 M0–M4, KIT version writing, the Settings cleanup and the Dock-quit fix. Last published release: v0.7.2. |
+| App crate version | `scriptcraft-app 0.8.0` (release prep); `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
+| Distribution | **v0.8.0 prepared for release** — ad-hoc macOS DMG (no Developer ID/notarisation), unsigned Windows/Linux packages via CI workflow as available, no auto-update. Last published release: v0.7.2. |
 | Current one-liner | Free, open-source, revision-first studio: one screenplay engine (Editor 2.0), crash-safe saves + recovery, revision colours/marks/pages, compare/restore, revision summary with scene counts + CSV + printable PDF, omitted scenes, smart screenplay paste, KIT version write/import, revision headers/title-page fields, production page locks with A/B page numbers and FDX revision metadata, dual dialogue side by side in editor/PDF with FDX interchange, a title-page editor whose A4 preview is the exporter's own layout, KIT-style editor/navigator settings, macOS standard selection keys, a compact file-focused Menu, OFL fonts, FDX/Fountain import/export; PDF export paginates exactly like the editor. |
-| Next release | **v0.8 revision-complete** — signing/runtime CI (M8) and the refactor/docs pass (M9) remain. See `docs/v0.8-plan.md`. |
+| Next release | **v0.8.0** — tag and publish with release notes, migration guide and checksums (Developer ID/notarisation and auto-update deferred). See `docs/release-checklist.md`. |
 
 **Positioning (locked 2026-10-26):** the free, open-source, revision-first
 screenwriting studio. Moat = the production revision workflow (colours, locked

@@ -1,4 +1,5 @@
-//! Small modal/modeless windows (About, Help) extracted from `app.rs`.
+//! Small modal/modeless windows extracted from `app.rs` (About, Help,
+//! clear-revision confirmation).
 
 use egui::Context;
 
@@ -39,4 +40,36 @@ pub fn help(ctx: &Context, open: &mut bool) {
             ui.separator();
             ui.label("Keep writing!");
         });
+}
+
+/// Confirmation dialog for clearing all revision history. Returns true when
+/// the user confirms clearing.
+pub fn confirm_clear_revisions(ctx: &Context, open: &mut bool) -> bool {
+    let mut win_open = *open;
+    let mut clear = false;
+    let mut cancel = false;
+    egui::Window::new("Clear Revision History")
+        .open(&mut win_open)
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+        .show(ctx, |ui| {
+            ui.label("Remove all revision colours and baselines from this project?");
+            ui.label("The script text is not changed.");
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if ui.button("Cancel").clicked() {
+                    cancel = true;
+                }
+                if ui.button("Clear Revision History").clicked() {
+                    clear = true;
+                }
+            });
+        });
+    if clear || cancel || !win_open {
+        *open = false;
+    } else {
+        *open = win_open;
+    }
+    clear
 }

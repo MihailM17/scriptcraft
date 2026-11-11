@@ -5599,34 +5599,8 @@ impl ScriptCraftApp {
     }
 
     fn clear_revisions_window(&mut self, ctx: &egui::Context) {
-        let mut open = self.show_clear_revisions;
-        let mut clear = false;
-        let mut cancel = false;
-        egui::Window::new("Clear Revision History")
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(false)
-            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-            .show(ctx, |ui| {
-                ui.label("Remove all revision colours and baselines from this project?");
-                ui.label("The script text is not changed.");
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    if ui.button("Cancel").clicked() {
-                        cancel = true;
-                    }
-                    if ui.button("Clear Revision History").clicked() {
-                        clear = true;
-                    }
-                });
-            });
-        if clear {
+        if crate::dialogs::confirm_clear_revisions(ctx, &mut self.show_clear_revisions) {
             self.clear_revision_history();
-            self.show_clear_revisions = false;
-        } else if cancel {
-            self.show_clear_revisions = false;
-        } else {
-            self.show_clear_revisions = open;
         }
     }
 
