@@ -24,9 +24,9 @@ Status legend: `[ ]` to do `[-]` in progress `[x]` done `[!]` blocked
 | Branch / commit | `main` at v0.8.0; tags `v0.7.0` at `9ce2e0e`, `v0.7.1` at `d8b17de`, `v0.7.2` at `8b75f9a`; v0.8 M0–M7 at `9bd4839`–`9f4c833`; M8/M9 progress at `a44ace0`, `1fe8c21`, `9d791a7`, `3b61227`; release prep at `d36ae4b`. |
 | Rust workspace | `scriptcraft-core`, `scriptcraft-app`, `scriptcraft-layout` (`Cargo.toml`, resolver 2) |
 | App crate version | `scriptcraft-app 0.8.0`; `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
-| Distribution | **v0.8.0 release** — ad-hoc macOS DMG (no Developer ID/notarisation), Windows/Linux packages via CI `Packages` workflow, no auto-update. Last published release: v0.7.2 (superseded by v0.8.0 when published). |
+| Distribution | **v0.8.0 released 2026-11-10** — <https://github.com/MihailM17/scriptcraft/releases/tag/v0.8.0>. macOS arm64 DMG attached (ad-hoc signed, not notarised). Windows/Linux packages: CI `Packages` workflow dispatched for tag `v0.8.0` (run 43002697070). No auto-update. |
 | Current one-liner | Free, open-source, revision-first studio: one screenplay engine (Editor 2.0), crash-safe saves + recovery, revision colours/marks/pages, compare/restore, revision summary with scene counts + CSV + printable PDF, omitted scenes, smart screenplay paste, KIT version write/import, revision headers/title-page fields, production page locks with A/B page numbers and FDX revision metadata, dual dialogue side by side in editor/PDF with FDX interchange, a title-page editor whose A4 preview is the exporter's own layout, KIT-style editor/navigator settings, macOS standard selection keys, a compact file-focused Menu, OFL fonts, FDX/Fountain import/export; PDF export paginates exactly like the editor. |
-| Next release | **v0.8.0** — tag and publish with release notes, migration guide and checksums (Developer ID/notarisation and auto-update deferred). See `docs/release-checklist.md`. |
+| Next release | **v0.8.1 / follow-up** — attach Windows/Linux release assets when CI completes, Windows signing path, optional release-binary/screenshot probe, further M9 extraction (`export/settings/research`), Developer ID/notarisation and auto-update when available. |
 
 **Positioning (locked 2026-10-26):** the free, open-source, revision-first
 screenwriting studio. Moat = the production revision workflow (colours, locked
@@ -1608,13 +1608,28 @@ Newest entries at the bottom. Each entry: date — what changed / what was found
     startup smoke on non-macOS runners (snapshots remain macOS-only).
   - Docs: `docs/v0.8-plan.md` and ROADMAP updated to reflect M8 progress.
 
-### 2026-11-10 — M9: extract About/Help dialogs
+### 2026-11-10 — M9: extract About/Help dialogs and release prep
 
-  - `scriptcraft-app/src/dialogs.rs`: `about` and `help` windows extracted from
-    `app.rs` (no behavior change); `ScriptCraftApp::shortcut_prefix` made
-    `pub(crate)` for the help text. `app.rs` now 8,510 lines.
-  - Local verification: `cargo fmt --all -- --check`, `cargo check -p
-    scriptcraft-app`. Commit follows.
+  - `scriptcraft-app/src/dialogs.rs`: `about`, `help` and clear-revisions
+    confirmation extracted from `app.rs` (no behavior change);
+    `ScriptCraftApp::shortcut_prefix` made `pub(crate)`. `app.rs` 8,510 lines.
+  - Docs: `docs/migration-from-kit.md`, `docs/releases/v0.8.0.md`; README and
+    `docs/v0.8-plan.md` updated for v0.8.0 (M0–M7 complete, M8 partial, M9
+    substantially addressed for release). Version bumped to 0.8.0.
+  - Gate: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets
+    -- -D warnings`, `cargo test --workspace` (52 interaction + 19 snapshots;
+    core 100 lib + 24 a95 + 6 dual + 12 identity + 4 omitted + 4 restore;
+    layout 26 unit + 4 dual + 3 omitted + 1 pagination + 3 parity + 5 pdf + 4
+    place + 2 relayout + 3 scale), `cargo deny check`, `git diff --check`.
+  - Release: tag `v0.8.0` at `0052bba` (prep `d36ae4b`), pushed `main`+tag.
+    macOS arm64 DMG built via `packaging/macos/bundle.sh` (ad-hoc, not
+    notarised): `ScriptCraft-0.8.0-macos-arm64.dmg` (8,159,816 bytes) SHA-256
+    `3033972495d65045a3cf95033e7508dc9d401607260d91bbee0c0cb3f5cb5faf`;
+    checksum file SHA-256 `70c2d1d622b93cb17b0dfc7d79935afeb64051db5bb32e61e1be4183c5da85c1`.
+    GitHub release published: <https://github.com/MihailM17/scriptcraft/releases/tag/v0.8.0>
+    with DMG + `.sha256` attached. `Packages` workflow dispatched for Windows/
+    Linux artifacts (run 43002697070, in progress at log time). Commits:
+    `d36ae4b`, `0052bba`.
 
 ---
 
