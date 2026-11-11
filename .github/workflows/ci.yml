@@ -37,21 +37,27 @@ jobs:
         run: cargo test --workspace
 
   test-linux:
-    name: tests (Linux, core) + app compile
+    name: tests (Linux) + app smoke
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install Linux deps
-        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev xvfb
       - name: Core tests
         run: cargo test -p scriptcraft-core
+      - name: Layout tests
+        run: cargo test -p scriptcraft-layout
+      - name: App lib tests
+        run: cargo test -p scriptcraft-app --lib
+      - name: App interaction smoke (Xvfb)
+        run: xvfb-run -a cargo test -p scriptcraft-app --test interaction -- --test-threads=1
       - name: Compile app and all test targets
         run: cargo check -p scriptcraft-app --all-targets
 
   test-windows:
-    name: tests (Windows, core) + app compile
+    name: tests (Windows) + app smoke
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -59,6 +65,12 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Core tests
         run: cargo test -p scriptcraft-core
+      - name: Layout tests
+        run: cargo test -p scriptcraft-layout
+      - name: App lib tests
+        run: cargo test -p scriptcraft-app --lib
+      - name: App interaction smoke
+        run: cargo test -p scriptcraft-app --test interaction -- --test-threads=1
       - name: Compile app and all test targets
         run: cargo check -p scriptcraft-app --all-targets
 

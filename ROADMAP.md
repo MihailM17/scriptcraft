@@ -198,10 +198,11 @@ direct workspace dependencies. There is still no benchmark harness.
   real Final Draft fixture). Planned: v0.8.1+.
 - [-] **Release engineering is partial.** M8 now has `docs/release-checklist.md`,
   `docs/benchmarks.md`, `packaging/macos/bundle.sh` (ad-hoc signed build
-  verified 2026-11-10) and Criterion benches for load/diff/marks/layout/relayout
-  /PDF. Still open: Developer ID signing + notarisation (needs certificate/
-  profile), Windows signing path, auto-update manifests (deferred to v0.8.1),
-  and Linux/Windows runtime CI smoke tests.
+  verified 2026-11-10), Criterion benches for load/diff/marks/layout/relayout
+  /PDF, and CI interaction smoke on Linux (Xvfb) and Windows. Still open:
+  Developer ID signing + notarisation (needs certificate/profile), Windows
+  signing path, auto-update manifests (deferred to v0.8.1), and a packaged-binary
+  launch/screenshot probe.
 - [x] **Font metrics derived from the bundled font.** Fixed 2026-11-10:
   `scriptcraft-layout/build.rs` parses Courier Prime's hhea metrics to generate
   `ROW_MM`; `row_mm_for_face` and tests prove a different font (IBM Plex Mono)
@@ -343,10 +344,11 @@ gate**. M8 runs in parallel; M9 is continuous.
       generated from Courier Prime TTF metrics (`row_mm_for_face` + 2-font test),
       Criterion benches (`scriptcraft-core/benches/engine.rs`,
       `scriptcraft-layout/benches/layout.rs`, `docs/benchmarks.md`), unknown
-      `scenario_data` preserved on save, `docs/release-checklist.md` and
+      `scenario_data` preserved on save, `docs/release-checklist.md`,
       `packaging/macos/bundle.sh` (ad-hoc DMG build + `codesign --verify`
-      passed locally). Remaining: Developer ID/notarisation, Windows signing
-      path, auto-update manifests (deferred v0.8.1), Linux/Windows runtime CI.
+      passed locally), and CI interaction smoke under Xvfb on Linux/Windows.
+      Remaining: Developer ID/notarisation, Windows signing path, auto-update
+      manifests (deferred v0.8.1), packaged-binary launch/screenshot probe.
 - [-] M9 — `scriptcraft-app/src/revision_summary.rs` extracted 2026-11-10
       (`app.rs` 8,538). Remaining: extract compare/title/export/settings/
       research views and update format/release docs.
@@ -1585,9 +1587,24 @@ Newest entries at the bottom. Each entry: date — what changed / what was found
     --check`. Bench executables compile and `--quick` runs recorded. Commit
     `a44ace0`.
   - Still open for M8: Developer ID signing/notarisation (needs cert/profile),
-    Windows signing path, auto-update manifests/channel (v0.8.1), Linux/Windows
-    runtime CI smoke tests. Still open for M9: extract more views
-    (compare/title/export/settings/research) and update format/release docs.
+    Windows signing path, auto-update manifests/channel (v0.8.1), and a
+    packaged-binary launch/screenshot probe. Still open for M9: extract more
+    views (compare/title/export/settings/research) and update format/release
+    docs.
+
+### 2026-11-10 — M8 CI: Linux/Windows interaction smoke
+
+  - `.github/workflows/ci.yml`: Linux job now installs `xvfb`, runs
+    core/layout/lib tests and `xvfb-run -a cargo test -p scriptcraft-app --test
+    interaction -- --test-threads=1`, then compiles all app targets. Windows
+    job runs core/layout/lib tests and the interaction suite before compiling
+    all app targets. This replaces compile-only app coverage with runtime
+    kittest smoke on non-macOS runners (snapshots remain macOS-only).
+  - Docs: `docs/v0.8-plan.md` and ROADMAP updated to reflect M8 progress.
+  - Local verification: `cargo fmt --all -- --check`, `cargo clippy --workspace
+    --all-targets -- -D warnings`, `cargo deny check`, `git diff --check`. Full
+    `cargo test --workspace` remains green from the previous gate. Commit
+    follows.
 
 ---
 
