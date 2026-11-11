@@ -21,7 +21,7 @@ Status legend: `[ ]` to do `[-]` in progress `[x]` done `[!]` blocked
 | Date | 2026-11-10 |
 | Project | ScriptCraft — free, open-source, revision-first screenwriting studio |
 | Repo | `/Users/mihailmihaylov/Documents/Dev_work/scriptcraft` |
-| Branch / commit | `main` after v0.8 M7; tags `v0.7.0` at `9ce2e0e`, `v0.7.1` at `d8b17de` (maintenance) and `v0.7.2` at `8b75f9a`; v0.8 M0 at `9bd4839`, M1 at `1948c62`, M2 at `b660219`, M3 at `2708838`, M4 at `e840a67`; UI polish at `41ea7d5`; M5 at `b52b512`; dependency refresh at `c1990ca`; M6 at `c80c50c`; M7 at `9f4c833`. |
+| Branch / commit | `main` after v0.8 M7; tags `v0.7.0` at `9ce2e0e`, `v0.7.1` at `d8b17de` (maintenance) and `v0.7.2` at `8b75f9a`; v0.8 M0 at `9bd4839`, M1 at `1948c62`, M2 at `b660219`, M3 at `2708838`, M4 at `e840a67`; UI polish at `41ea7d5`; M5 at `b52b512`; dependency refresh at `c1990ca`; M6 at `c80c50c`; M7 at `9f4c833`. Uncommitted M8/M9 progress: `ROW_MM` derived from Courier Prime at build time, criterion benches, unknown `scenario_data` preserved on save, release checklist/benchmarks docs and `packaging/macos/bundle.sh`, and revision-summary UI extracted to `revision_summary.rs`. |
 | Rust workspace | `scriptcraft-core`, `scriptcraft-app`, `scriptcraft-layout` (`Cargo.toml`, resolver 2) |
 | App crate version | `scriptcraft-app 0.7.2` at tag `v0.7.2`; `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
 | Distribution | **v0.7.2 released 2026-11-02** — <https://github.com/MihailM17/scriptcraft/releases/tag/v0.7.2> packages v0.8 M0–M4, KIT version writing, the Settings cleanup and the Dock-quit fix. Last published release: v0.7.2. |
@@ -82,7 +82,7 @@ writing features.
   - `pdf.rs` — print layout + `printpdf` renderer (title page, scene/page numbers, watermarks, current-revision margin bars/pages).
   - `tests/` — `parity.rs` (golden hashes), `pagination.rs`, `place.rs`, `pdf_export.rs`, `scale.rs` (500-page timings).
 - `scriptcraft-app/src/`
-  - `app.rs` — 8,661-line monolith: all state, IO, views, editor, export dialog. `title_page.rs` holds the M6 form and PDF-matched preview; `core::summary` derives M7 counts and this file paints the summary window.
+  - `app.rs` — 8,538-line monolith: all state, IO, views, editor, export dialog. `title_page.rs` holds the M6 form and PDF-matched preview; `revision_summary.rs` paints the M7 window while `core::summary` derives the counts. `quit_guard.rs` routes native quit through the save prompt.
   - `script_view.rs` — Editor 2.0 `ScriptView` (the only editor since M5): paints `DocLayout` pages (visible pages only; zoom scales geometry, never breaks) and edits by emitting `core::edit` commands — selection/caret, keyboard/pointer, cross-block clipboard, IME, command-history undo/redo.
   - `theme.rs` — palette + egui style. `menu.rs` — native macOS menu. `main.rs`, `lib.rs`.
   - `assets/fonts/` — Courier Prime (Regular/Bold/Italic), PT Sans, IBM Plex Mono; all OFL, license texts in `assets/fonts/licenses/`.
@@ -177,11 +177,11 @@ direct workspace dependencies. There is still no benchmark harness.
 - [x] **Proprietary fonts bundled.** Fixed 2026-10-19: `cour*.ttf` removed;
   editor and PDF now use Courier Prime (OFL), OFL license texts added for all
   bundled fonts, root `LICENSE` (Apache-2.0) and `NOTICE` added.
-- [ ] **Monolith.** `app.rs` is 8,195 lines; state, IO, layout and UI are entangled. v0.8 extracts views one at a time; no big-bang rewrite.
+- [-] **Monolith.** `app.rs` is 8,538 lines (down from 8,661 before M7/M8 work); state, IO, layout and UI are still entangled. v0.8 M9 extracts views one at a time; no big-bang rewrite.
 - [x] **Revision summary shipped.** Fixed 2026-11-10 (v0.8 M7): the summary
   derives from the same `DraftDiff` as compare, groups counts by scene with a
   totals row, and exports deterministic UTF-8 CSV (BOM for Excel) plus a
-  printable A4 PDF. See `scriptcraft-core/src/summary.rs`.
+  printable A4 PDF. See `scriptcraft-core/src/summary.rs` and `scriptcraft-app/src/revision_summary.rs`.
 - [x] **Stable block/scene identity now survives `.kitsp` reopen.** Fixed
   2026-10-26 (v0.8 M0): versioned `scenario_data.scriptcraft_ids` and
   `scriptcraft_scene_meta` rows persist `ScriptBlock.id` and scene identity;
@@ -195,14 +195,19 @@ direct workspace dependencies. There is still no benchmark harness.
   Compare/restore, sidecar-only omitted scenes, dual dialogue, the
   title-page editor and the revision summary shipped in v0.8 M1–M7. Still open:
   FDX revision-ID import, spellcheck, and an FDX omission mapping (waiting on a
-  real Final Draft fixture). Planned: v0.8 M8/M9.
-- [ ] **No signed/notarised builds or auto-update.** macOS is ad-hoc signed;
-  Windows/Linux packages are unsigned, and Windows/Linux have no GUI smoke
-  test. Planned: v0.8 M8.
-- [ ] **Hardcoded font metrics.** `ROW_MM` is the measured Courier Prime value
-  (`scriptcraft-layout/src/place.rs:24`), but is still a constant. Must derive
-  from the TTF at runtime (e.g. `ttf-parser`) so swapping fonts cannot break
-  pagination. Planned: v0.8 M8.
+  real Final Draft fixture). Planned: v0.8.1+.
+- [-] **Release engineering is partial.** M8 now has `docs/release-checklist.md`,
+  `docs/benchmarks.md`, `packaging/macos/bundle.sh` (ad-hoc signed build
+  verified 2026-11-10) and Criterion benches for load/diff/marks/layout/relayout
+  /PDF. Still open: Developer ID signing + notarisation (needs certificate/
+  profile), Windows signing path, auto-update manifests (deferred to v0.8.1),
+  and Linux/Windows runtime CI smoke tests.
+- [x] **Font metrics derived from the bundled font.** Fixed 2026-11-10:
+  `scriptcraft-layout/build.rs` parses Courier Prime's hhea metrics to generate
+  `ROW_MM`; `row_mm_for_face` and tests prove a different font (IBM Plex Mono)
+  produces a different pitch instead of silently misprinting pagination. Unknown
+  `scenario_data` rows are also preserved on save (`save_preserves_unknown_
+  scenario_data_rows`).
 
 ---
 
@@ -211,8 +216,9 @@ direct workspace dependencies. There is still no benchmark harness.
 ### Phase 0 — Trust (week 1)
 
 - [x] Apache-2.0 `LICENSE`, `NOTICE`, font license files; remove `cour*.ttf`.
-- [-] Switch editor + PDF to Courier Prime (done); derive line metrics from the
-  font file (pending — constant updated to the measured 2300/2048 for now).
+- [x] Switch editor + PDF to Courier Prime (done); derive line metrics from the
+  font file (done 2026-11-10 — `ROW_MM` generated from Courier Prime hhea in
+  `scriptcraft-layout/build.rs`, with a second-font pitch test).
 - [x] Fix metadata key aliases (accept both spellings); persist metadata in `do_save`.
 - [x] Atomic saves: write temp in same dir → fsync → rename; keep `.bak`.
 - [x] Recovery file + launch-time "restore unsaved changes" prompt.
@@ -265,9 +271,11 @@ Source of truth: `docs/v0.8-plan.md`.
   Shipped 2026-11-09.
 - [x] **M7 Revision summary** — scene/page/block counts, CSV + printable view.
   Shipped 2026-11-10.
-- [ ] **M8 Release engineering** — signing/notarisation, auto-update, runtime
-  CI, Dock quit, font metrics, benchmarks.
-- [ ] **M9 Refactor + docs** — extract views, update format docs/release notes.
+- [-] **M8 Release engineering** — packaging/checklist/benchmarks/font metrics/
+  unknown-data preservation shipped 2026-11-10; signing/notarisation, Windows
+  signing, auto-update manifests and Linux/Windows runtime CI remain.
+- [-] **M9 Refactor + docs** — `revision_summary.rs` extracted 2026-11-10; more
+  view extraction and format/release docs remain.
 - [ ] **v0.9** — production reports: scene/location/cast/structure/activity,
   CSV + HTML; CLI/JSON export. Tags/breakdowns depend on M0.
 - [ ] Later: FDX revision-ID import, spellcheck (pure-Rust, e.g. `zspell`),
@@ -331,12 +339,17 @@ gate**. M8 runs in parallel; M9 is continuous.
 - [x] M7 — revision summary: scene-grouped added/removed/changed counts, page
       baseline, selectable baseline, deterministic CSV and printable A4 PDF.
       Shipped 2026-11-10 (`9f4c833`).
-- [-] M8 — Dock/AppleScript quit fixed 2026-11-02 (native `terminate:`
-      routed through the save prompt). Remaining: signing/notarisation,
-      auto-update, Windows/Linux runtime CI, font metrics from TTF, benchmark
-      harness.
-- [ ] M9 — extract compare/title/summary views; update README, ROADMAP and
-      `docs/kitsp-format.md`.
+- [-] M8 — Dock/AppleScript quit fixed 2026-11-02. 2026-11-10 added: `ROW_MM`
+      generated from Courier Prime TTF metrics (`row_mm_for_face` + 2-font test),
+      Criterion benches (`scriptcraft-core/benches/engine.rs`,
+      `scriptcraft-layout/benches/layout.rs`, `docs/benchmarks.md`), unknown
+      `scenario_data` preserved on save, `docs/release-checklist.md` and
+      `packaging/macos/bundle.sh` (ad-hoc DMG build + `codesign --verify`
+      passed locally). Remaining: Developer ID/notarisation, Windows signing
+      path, auto-update manifests (deferred v0.8.1), Linux/Windows runtime CI.
+- [-] M9 — `scriptcraft-app/src/revision_summary.rs` extracted 2026-11-10
+      (`app.rs` 8,538). Remaining: extract compare/title/export/settings/
+      research views and update format/release docs.
 - [ ] Release gate and 5–10 writer validation; tag v0.8.0.
 
 Exit: a writer can compare Blue vs Pink, jump changes, restore Blue as a copy,
@@ -1540,9 +1553,40 @@ Newest entries at the bottom. Each entry: date — what changed / what was found
     layout 24 unit + 4 dual + 3 omitted + 1 pagination + 3 parity + 5 pdf +
     4 place + 2 relayout + 3 scale), `cargo deny check` and
     `git diff --check` green. Commit `9f4c833`.
-  - Next: v0.8 M8 release engineering (signing/notarisation, auto-update,
-    runtime CI, remaining Dock/font-metrics/benchmark work), then M9 refactor
-    and docs, then v0.8.0.
+  - Next: v0.8 M8 release engineering and M9 refactor/docs, then v0.8.0.
+
+### 2026-11-10 — v0.8 M8 progress: font metrics, benches, packaging/docs, M9 extract
+
+  - `scriptcraft-layout/build.rs` + `place.rs`: generate `ROW_MM` from the
+    bundled Courier Prime TTF hhea metrics at build time; `row_mm_for_face`
+    exported and tested against Courier Prime (4.7542 mm) and IBM Plex Mono
+    (5.5033 mm) so a font swap cannot silently misprint pagination.
+  - Benches: `scriptcraft-core/benches/engine.rs` (load/diff/compare/marks) and
+    `scriptcraft-layout/benches/layout.rs` (layout/relayout/pdf) with Criterion;
+    baselines recorded in `docs/benchmarks.md` (A95, macOS arm64 quick run).
+  - Safety: `save_preserves_unknown_scenario_data_rows` in
+    `scriptcraft-core/tests/test_a95.rs` proves future `scenario_data` rows
+    survive a normal save byte-for-byte.
+  - Release: `docs/release-checklist.md`, `packaging/macos/Info.plist.in`,
+    `packaging/macos/bundle.sh`; local ad-hoc DMG build and `codesign --verify
+    --deep --strict` passed (artifacts cleaned, not committed). Windows signing
+    deferred and auto-update manifests deferred to v0.8.1 in the plan/checklist.
+  - M9: extracted revision-summary UI to `scriptcraft-app/src/revision_summary.rs`
+    (painted by `SummaryAction`; `app.rs` delegates), shrinking `app.rs` to
+    8,538 lines.
+  - `deny.toml`: ignored `RUSTSEC-2026-0192` for direct `ttf-parser` use in the
+    layout build/metrics path (bundled trusted fonts only; crate already
+    transitive via epaint/winit/printpdf).
+  - Gate (workspace): `cargo fmt --all -- --check`, `cargo clippy --workspace
+    --all-targets -- -D warnings`, `cargo test --workspace` (52 interaction + 19
+    snapshots; core 100 lib + 24 a95 + 6 dual + 12 identity + 4 omitted + 4
+    restore; layout 26 unit + 4 dual + 3 omitted + 1 pagination + 3 parity + 5
+    pdf + 4 place + 2 relayout + 3 scale), `cargo deny check`, `git diff
+    --check`. Bench executables compile and `--quick` runs recorded.
+  - Still open for M8: Developer ID signing/notarisation (needs cert/profile),
+    Windows signing path, auto-update manifests/channel (v0.8.1), Linux/Windows
+    runtime CI smoke tests. Still open for M9: extract more views
+    (compare/title/export/settings/research) and update format/release docs.
 
 ---
 

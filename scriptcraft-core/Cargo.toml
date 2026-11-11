@@ -15,3 +15,10 @@ thiserror = "2"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem"] }
+
+[dev-dependencies]
+criterion = "0.8.2"
+
+[[bench]]
+name = "engine"
+harness = false

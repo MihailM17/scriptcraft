@@ -22,6 +22,14 @@ yanked = "deny"
 # each dependency bump; any *vulnerability* (not just unmaintained) is still
 # a hard failure.
 unmaintained = "workspace"
+ignore = [
+    # Unmaintained (not a vulnerability). Direct dep of scriptcraft-layout's
+    # build script and metrics helper, used only to read hhea values from our
+    # bundled, trusted Courier Prime/IBM Plex Mono fonts. ttf-parser is also a
+    # deep transitive dep of epaint/winit/printpdf; migrate to skrifa when the
+    # font stack moves.
+    "RUSTSEC-2026-0192",
+]
 
 [licenses]
 version = 2

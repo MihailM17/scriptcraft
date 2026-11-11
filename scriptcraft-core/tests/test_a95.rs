@@ -488,6 +488,36 @@ fn recovery_file_roundtrip() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Rows ScriptCraft does not know about belong to other tools (or a newer
+/// build) and must survive an ordinary save byte-for-byte.
+#[test]
+fn save_preserves_unknown_scenario_data_rows() {
+    let tmp = std::env::temp_dir().join("scriptcraft_test_unknown_data.kitsp");
+    std::fs::copy(FIXTURE, &tmp).expect("copy fixture");
+    let key = "future_app_state";
+    let value = "{\"schema\":9,\"keep\":true}";
+    {
+        let conn = rusqlite::Connection::open(&tmp).unwrap();
+        conn.execute(
+            "INSERT INTO scenario_data (data_name, data_value) VALUES (?1, ?2)
+             ON CONFLICT(data_name) DO UPDATE SET data_value=excluded.data_value",
+            rusqlite::params![key, value],
+        )
+        .unwrap();
+    }
+
+    let mut p = kitsp::load_file(&tmp).expect("load copy");
+    p.blocks[0].text.push_str(" — saved");
+    kitsp::save_file(&tmp, &p).expect("save back");
+
+    let conn = rusqlite::Connection::open(&tmp).unwrap();
+    assert_eq!(
+        scenario_data_value(&conn, key).as_deref(),
+        Some(value),
+        "save must not delete or rewrite unknown scenario_data rows"
+    );
+}
+
 /// `save_file` may only touch `scenario` id=1 (text + corkboard sync).
 /// Every other table and row in the KIT database must survive untouched.
 #[test]

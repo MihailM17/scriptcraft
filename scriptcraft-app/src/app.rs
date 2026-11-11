@@ -5490,145 +5490,22 @@ impl ScriptCraftApp {
             return;
         }
         self.ensure_summary();
-        let mut open = self.show_summary;
-        let mut base = self.summary_base;
-        let mut save_csv = false;
-        let mut print = false;
-        let mut close = false;
-        egui::Window::new("Revision Summary")
-            .open(&mut open)
-            .collapsible(false)
-            .resizable(true)
-            .default_width(660.0)
-            .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label("Baseline:");
-                    let selected = self
-                        .revisions
-                        .sets
-                        .get(base)
-                        .map(|set| {
-                            let name = if set.name.is_empty() {
-                                format!("{} Revision", set.color.label())
-                            } else {
-                                set.name.clone()
-                            };
-                            format!("{} · {}", name, set.started)
-                        })
-                        .unwrap_or_else(|| "Latest revision".to_string());
-                    egui::ComboBox::from_id_salt("summary_baseline")
-                        .selected_text(selected)
-                        .width(360.0)
-                        .show_ui(ui, |ui| {
-                            for (i, set) in self.revisions.sets.iter().enumerate().rev() {
-                                let name = if set.name.is_empty() {
-                                    format!("{} Revision", set.color.label())
-                                } else {
-                                    set.name.clone()
-                                };
-                                let label = format!("{} · {}", name, set.started);
-                                ui.selectable_value(&mut base, i, label);
-                            }
-                        });
-                });
-                let Some(summary) = self.summary.as_ref() else {
-                    ui.label("No revision data.");
-                    return;
-                };
-                ui.add_space(6.0);
-                ui.horizontal(|ui| {
-                    let (swatch, _) =
-                        ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
-                    ui.painter()
-                        .rect_filled(swatch, 2.0, revision_color(summary.color));
-                    let name = if summary.name.trim().is_empty() {
-                        format!("{} Revision", summary.color.label())
-                    } else {
-                        summary.name.clone()
-                    };
-                    ui.label(egui::RichText::new(name).strong());
-                    if !summary.date.is_empty() {
-                        ui.label(egui::RichText::new(&summary.date).weak());
-                    }
-                });
-                let pages = if summary.base_pages == 0 {
-                    format!("Current draft: {} pages", summary.current_pages)
-                } else {
-                    format!(
-                        "{} pages to {} pages ({:+})",
-                        summary.base_pages,
-                        summary.current_pages,
-                        summary.pages_delta()
-                    )
-                };
-                ui.label(pages);
-                ui.add_space(8.0);
-                egui::ScrollArea::vertical()
-                    .max_height(360.0)
-                    .show(ui, |ui| {
-                        egui::Grid::new("summary_scene_grid")
-                            .num_columns(5)
-                            .striped(true)
-                            .spacing(egui::vec2(18.0, 6.0))
-                            .show(ui, |ui| {
-                                ui.label(egui::RichText::new("Scene").strong());
-                                ui.label(egui::RichText::new("Heading").strong());
-                                ui.label(egui::RichText::new("Added").strong());
-                                ui.label(egui::RichText::new("Removed").strong());
-                                ui.label(egui::RichText::new("Changed").strong());
-                                ui.end_row();
-                                for scene in &summary.scenes {
-                                    ui.label(summary.scene_label(scene));
-                                    ui.label(&scene.heading);
-                                    ui.label(scene.added.to_string());
-                                    ui.label(scene.removed.to_string());
-                                    ui.label(scene.changed.to_string());
-                                    ui.end_row();
-                                }
-                                ui.label(egui::RichText::new("TOTAL").strong());
-                                ui.label("");
-                                ui.label(egui::RichText::new(summary.added.to_string()).strong());
-                                ui.label(egui::RichText::new(summary.removed.to_string()).strong());
-                                ui.label(egui::RichText::new(summary.changed.to_string()).strong());
-                                ui.end_row();
-                            });
-                    });
-                if summary.scenes.is_empty() {
-                    ui.label(
-                        egui::RichText::new("No changes in this revision.")
-                            .small()
-                            .weak(),
-                    );
-                }
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    if ui.button("Save CSV…").clicked() {
-                        save_csv = true;
-                    }
-                    if ui.button("Print Summary…").clicked() {
-                        print = true;
-                    }
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button("Close").clicked() {
-                            close = true;
-                        }
-                    });
-                });
-            });
-        self.show_summary = open && !close;
-        if base != self.summary_base {
-            self.summary_base = base;
-            self.summary = None;
-            self.ensure_summary();
-        }
-        if close {
-            self.show_summary = false;
-        }
-        if save_csv {
-            self.save_summary_csv();
-        }
-        if print {
-            self.print_summary();
+        let action = crate::revision_summary::window(
+            ctx,
+            &mut self.show_summary,
+            &mut self.summary_base,
+            self.summary.as_ref(),
+            &self.revisions.sets,
+        );
+        match action {
+            crate::revision_summary::SummaryAction::None => {}
+            crate::revision_summary::SummaryAction::BaseChanged => {
+                self.summary = None;
+                self.ensure_summary();
+            }
+            crate::revision_summary::SummaryAction::Close => self.show_summary = false,
+            crate::revision_summary::SummaryAction::SaveCsv => self.save_summary_csv(),
+            crate::revision_summary::SummaryAction::Print => self.print_summary(),
         }
     }
 

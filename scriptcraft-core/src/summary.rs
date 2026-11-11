@@ -213,7 +213,7 @@ mod tests {
 
         // Scene 1: change the action. Scene 2: remove the old action and add
         // a new scene at the end.
-        let mut current = vec![
+        let current = vec![
             base.blocks[0].clone(),
             block(ElementType::Action, "Иван пише."),
             base.blocks[2].clone(),

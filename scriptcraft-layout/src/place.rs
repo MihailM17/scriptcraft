@@ -24,8 +24,19 @@ pub use crate::dual::SourceSpan;
 pub const MM_PER_CELL: f32 = 2.54;
 /// Width of the Russian template's text column (A4 210 − 37.5 − 25 mm).
 pub const TEXT_W_MM: f32 = 147.5;
-/// Height of one line-grid row: Courier Prime 12 pt × ROW_FACTOR 2300/2048.
-pub const ROW_MM: f32 = 12.0 * (2300.0 / 2048.0) * (25.4 / 72.0);
+
+include!(concat!(env!("OUT_DIR"), "/font_metrics.rs"));
+
+/// Line-grid pitch for an arbitrary font at 12 pt, from its hhea metrics
+/// (ascender − descender + line gap). Swapping the bundled font must change
+/// this value rather than silently misprint pagination.
+pub fn row_mm_for_face(data: &[u8]) -> Option<f32> {
+    let face = ttf_parser::Face::parse(data, 0).ok()?;
+    let upem = f32::from(face.units_per_em());
+    let height =
+        f32::from(face.ascender()) - f32::from(face.descender()) + f32::from(face.line_gap());
+    Some(12.0 * height / upem * (25.4 / 72.0))
+}
 
 /// Horizontal columns of a template, in millimetres from the text-column
 /// left edge. Mirrors the editor's historical fractions of the column width
@@ -602,4 +613,46 @@ fn is_bold(t: ElementType) -> bool {
         t,
         ElementType::SceneHeading | ElementType::Character | ElementType::Transition
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn font(name: &str) -> Vec<u8> {
+        std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../scriptcraft-app/assets/fonts")
+                .join(name),
+        )
+        .expect("bundled font")
+    }
+
+    #[test]
+    fn row_pitch_comes_from_the_bundled_font_metrics() {
+        let courier = row_mm_for_face(&font("CourierPrime-Regular.ttf")).expect("parse Courier");
+        assert!(
+            (courier - ROW_MM).abs() < 1e-6,
+            "generated ROW_MM {ROW_MM} drifted from live metrics {courier}"
+        );
+        // 12 pt × (1600 − −700) / 2048 × 25.4/72.
+        assert!(
+            (ROW_MM - 4.754_232).abs() < 1e-4,
+            "unexpected pitch {ROW_MM}"
+        );
+    }
+
+    #[test]
+    fn a_different_font_changes_the_pitch() {
+        let plex = row_mm_for_face(&font("IBMPlexMono-Regular.ttf")).expect("parse Plex");
+        assert!(
+            plex > ROW_MM,
+            "IBM Plex Mono is taller than Courier Prime: {plex} vs {ROW_MM}"
+        );
+        // 12 pt × 1300 / 1000 × 25.4/72.
+        assert!(
+            (plex - 5.503_333).abs() < 1e-4,
+            "unexpected Plex pitch {plex}"
+        );
+    }
 }
