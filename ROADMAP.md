@@ -21,7 +21,7 @@ Status legend: `[ ]` to do `[-]` in progress `[x]` done `[!]` blocked
 | Date | 2026-11-10 |
 | Project | ScriptCraft — free, open-source, revision-first screenwriting studio |
 | Repo | `/Users/mihailmihaylov/Documents/Dev_work/scriptcraft` |
-| Branch / commit | `main` after v0.8 M7; tags `v0.7.0` at `9ce2e0e`, `v0.7.1` at `d8b17de` (maintenance) and `v0.7.2` at `8b75f9a`; v0.8 M0 at `9bd4839`, M1 at `1948c62`, M2 at `b660219`, M3 at `2708838`, M4 at `e840a67`; UI polish at `41ea7d5`; M5 at `b52b512`; dependency refresh at `c1990ca`; M6 at `c80c50c`; M7 at `9f4c833`. Uncommitted M8/M9 progress: `ROW_MM` derived from Courier Prime at build time, criterion benches, unknown `scenario_data` preserved on save, release checklist/benchmarks docs and `packaging/macos/bundle.sh`, and revision-summary UI extracted to `revision_summary.rs`. |
+| Branch / commit | `main` after v0.8 M8/M9 progress; tags `v0.7.0` at `9ce2e0e`, `v0.7.1` at `d8b17de` (maintenance) and `v0.7.2` at `8b75f9a`; v0.8 M0 at `9bd4839`, M1 at `1948c62`, M2 at `b660219`, M3 at `2708838`, M4 at `e840a67`; UI polish at `41ea7d5`; M5 at `b52b512`; dependency refresh at `c1990ca`; M6 at `c80c50c`; M7 at `9f4c833`; M8/M9 progress at `a44ace0`. |
 | Rust workspace | `scriptcraft-core`, `scriptcraft-app`, `scriptcraft-layout` (`Cargo.toml`, resolver 2) |
 | App crate version | `scriptcraft-app 0.7.2` at tag `v0.7.2`; `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
 | Distribution | **v0.7.2 released 2026-11-02** — <https://github.com/MihailM17/scriptcraft/releases/tag/v0.7.2> packages v0.8 M0–M4, KIT version writing, the Settings cleanup and the Dock-quit fix. Last published release: v0.7.2. |
@@ -1582,7 +1582,8 @@ Newest entries at the bottom. Each entry: date — what changed / what was found
     snapshots; core 100 lib + 24 a95 + 6 dual + 12 identity + 4 omitted + 4
     restore; layout 26 unit + 4 dual + 3 omitted + 1 pagination + 3 parity + 5
     pdf + 4 place + 2 relayout + 3 scale), `cargo deny check`, `git diff
-    --check`. Bench executables compile and `--quick` runs recorded.
+    --check`. Bench executables compile and `--quick` runs recorded. Commit
+    `a44ace0`.
   - Still open for M8: Developer ID signing/notarisation (needs cert/profile),
     Windows signing path, auto-update manifests/channel (v0.8.1), Linux/Windows
     runtime CI smoke tests. Still open for M9: extract more views
