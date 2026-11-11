@@ -82,7 +82,7 @@ writing features.
   - `pdf.rs` — print layout + `printpdf` renderer (title page, scene/page numbers, watermarks, current-revision margin bars/pages).
   - `tests/` — `parity.rs` (golden hashes), `pagination.rs`, `place.rs`, `pdf_export.rs`, `scale.rs` (500-page timings).
 - `scriptcraft-app/src/`
-  - `app.rs` — 8,538-line monolith: all state, IO, views, editor, export dialog. `title_page.rs` holds the M6 form and PDF-matched preview; `revision_summary.rs` paints the M7 window while `core::summary` derives the counts. `quit_guard.rs` routes native quit through the save prompt.
+  - `app.rs` — 8,510-line monolith: all state, IO, views, editor, export dialog. `title_page.rs` holds the M6 form and PDF-matched preview; `revision_summary.rs` paints the M7 window, `dialogs.rs` paints About/Help, and `core::summary` derives revision counts. `quit_guard.rs` routes native quit through the save prompt.
   - `script_view.rs` — Editor 2.0 `ScriptView` (the only editor since M5): paints `DocLayout` pages (visible pages only; zoom scales geometry, never breaks) and edits by emitting `core::edit` commands — selection/caret, keyboard/pointer, cross-block clipboard, IME, command-history undo/redo.
   - `theme.rs` — palette + egui style. `menu.rs` — native macOS menu. `main.rs`, `lib.rs`.
   - `assets/fonts/` — Courier Prime (Regular/Bold/Italic), PT Sans, IBM Plex Mono; all OFL, license texts in `assets/fonts/licenses/`.
@@ -177,7 +177,7 @@ direct workspace dependencies. There is still no benchmark harness.
 - [x] **Proprietary fonts bundled.** Fixed 2026-10-19: `cour*.ttf` removed;
   editor and PDF now use Courier Prime (OFL), OFL license texts added for all
   bundled fonts, root `LICENSE` (Apache-2.0) and `NOTICE` added.
-- [-] **Monolith.** `app.rs` is 8,538 lines (down from 8,661 before M7/M8 work); state, IO, layout and UI are still entangled. v0.8 M9 extracts views one at a time; no big-bang rewrite.
+- [-] **Monolith.** `app.rs` is 8,510 lines (down from 8,661 before M7/M8 work); state, IO, layout and UI are still entangled. v0.8 M9 extracts views one at a time; no big-bang rewrite.
 - [x] **Revision summary shipped.** Fixed 2026-11-10 (v0.8 M7): the summary
   derives from the same `DraftDiff` as compare, groups counts by scene with a
   totals row, and exports deterministic UTF-8 CSV (BOM for Excel) plus a
@@ -199,10 +199,11 @@ direct workspace dependencies. There is still no benchmark harness.
 - [-] **Release engineering is partial.** M8 now has `docs/release-checklist.md`,
   `docs/benchmarks.md`, `packaging/macos/bundle.sh` (ad-hoc signed build
   verified 2026-11-10), Criterion benches for load/diff/marks/layout/relayout
-  /PDF, and CI interaction smoke on Linux (Xvfb) and Windows. Still open:
-  Developer ID signing + notarisation (needs certificate/profile), Windows
-  signing path, auto-update manifests (deferred to v0.8.1), and a packaged-binary
-  launch/screenshot probe.
+  /PDF, CI interaction smoke on Linux (Xvfb) and Windows, and a debug-binary
+  launch probe (timeout = startup OK, early crash fails). Still open: Developer
+  ID signing + notarisation (ignored for now), Windows signing path,
+  auto-update manifests (deferred to v0.8.1), and optional release/screenshot
+  probe artifact.
 - [x] **Font metrics derived from the bundled font.** Fixed 2026-11-10:
   `scriptcraft-layout/build.rs` parses Courier Prime's hhea metrics to generate
   `ROW_MM`; `row_mm_for_face` and tests prove a different font (IBM Plex Mono)
@@ -346,12 +347,15 @@ gate**. M8 runs in parallel; M9 is continuous.
       `scriptcraft-layout/benches/layout.rs`, `docs/benchmarks.md`), unknown
       `scenario_data` preserved on save, `docs/release-checklist.md`,
       `packaging/macos/bundle.sh` (ad-hoc DMG build + `codesign --verify`
-      passed locally), and CI interaction smoke under Xvfb on Linux/Windows.
-      Remaining: Developer ID/notarisation, Windows signing path, auto-update
-      manifests (deferred v0.8.1), packaged-binary launch/screenshot probe.
-- [-] M9 — `scriptcraft-app/src/revision_summary.rs` extracted 2026-11-10
-      (`app.rs` 8,538). Remaining: extract compare/title/export/settings/
-      research views and update format/release docs.
+      passed locally), CI interaction smoke under Xvfb on Linux/Windows, and a
+      debug-binary launch probe (timeout treated as startup success). Remaining:
+      Developer ID/notarisation (ignored for now), Windows signing path,
+      auto-update manifests (deferred v0.8.1), optional release/screenshot
+      artifact.
+- [-] M9 — `scriptcraft-app/src/revision_summary.rs` extracted 2026-11-10 and
+      `dialogs.rs` (About/Help) extracted 2026-11-10 (`app.rs` 8,510).
+      Remaining: extract compare/title/export/settings/research views and update
+      format/release docs.
 - [ ] Release gate and 5–10 writer validation; tag v0.8.0.
 
 Exit: a writer can compare Blue vs Pink, jump changes, restore Blue as a copy,
@@ -1592,19 +1596,25 @@ Newest entries at the bottom. Each entry: date — what changed / what was found
     views (compare/title/export/settings/research) and update format/release
     docs.
 
-### 2026-11-10 — M8 CI: Linux/Windows interaction smoke
+### 2026-11-10 — M8 CI: Linux/Windows interaction and binary launch smoke
 
   - `.github/workflows/ci.yml`: Linux job now installs `xvfb`, runs
     core/layout/lib tests and `xvfb-run -a cargo test -p scriptcraft-app --test
-    interaction -- --test-threads=1`, then compiles all app targets. Windows
-    job runs core/layout/lib tests and the interaction suite before compiling
-    all app targets. This replaces compile-only app coverage with runtime
-    kittest smoke on non-macOS runners (snapshots remain macOS-only).
+    interaction -- --test-threads=1`, then builds and launch-probes the debug
+    binary (`timeout` treated as startup success, early crash fails), then
+    compiles all app targets. Windows job runs core/layout/lib tests, the
+    interaction suite, and a debug-binary launch probe before compiling all app
+    targets. This replaces compile-only app coverage with runtime kittest and
+    startup smoke on non-macOS runners (snapshots remain macOS-only).
   - Docs: `docs/v0.8-plan.md` and ROADMAP updated to reflect M8 progress.
-  - Local verification: `cargo fmt --all -- --check`, `cargo clippy --workspace
-    --all-targets -- -D warnings`, `cargo deny check`, `git diff --check`. Full
-    `cargo test --workspace` remains green from the previous gate. Commit
-    follows.
+
+### 2026-11-10 — M9: extract About/Help dialogs
+
+  - `scriptcraft-app/src/dialogs.rs`: `about` and `help` windows extracted from
+    `app.rs` (no behavior change); `ScriptCraftApp::shortcut_prefix` made
+    `pub(crate)` for the help text. `app.rs` now 8,510 lines.
+  - Local verification: `cargo fmt --all -- --check`, `cargo check -p
+    scriptcraft-app`. Commit follows.
 
 ---
 

@@ -53,6 +53,20 @@ jobs:
         run: cargo test -p scriptcraft-app --lib
       - name: App interaction smoke (Xvfb)
         run: xvfb-run -a cargo test -p scriptcraft-app --test interaction -- --test-threads=1
+      - name: Launch packaged binary smoke (Xvfb)
+        shell: bash
+        run: |
+          cargo build -p scriptcraft-app
+          set +e
+          timeout 8s xvfb-run -a ./target/debug/scriptcraft-app
+          code=$?
+          set -e
+          if [ "$code" -eq 124 ]; then
+            echo "Binary stayed alive for 8s without crashing (startup smoke OK)."
+            exit 0
+          fi
+          echo "Binary exited with code $code before timeout."
+          exit "$code"
       - name: Compile app and all test targets
         run: cargo check -p scriptcraft-app --all-targets
 
@@ -71,6 +85,18 @@ jobs:
         run: cargo test -p scriptcraft-app --lib
       - name: App interaction smoke
         run: cargo test -p scriptcraft-app --test interaction -- --test-threads=1
+      - name: Launch packaged binary smoke
+        shell: pwsh
+        run: |
+          cargo build -p scriptcraft-app
+          $p = Start-Process -FilePath "target\debug\scriptcraft-app.exe" -PassThru
+          if (-not $p.WaitForExit(8000)) {
+            $p.Kill()
+            Write-Host "Binary stayed alive for 8s without crashing (startup smoke OK)."
+            exit 0
+          }
+          Write-Host "Binary exited with code $($p.ExitCode) before timeout."
+          exit $p.ExitCode
       - name: Compile app and all test targets
         run: cargo check -p scriptcraft-app --all-targets
 

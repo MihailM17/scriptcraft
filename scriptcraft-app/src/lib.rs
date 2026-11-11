@@ -1,5 +1,6 @@
 pub mod app;
 pub mod compare_view;
+pub mod dialogs;
 pub mod menu;
 pub mod quit_guard;
 pub mod revision_summary;
