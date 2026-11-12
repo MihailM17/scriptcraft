@@ -13,6 +13,8 @@ use scriptcraft_core::{
 // Palette, global style and the painted widgets live in `theme.rs`.
 pub use crate::compare_view::{ChangeFilter, CompareView};
 use crate::compare_view::{CompareAction, CompareState};
+use crate::export::{ExportAction, ExportDialog, ExportFormat, ExportTab};
+use crate::settings::{AppSettings, SettingsPage};
 use crate::theme::*;
 pub use crate::theme::{apply_theme, kit_visuals, set_kit_theme};
 /// Statistics report bar palette (sampled from KIT's summary report).
@@ -342,34 +344,6 @@ fn menu_check(
     menu_row(ui, label, shortcut, enabled, Some(checked))
 }
 
-/// Left-hand page row in Settings, mirroring KIT's preferences list.
-fn settings_nav_row(ui: &mut egui::Ui, label: &str, selected: bool) -> egui::Response {
-    let (rect, resp) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 32.0), egui::Sense::click());
-    if selected {
-        ui.painter().rect_filled(rect, 6.0, kit().accent_soft);
-    } else if resp.hovered() {
-        ui.painter().rect_filled(rect, 6.0, kit().hover_light);
-    }
-    ui.painter().text(
-        egui::pos2(rect.left() + 12.0, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        label,
-        egui::FontId::proportional(13.0),
-        if selected {
-            kit().accent_text
-        } else {
-            kit().text
-        },
-    );
-    let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
-    let text = label.to_owned();
-    resp.widget_info(|| {
-        egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, text.clone())
-    });
-    resp
-}
-
 #[derive(Default, PartialEq, Eq, Clone, Copy, Debug)]
 pub enum SideTab {
     #[default]
@@ -379,107 +353,6 @@ pub enum SideTab {
     Cards,
     Statistics,
     Settings,
-}
-
-/// Selected page in Settings, mirroring KIT's Preferences list.
-#[derive(Default, PartialEq, Eq, Clone, Copy, Debug)]
-pub enum SettingsPage {
-    #[default]
-    Application,
-    ScenarioEditor,
-    Navigator,
-}
-
-impl SettingsPage {
-    fn label(self) -> &'static str {
-        match self {
-            Self::Application => "Application",
-            Self::ScenarioEditor => "Scenario Editor",
-            Self::Navigator => "Navigator",
-        }
-    }
-}
-
-/// Export dialog modules, mirroring KIT's Research / Outline / Script tabs.
-#[derive(Default, PartialEq, Eq, Clone, Copy)]
-enum ExportTab {
-    Research,
-    Outline,
-    #[default]
-    Script,
-}
-
-/// Export dialog file formats, mirroring KIT's format radio group.
-#[derive(Default, PartialEq, Eq, Clone, Copy)]
-enum ExportFormat {
-    #[default]
-    Pdf,
-    Fdx,
-    Fountain,
-}
-
-impl ExportFormat {
-    fn label(self) -> &'static str {
-        match self {
-            Self::Pdf => "PDF",
-            Self::Fdx => "FDX",
-            Self::Fountain => "Fountain",
-        }
-    }
-}
-
-/// Persisted application settings (`settings.conf` in the per-user config dir).
-#[derive(Clone)]
-struct AppSettings {
-    autosave: bool,
-    autosave_minutes: u32,
-    backups: bool,
-    backups_dir: String,
-    theme: Theme,
-    /// KIT's Scenario Editor toggles. Defaults preserve the editor's
-    /// previous behaviour: scene numbers and a preview in the navigator on,
-    /// automatic typography off until the writer asks for it.
-    show_scene_numbers: bool,
-    highlight_current_line: bool,
-    capitalize_first_word: bool,
-    correct_double_capitals: bool,
-    replace_three_dots: bool,
-    smart_quotes: bool,
-    navigator_preview: bool,
-    navigator_show_numbers: bool,
-}
-
-impl Default for AppSettings {
-    fn default() -> Self {
-        Self {
-            autosave: true,
-            autosave_minutes: 5,
-            backups: true,
-            backups_dir: default_backups_dir(),
-            theme: Theme::Midnight,
-            show_scene_numbers: true,
-            highlight_current_line: false,
-            capitalize_first_word: false,
-            correct_double_capitals: false,
-            replace_three_dots: false,
-            smart_quotes: false,
-            navigator_preview: true,
-            navigator_show_numbers: true,
-        }
-    }
-}
-
-impl AppSettings {
-    fn editor_options(&self) -> crate::script_view::EditorOptions {
-        crate::script_view::EditorOptions {
-            show_scene_numbers: self.show_scene_numbers,
-            highlight_current_line: self.highlight_current_line,
-            capitalize_first_word: self.capitalize_first_word,
-            correct_double_capitals: self.correct_double_capitals,
-            replace_three_dots: self.replace_three_dots,
-            smart_quotes: self.smart_quotes,
-        }
-    }
 }
 
 /// Research module selection (KIT's research tree).
@@ -972,7 +845,7 @@ impl ScriptCraftApp {
     /// Arm disk persistence and load settings + recent projects.
     /// Called by the real app only — tests stay disk-free.
     pub fn load_persistent(&mut self) {
-        self.settings = load_settings();
+        self.settings = AppSettings::load();
         self.recent = load_recent();
         self.persist = true;
         self.recovery = Self::scan_recovery_files();
@@ -3749,7 +3622,7 @@ fn module_header(ui: &mut egui::Ui, title: &str, hint: Option<&str>) {
 
 /// Flat line icons for the KIT-style trees and module strips.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum KitIcon {
+pub(crate) enum KitIcon {
     TriangleDown,
     TriangleRight,
     Script,
@@ -4262,7 +4135,7 @@ fn kit_icon_button(ui: &mut egui::Ui, icon: KitIcon, text: &str) -> egui::Respon
 }
 
 /// Full-width Start-page button: optional left icon + label, 34pt tall.
-fn start_button(ui: &mut egui::Ui, icon: Option<KitIcon>, text: &str) -> bool {
+pub(crate) fn start_button(ui: &mut egui::Ui, icon: Option<KitIcon>, text: &str) -> bool {
     start_button_styled(ui, icon, text, false)
 }
 
@@ -4318,7 +4191,7 @@ fn start_button_styled(
 }
 
 /// Small square glyph button (folder pickers, strip icons).
-fn kit_square_button(ui: &mut egui::Ui, icon: KitIcon) -> egui::Response {
+pub(crate) fn kit_square_button(ui: &mut egui::Ui, icon: KitIcon) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(30.0, 28.0), egui::Sense::click());
     ui.painter().rect_filled(rect, 7.0, button_fill(&resp));
     draw_kit_icon(ui.painter(), icon, rect.center(), kit().text);
@@ -4357,7 +4230,7 @@ fn home_dir() -> Option<std::path::PathBuf> {
 }
 
 /// Per-platform settings, recent projects and recovery snapshots.
-fn config_dir() -> std::path::PathBuf {
+pub(crate) fn config_dir() -> std::path::PathBuf {
     #[cfg(target_os = "windows")]
     if let Some(appdata) = std::env::var_os("APPDATA") {
         return std::path::PathBuf::from(appdata).join("ScriptCraft");
@@ -4382,84 +4255,11 @@ fn config_dir() -> std::path::PathBuf {
         .join("ScriptCraft")
 }
 
-fn default_backups_dir() -> String {
+pub(crate) fn default_backups_dir() -> String {
     let dir = home_dir()
         .map(|home| home.join("Documents").join("ScriptCraft").join("backups"))
         .unwrap_or_else(|| std::path::PathBuf::from("ScriptCraft/backups"));
     dir.to_string_lossy().into_owned()
-}
-
-fn load_settings() -> AppSettings {
-    let mut s = AppSettings::default();
-    let mut theme_seen = false;
-    if let Ok(text) = std::fs::read_to_string(config_dir().join("settings.conf")) {
-        for line in text.lines() {
-            let Some((k, v)) = line.split_once('=') else {
-                continue;
-            };
-            let v = v.trim();
-            match k.trim() {
-                "autosave" => s.autosave = v == "1",
-                "autosave_minutes" => s.autosave_minutes = v.parse().unwrap_or(5).clamp(1, 60),
-                "backups" => s.backups = v == "1",
-                "backups_dir" => {
-                    if !v.is_empty() {
-                        s.backups_dir = v.to_string();
-                    }
-                }
-                "show_scene_numbers" => s.show_scene_numbers = v != "0",
-                "highlight_current_line" => s.highlight_current_line = v == "1",
-                "capitalize_first_word" => s.capitalize_first_word = v == "1",
-                "correct_double_capitals" => s.correct_double_capitals = v == "1",
-                "replace_three_dots" => s.replace_three_dots = v == "1",
-                "smart_quotes" => s.smart_quotes = v == "1",
-                "navigator_preview" => s.navigator_preview = v != "0",
-                "navigator_show_numbers" => s.navigator_show_numbers = v != "0",
-                "theme" => {
-                    s.theme = match v {
-                        "light" => Theme::Light,
-                        "midnight" => Theme::Midnight,
-                        _ => s.theme,
-                    };
-                    theme_seen = true;
-                }
-                // Pre-theme-picker setting: 1 = Midnight, 0 = Light.
-                "dark_mode" if !theme_seen => {
-                    s.theme = if v == "1" {
-                        Theme::Midnight
-                    } else {
-                        Theme::Light
-                    };
-                }
-                _ => {}
-            }
-        }
-    }
-    s
-}
-
-fn save_settings(s: &AppSettings) {
-    let _ = std::fs::create_dir_all(config_dir());
-    let text = format!(
-        "autosave={}\nautosave_minutes={}\nbackups={}\nbackups_dir={}\ntheme={}\n\
-         show_scene_numbers={}\nhighlight_current_line={}\ncapitalize_first_word={}\n\
-         correct_double_capitals={}\nreplace_three_dots={}\nsmart_quotes={}\nnavigator_preview={}\n\
-         navigator_show_numbers={}\n",
-        s.autosave as u8,
-        s.autosave_minutes.clamp(1, 60),
-        s.backups as u8,
-        s.backups_dir,
-        s.theme.key(),
-        s.show_scene_numbers as u8,
-        s.highlight_current_line as u8,
-        s.capitalize_first_word as u8,
-        s.correct_double_capitals as u8,
-        s.replace_three_dots as u8,
-        s.smart_quotes as u8,
-        s.navigator_preview as u8,
-        s.navigator_show_numbers as u8,
-    );
-    let _ = std::fs::write(config_dir().join("settings.conf"), text);
 }
 
 fn load_recent() -> Vec<(String, String)> {
@@ -5618,236 +5418,35 @@ impl ScriptCraftApp {
             self.show_export = false;
             return;
         }
-        let mut win_open = true;
-        let mut close = false;
-        let mut do_preview = false;
-        let mut do_export = false;
-        let mut browse = false;
-        egui::Window::new("Export Scenario")
-            .open(&mut win_open)
-            .collapsible(false)
-            .resizable(false)
-            .fixed_size(egui::vec2(550.0, 500.0))
-            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-            .show(ctx, |ui| {
-                // Tab bar across the top (KIT: Export research / outline / script).
-                ui.spacing_mut().item_spacing.x = 4.0;
-                let tab_w = (ui.available_width() - 8.0) / 3.0;
-                ui.horizontal(|ui| {
-                    for (tab, name) in [
-                        (ExportTab::Research, "Export research"),
-                        (ExportTab::Outline, "Export outline"),
-                        (ExportTab::Script, "Export script"),
-                    ] {
-                        if ui
-                            .add_sized(
-                                [tab_w, 26.0],
-                                egui::Button::selectable(self.export_tab == tab, name),
-                            )
-                            .clicked()
-                        {
-                            self.export_tab = tab;
-                        }
-                    }
-                });
-                ui.separator();
-                let script_tab = self.export_tab == ExportTab::Script;
-
-                // "Choose file to export:" + path field + browse button.
-                ui.label("Choose file to export:");
-                ui.spacing_mut().item_spacing.x = 6.0;
-                ui.horizontal(|ui| {
-                    let w = (ui.available_width() - 36.0).max(80.0);
-                    ui.add_sized(
-                        [w, 22.0],
-                        egui::TextEdit::singleline(&mut self.export_path)
-                            .hint_text("Choose a destination file…"),
-                    );
-                    if ui
-                        .add_sized([30.0, 22.0], egui::Button::new("..."))
-                        .clicked()
-                    {
-                        browse = true;
-                    }
-                });
-                let file_exists = !self.export_path.is_empty()
-                    && std::path::Path::new(&self.export_path).exists();
-                if file_exists {
-                    ui.label(
-                        egui::RichText::new("File exists. It will be replaced after exporting.")
-                            .small()
-                            .weak(),
-                    );
-                }
-
-                match self.export_tab {
-                    ExportTab::Script => {
-                        ui.add_space(6.0);
-                        ui.horizontal(|ui| {
-                            ui.label("Format:");
-                            for fmt in
-                                [ExportFormat::Pdf, ExportFormat::Fdx, ExportFormat::Fountain]
-                            {
-                                ui.radio_value(&mut self.export_format, fmt, fmt.label());
-                            }
-                        });
-                        ui.add_space(2.0);
-                        ui.checkbox(
-                            &mut self.export_additional,
-                            "Additional (Numbering, Title Page etc.)",
-                        );
-                        if self.export_additional {
-                            egui::Frame::group(ui.style()).show(ui, |ui| {
-                                ui.horizontal(|ui| {
-                                    ui.label("Template:");
-                                    egui::ComboBox::from_id_salt("export_template")
-                                        .selected_text("Final Draft Screenplay (A4)")
-                                        .show_ui(ui, |ui| {
-                                            ui.selectable_value(
-                                                &mut (),
-                                                (),
-                                                "Final Draft Screenplay (A4)",
-                                            );
-                                        });
-                                });
-                                ui.checkbox(
-                                    &mut self.export_options.title_page,
-                                    "Print Title Page",
-                                );
-                                ui.checkbox(
-                                    &mut self.export_options.page_numbers,
-                                    "Print pages numbers",
-                                );
-                                ui.checkbox(
-                                    &mut self.export_options.scene_numbers,
-                                    "Print scenes numbers",
-                                );
-                                if !self.revisions.is_empty() {
-                                    ui.checkbox(
-                                        &mut self.export_options.revision_marks,
-                                        "Print revision marks (current)",
-                                    );
-                                    ui.checkbox(
-                                        &mut self.export_options.revision_pages_only,
-                                        "Print current revision pages only",
-                                    );
-                                }
-                                ui.add_enabled(
-                                    false,
-                                    egui::Checkbox::new(&mut false, "Print dialogues numbers"),
-                                )
-                                .on_disabled_hover_text("Not supported yet");
-                                ui.add_enabled(
-                                    false,
-                                    egui::Checkbox::new(&mut false, "Save Review Marks"),
-                                )
-                                .on_disabled_hover_text("No review marks in this app");
-                                ui.checkbox(&mut self.export_check_breaks, "Check Page Breaks");
-                                ui.horizontal(|ui| {
-                                    ui.checkbox(&mut self.export_watermark_on, "Print watermark:");
-                                    ui.add_enabled(
-                                        self.export_watermark_on,
-                                        egui::TextEdit::singleline(&mut self.export_watermark)
-                                            .desired_width(150.0),
-                                    );
-                                });
-                            });
-                        }
-                    }
-                    ExportTab::Research => {
-                        ui.add_space(6.0);
-                        ui.label(
-                            egui::RichText::new("Research export is not implemented yet.")
-                                .small()
-                                .weak(),
-                        );
-                        egui::ScrollArea::vertical()
-                            .max_height(280.0)
-                            .show(ui, |ui| {
-                                for e in &self.research {
-                                    let kind = match e.kind {
-                                        kitsp::ResearchKind::Character => "character",
-                                        kitsp::ResearchKind::Location => "place",
-                                        kitsp::ResearchKind::Other => "note",
-                                    };
-                                    ui.label(format!("{}  ({kind})", e.name));
-                                }
-                            });
-                    }
-                    ExportTab::Outline => {
-                        ui.add_space(6.0);
-                        ui.label(
-                            egui::RichText::new("Outline export is not implemented yet.")
-                                .small()
-                                .weak(),
-                        );
-                    }
-                }
-
-                // Bottom-right buttons (KIT order: Export, Print Preview, Cancel).
-                let gap = (ui.available_height() - 32.0).max(4.0);
-                ui.add_space(gap);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("Cancel").clicked() {
-                        close = true;
-                    }
-                    if ui.button("Print Preview").clicked() {
-                        do_preview = true;
-                    }
-                    let supported = script_tab
-                        && !self.export_path.is_empty()
-                        && matches!(
-                            self.export_format,
-                            ExportFormat::Pdf | ExportFormat::Fdx | ExportFormat::Fountain
-                        );
-                    let label = if file_exists { "Rewrite" } else { "Export" };
-                    if ui
-                        .add_enabled(supported, egui::Button::new(label))
-                        .clicked()
-                    {
-                        do_export = true;
-                    }
-                });
-            });
-        self.show_export = win_open && !close && self.show_export;
-        if browse {
-            let mut dlg = rfd::FileDialog::new();
-            let (name, ext, filter) = match self.export_format {
-                ExportFormat::Pdf => (
-                    if self.title.is_empty() {
-                        "script.pdf".to_string()
-                    } else {
-                        format!("{}.pdf", self.title)
-                    },
-                    "pdf",
-                    "PDF",
-                ),
-                ExportFormat::Fountain => (
-                    if self.title.is_empty() {
-                        "script.fountain".to_string()
-                    } else {
-                        format!("{}.fountain", self.title)
-                    },
-                    "fountain",
-                    "Fountain",
-                ),
-                ExportFormat::Fdx => ("script.fdx".to_string(), "fdx", "FDX"),
+        let action = {
+            let mut state = ExportDialog {
+                title: &self.title,
+                research: &self.research,
+                has_revisions: !self.revisions.is_empty(),
+                open: &mut self.show_export,
+                tab: &mut self.export_tab,
+                format: &mut self.export_format,
+                path: &mut self.export_path,
+                additional: &mut self.export_additional,
+                options: &mut self.export_options,
+                check_breaks: &mut self.export_check_breaks,
+                watermark_on: &mut self.export_watermark_on,
+                watermark: &mut self.export_watermark,
             };
-            dlg = dlg.add_filter(filter, &[ext]).set_file_name(&name);
-            if let Some(dst) = dlg.save_file() {
-                self.export_path = dst.to_string_lossy().into_owned();
+            crate::export::dialog(ctx, &mut state)
+        };
+        match action {
+            ExportAction::None => {}
+            ExportAction::Close => self.show_export = false,
+            ExportAction::Preview => self.preview_pdf(),
+            ExportAction::Export { path, format } => {
+                match format {
+                    ExportFormat::Pdf => self.save_pdf(&path),
+                    ExportFormat::Fdx => self.save_fdx(&path),
+                    ExportFormat::Fountain => self.save_fountain(&path),
+                }
+                self.show_export = false;
             }
-        }
-        if do_preview {
-            self.preview_pdf();
-        } else if do_export {
-            let dst = std::path::PathBuf::from(&self.export_path);
-            match self.export_format {
-                ExportFormat::Pdf => self.save_pdf(&dst),
-                ExportFormat::Fdx => self.save_fdx(&dst),
-                ExportFormat::Fountain => self.save_fountain(&dst),
-            }
-            self.show_export = false;
         }
     }
 
@@ -7825,274 +7424,13 @@ impl ScriptCraftApp {
     /// Settings module: page list on the left, Common/Modules options right —
     /// KIT's Preferences dialog rendered as a full module.
     fn settings_view(&mut self, ctx: &egui::Context) {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            let mut changed = false;
-            ui.add_space(20.0);
-            ui.horizontal_top(|ui| {
-                ui.add_space(24.0);
-                ui.vertical(|ui| {
-                    ui.set_width(186.0);
-                    ui.label(egui::RichText::new("Settings").size(18.0).strong());
-                    ui.add_space(14.0);
-                    for page in [
-                        SettingsPage::Application,
-                        SettingsPage::ScenarioEditor,
-                        SettingsPage::Navigator,
-                    ] {
-                        let selected = self.settings_page == page;
-                        if settings_nav_row(ui, page.label(), selected).clicked() {
-                            self.settings_page = page;
-                        }
-                        ui.add_space(2.0);
-                    }
-                });
-                ui.add_space(10.0);
-                let (line, _) = ui.allocate_exact_size(
-                    egui::vec2(1.0, ui.available_height().max(320.0)),
-                    egui::Sense::hover(),
-                );
-                ui.painter().rect_filled(line, 0.0, kit().sep);
-                ui.add_space(24.0);
-                ui.vertical(|ui| {
-                    ui.set_max_width(640.0);
-                    ui.label(
-                        egui::RichText::new(self.settings_page.label())
-                            .size(16.0)
-                            .strong(),
-                    );
-                    ui.add_space(4.0);
-                    ui.label(
-                        egui::RichText::new(
-                            "Everything here is applied immediately and saved for the next launch.",
-                        )
-                        .size(12.0)
-                        .color(kit().disabled_text),
-                    );
-                    ui.add_space(14.0);
-                    egui::ScrollArea::vertical()
-                        .id_salt("settings_page")
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            changed |= match self.settings_page {
-                                SettingsPage::Application => self.settings_application(ui),
-                                SettingsPage::ScenarioEditor => self.settings_editor(ui),
-                                SettingsPage::Navigator => self.settings_navigator(ui),
-                            };
-                        });
-                });
-            });
-            if changed && self.persist {
-                save_settings(&self.settings);
-            }
-        });
-    }
-
-    /// Application page: theme, autosave, backups and the reset action.
-    fn settings_application(&mut self, ui: &mut egui::Ui) -> bool {
-        let mut changed = false;
-        let mut v = ui.visuals().clone();
-        v.extreme_bg_color = kit().field_stroke;
-        v.widgets.inactive.weak_bg_fill = kit().field_stroke;
-        v.widgets.hovered.weak_bg_fill = kit().hover_light;
-        v.widgets.inactive.bg_stroke = egui::Stroke::new(1.0_f32, kit().sep);
-        v.widgets.hovered.bg_stroke = egui::Stroke::new(1.0_f32, kit().sep);
-        ui.horizontal(|ui| {
-            ui.add_space(16.0);
-            ui.label("Language:");
-            ui.add_space(6.0);
-            ui.label(
-                egui::RichText::new("English (the only language in this build)")
-                    .color(kit().disabled_text),
-            );
-        });
-        ui.add_space(12.0);
-        ui.horizontal(|ui| {
-            ui.add_space(16.0);
-            ui.label("Theme:");
-            ui.add_space(6.0);
-            egui::ComboBox::from_id_salt("theme")
-                .selected_text(self.settings.theme.label())
-                .width(140.0)
-                .show_ui(ui, |ui| {
-                    for theme in [Theme::Light, Theme::Midnight] {
-                        changed |= ui
-                            .selectable_value(&mut self.settings.theme, theme, theme.label())
-                            .changed();
-                    }
-                });
-        });
-        ui.add_space(12.0);
-        ui.horizontal(|ui| {
-            ui.add_space(16.0);
-            let r = ui.checkbox(&mut self.settings.autosave, "Automatically Save Every");
-            changed |= r.changed();
-            ui.add_space(6.0);
-            changed |= ui
-                .scope(|ui| {
-                    ui.style_mut().visuals = v.clone();
-                    ui.add_enabled(
-                        self.settings.autosave,
-                        egui::DragValue::new(&mut self.settings.autosave_minutes)
-                            .range(1..=60)
-                            .speed(0.05),
-                    )
-                })
-                .inner
-                .changed();
-            ui.add_space(6.0);
-            ui.label("Minutes");
-            ui.add_space(4.0);
-            ui.label(egui::RichText::new("?").weak())
-                .on_hover_text("Saves the project while you work. Turn off to save by hand only.");
-        });
-        ui.add_space(12.0);
-        ui.horizontal(|ui| {
-            ui.add_space(16.0);
-            let r = ui.checkbox(&mut self.settings.backups, "Save Backups");
-            changed |= r.changed();
-            r.on_hover_text("Timestamped copies are written here on every save.");
-            ui.add_space(6.0);
-            let field_w = (ui.available_width() - 44.0).max(80.0);
-            changed |= ui
-                .scope(|ui| {
-                    ui.style_mut().visuals = v.clone();
-                    ui.add_enabled(
-                        self.settings.backups,
-                        egui::TextEdit::singleline(&mut self.settings.backups_dir)
-                            .margin(egui::Margin::symmetric(8, 4))
-                            .font(egui::FontId::proportional(12.5))
-                            .desired_width(field_w),
-                    )
-                })
-                .inner
-                .changed();
-            if kit_square_button(ui, KitIcon::Folder).clicked() {
-                if let Some(dir) = rfd::FileDialog::new().pick_folder() {
-                    self.settings.backups_dir = dir.to_string_lossy().into_owned();
-                    changed = true;
-                }
-            }
-        });
-        ui.add_space(24.0);
-        if start_button(ui, None, "Reset Settings") {
-            self.settings = AppSettings::default();
-            if self.persist {
-                save_settings(&self.settings);
-            }
+        let outcome = crate::settings::show(ctx, &mut self.settings, &mut self.settings_page);
+        if outcome.reset {
             self.status = "Settings reset to defaults.".to_string();
-            changed = true;
         }
-        ui.add_space(24.0);
-        changed
-    }
-
-    /// Scenario Editor page: KIT's view toggles and automatic corrections.
-    fn settings_editor(&mut self, ui: &mut egui::Ui) -> bool {
-        let mut changed = false;
-        kit_section(ui, "View");
-        ui.horizontal(|ui| {
-            ui.add_space(16.0);
-            changed |= ui
-                .checkbox(&mut self.settings.show_scene_numbers, "Show scene numbers")
-                .on_hover_text("Show the scene number in the page margin while editing.")
-                .changed();
-        });
-        ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            ui.add_space(16.0);
-            changed |= ui
-                .checkbox(
-                    &mut self.settings.highlight_current_line,
-                    "Highlight current line",
-                )
-                .on_hover_text("Tint the line holding the caret, like KIT's editor.")
-                .changed();
-        });
-        ui.add_space(20.0);
-        kit_section(ui, "Automatic corrections");
-        ui.horizontal(|ui| {
-            ui.add_space(16.0);
-            changed |= ui
-                .checkbox(
-                    &mut self.settings.capitalize_first_word,
-                    "Capitalize first word",
-                )
-                .on_hover_text("Uppercase the first letter typed at the start of a sentence.")
-                .changed();
-        });
-        ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            ui.add_space(16.0);
-            changed |= ui
-                .checkbox(
-                    &mut self.settings.correct_double_capitals,
-                    "Correct DOuble CApitals",
-                )
-                .on_hover_text("Fix a second capital in a word: DOuble becomes Double.")
-                .changed();
-        });
-        ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            ui.add_space(16.0);
-            changed |= ui
-                .checkbox(
-                    &mut self.settings.replace_three_dots,
-                    "Replace three dots with …",
-                )
-                .on_hover_text("Typing ... inserts the single ellipsis character.")
-                .changed();
-        });
-        ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            ui.add_space(16.0);
-            changed |= ui
-                .checkbox(&mut self.settings.smart_quotes, "Smart quotes")
-                .on_hover_text("Straight quotes become typographic quotes and apostrophes.")
-                .changed();
-        });
-        ui.add_space(20.0);
-        ui.label(
-            egui::RichText::new(
-                "Corrections apply as you type. Existing text is never rewritten in bulk.",
-            )
-            .size(11.0)
-            .color(kit().disabled_text),
-        );
-        changed
-    }
-
-    /// Navigator page: what each scene row shows.
-    fn settings_navigator(&mut self, ui: &mut egui::Ui) -> bool {
-        let mut changed = false;
-        kit_section(ui, "Scene list");
-        ui.horizontal(|ui| {
-            ui.add_space(16.0);
-            changed |= ui
-                .checkbox(
-                    &mut self.settings.navigator_show_numbers,
-                    "Show scene numbers",
-                )
-                .on_hover_text("Show each scene's number in the navigator.")
-                .changed();
-        });
-        ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            ui.add_space(16.0);
-            changed |= ui
-                .checkbox(
-                    &mut self.settings.navigator_preview,
-                    "Show scene description",
-                )
-                .on_hover_text("The first action line under each heading.")
-                .changed();
-        });
-        ui.add_space(20.0);
-        ui.label(
-            egui::RichText::new("Scene rows always show the heading and estimated duration.")
-                .size(11.0)
-                .color(kit().disabled_text),
-        );
-        changed
+        if outcome.changed && self.persist {
+            self.settings.save();
+        }
     }
 
     /// Fixed-size A4 pages on a recessed desk: the shared layout engine

@@ -1,9 +1,11 @@
 pub mod app;
 pub mod compare_view;
 pub mod dialogs;
+pub mod export;
 pub mod menu;
 pub mod quit_guard;
 pub mod revision_summary;
 pub mod script_view;
+pub mod settings;
 pub mod theme;
 pub mod title_page;
