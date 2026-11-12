@@ -24,9 +24,9 @@ Status legend: `[ ]` to do `[-]` in progress `[x]` done `[!]` blocked
 | Branch / commit | `main` at v0.8.0; tags `v0.7.0` at `9ce2e0e`, `v0.7.1` at `d8b17de`, `v0.7.2` at `8b75f9a`; v0.8 M0–M7 at `9bd4839`–`9f4c833`; M8/M9 progress at `a44ace0`, `1fe8c21`, `9d791a7`, `3b61227`; release prep at `d36ae4b`. |
 | Rust workspace | `scriptcraft-core`, `scriptcraft-app`, `scriptcraft-layout` (`Cargo.toml`, resolver 2) |
 | App crate version | `scriptcraft-app 0.8.0`; `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
-| Distribution | **v0.8.0 released 2026-11-10** — <https://github.com/MihailM17/scriptcraft/releases/tag/v0.8.0>. macOS arm64 DMG attached (ad-hoc signed, not notarised). Windows/Linux packages: CI `Packages` workflow dispatched for tag `v0.8.0` (run 43002697070). No auto-update. |
+| Distribution | **v0.8.0 released 2026-11-10** — <https://github.com/MihailM17/scriptcraft/releases/tag/v0.8.0>. Assets: macOS arm64 DMG (ad-hoc signed, not notarised), Windows x64 zip and Linux x86_64 tar.gz from Packages run 43002697070, each with `.sha256`. No auto-update. |
 | Current one-liner | Free, open-source, revision-first studio: one screenplay engine (Editor 2.0), crash-safe saves + recovery, revision colours/marks/pages, compare/restore, revision summary with scene counts + CSV + printable PDF, omitted scenes, smart screenplay paste, KIT version write/import, revision headers/title-page fields, production page locks with A/B page numbers and FDX revision metadata, dual dialogue side by side in editor/PDF with FDX interchange, a title-page editor whose A4 preview is the exporter's own layout, KIT-style editor/navigator settings, macOS standard selection keys, a compact file-focused Menu, OFL fonts, FDX/Fountain import/export; PDF export paginates exactly like the editor. |
-| Next release | **v0.8.1 / follow-up** — attach Windows/Linux release assets when CI completes, Windows signing path, optional release-binary/screenshot probe, further M9 extraction (`export/settings/research`), Developer ID/notarisation and auto-update when available. |
+| Next release | **v0.8.1 / follow-up** — finish M9 extraction (`export/settings/research`), Windows signing path, optional release-binary/screenshot probe, Developer ID/notarisation and auto-update when available. |
 
 **Positioning (locked 2026-10-26):** the free, open-source, revision-first
 screenwriting studio. Moat = the production revision workflow (colours, locked
@@ -1630,6 +1630,13 @@ Newest entries at the bottom. Each entry: date — what changed / what was found
     with DMG + `.sha256` attached. `Packages` workflow dispatched for Windows/
     Linux artifacts (run 43002697070, in progress at log time). Commits:
     `d36ae4b`, `0052bba`.
+  - Windows/Linux artifacts completed successfully and were attached to the
+    release on 2026-11-12: `ScriptCraft-0.8.0-windows-x64.zip` (6,662,548 bytes,
+    SHA-256 `cc2220521395f01250dcbfda8d5dda4037748954b3385fd13b5be328d117c98f`)
+    and `ScriptCraft-0.8.0-linux-x86_64.tar.gz` (10,966,237 bytes, SHA-256
+    `99288250914d2d6d975860f035adc9373f7efa4a52345e427ca6f61d72efc95f`), plus
+    their `.sha256` files. Release notes updated with a downloads/checksums
+    table.
 
 ---
 
