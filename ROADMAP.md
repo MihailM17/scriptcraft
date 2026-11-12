@@ -1717,3 +1717,24 @@ When a user prompt arrives:
     does not fail a correct diff, while still catching algorithmic blow-ups.
   - Test renamed `five_hundred_page_compare_stays_fast`; local test, fmt and
     clippy pass. Release-checklist note added.
+
+### 2026-11-12 — Compare workspace redesign
+
+  - `scriptcraft-app/src/compare_view.rs`: three-row header (title plus
+    read-only badge; base/target selectors, view switch and navigation;
+    coloured counts and keyboard hint). Coloured filter chips and scene cards
+    with number badges and `+`/`-`/`~` counts.
+  - Diff rows now carry kind tinting, rounded marker badges and a selected
+    accent bar. Changed lines highlight the edited span (old struck through in
+    red, new in green); long prefixes are windowed so the edit stays visible.
+    Side-by-side shows tinted old/new cells with a divider. Tints adapt to the
+    light theme.
+  - Preserved labels (`Compare Drafts`, `Close`, `Unified`, `Side by side`,
+    `All 2`/`Added 0`/…) and keyboard behaviour (J/K, arrows, V, Enter, Esc).
+  - Tests: six `inline_diff` unit tests; interaction test asserts the
+    read-only badge and keyboard hint. Regenerated `14_compare_drafts` and
+    `15_compare_side_by_side`; added `21_compare_light`.
+  - Gate: `cargo fmt --all -- --check`, `cargo clippy --workspace
+    --all-targets -- -D warnings`, `cargo test --workspace` (app 29 lib + 52
+    interaction + 20 snapshots; core 100 lib + 49 integration; layout 26 unit
+    + 25 integration), `cargo deny check`, `git diff --check`.

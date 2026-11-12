@@ -1477,6 +1477,21 @@ fn compare_workspace_open_filter_navigate_jump_close() {
     assert!(h.state().compare_open_for_test());
     assert!(h.query_by_label("Compare Drafts").is_some());
     assert!(h.query_by_label("Close").is_some());
+    // The redesigned header states the read-only guarantee and the keyboard
+    // controls instead of relying on hover text.
+    assert!(
+        h.query_by_label("Read-only").is_some(),
+        "compare must show the read-only badge"
+    );
+    assert!(
+        h.query_by_label("J/K navigate · V switch view · Enter open · Esc close")
+            .is_some(),
+        "compare must surface its keyboard shortcuts"
+    );
+    assert!(
+        h.query_by_label("Changes").is_some(),
+        "compare must title the change list"
+    );
 
     // Verify the change list shows changes.
     let counts = h

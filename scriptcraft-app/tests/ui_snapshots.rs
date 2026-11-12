@@ -319,6 +319,38 @@ fn snap_15_compare_side_by_side() {
     h.snapshot("15_compare_side_by_side");
 }
 
+/// Compare workspace in the light theme: row tints, marker badges and the
+/// side-by-side divider must stay legible on white surfaces.
+#[test]
+fn snap_21_compare_light() {
+    let mut h = Harness::builder()
+        .with_size(egui::Vec2::new(1360.0, 880.0))
+        .build_eframe(|cc| {
+            app::apply_theme(&cc.egui_ctx);
+            app::install_fonts(&cc.egui_ctx);
+            let mut a = ScriptCraftApp::default();
+            assert!(a.open_fixture(), "A95 fixture not found");
+            a.set_dark_mode(false);
+            a.goto_tab(SideTab::Script);
+            a
+        });
+    h.run();
+    h.state_mut()
+        .start_revision_at_for_test("Blue Revision", "28.10.2026 11:58");
+    h.run();
+
+    let bi = h.state().find_first_heading_block().expect("heading");
+    let heading = h.state().block_text(bi).unwrap();
+    let action = h.state().block_text(bi + 1).unwrap();
+    h.state_mut()
+        .set_block_text_for_test(bi, &format!("{heading} — REVISED"));
+    h.state_mut()
+        .set_block_text_for_test(bi + 1, &format!("{action} (revised action)"));
+    h.state_mut().open_compare();
+    h.run();
+    h.snapshot("21_compare_light");
+}
+
 /// A real dual-dialogue pair rendered side by side in the editor.
 #[test]
 fn snap_18_dual_dialogue() {
