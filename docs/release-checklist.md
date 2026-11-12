@@ -27,6 +27,9 @@ Expected v0.8 counts (2026-11-10): app 52 interaction + 19 snapshots + 23 lib,
 core 100 lib + 49 integration, layout 26 unit + 25 integration. Counts grow;
 what matters is zero failures.
 
+Timing gates use best-of-five samples and a CI-tolerant unit threshold; the
+Criterion benches in `docs/benchmarks.md` remain the real performance budget.
+
 Run the benchmark smoke and compare against `docs/benchmarks.md`:
 
 ```sh
