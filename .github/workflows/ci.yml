@@ -101,6 +101,15 @@ jobs:
           Write-Host "Binary exited with code $($p.ExitCode) before timeout."
           if (Test-Path $out) { Write-Host "--- stdout ---"; Get-Content $out }
           if (Test-Path $err) { Write-Host "--- stderr ---"; Get-Content $err }
+          # GitHub's Windows runners have no OpenGL 2.0 context. Reaching this
+          # error proves startup, window creation and renderer selection ran;
+          # it is the runner's limit, not an app crash. Any other early exit
+          # (panic, missing asset, bad settings) still fails the job.
+          $errText = if (Test-Path $err) { Get-Content $err -Raw } else { "" }
+          if ($p.ExitCode -eq 1 -and $errText -match "egui_glow requires opengl 2\.0\+") {
+            Write-Host "Runner has no OpenGL 2.0 context; startup reached the renderer (smoke OK)."
+            exit 0
+          }
           exit $p.ExitCode
       - name: Compile app and all test targets
         run: cargo check -p scriptcraft-app --all-targets
