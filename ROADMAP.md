@@ -21,12 +21,12 @@ Status legend: `[ ]` to do `[-]` in progress `[x]` done `[!]` blocked
 | Date | 2026-11-12 |
 | Project | ScriptCraft — free, open-source, revision-first screenwriting studio |
 | Repo | `/Users/mihailmihaylov/Documents/Dev_work/scriptcraft` |
-| Branch / commit | `main` after v0.8.0 + M9; tags `v0.7.0` at `9ce2e0e`, `v0.7.1` at `d8b17de`, `v0.7.2` at `8b75f9a`, `v0.8.0` at `0052bba`; M8/M9 progress at `a44ace0`, `1fe8c21`, `9d791a7`, `3b61227`; release prep at `d36ae4b`; assets/checksums at `aaad983`; M9 settings/export at `b284a78`; M9 research at the commit that follows. |
+| Branch / commit | `main` at v0.8.1; tags `v0.7.0` at `9ce2e0e`, `v0.7.1` at `d8b17de`, `v0.7.2` at `8b75f9a`, `v0.8.0` at `0052bba`, `v0.8.1` at `0fa598e`; M8/M9 progress at `a44ace0`, `1fe8c21`, `9d791a7`, `3b61227`; release prep at `d36ae4b`; assets/checksums at `aaad983`; M9 settings/export at `b284a78`; M9 research at `b9f9c21`. |
 | Rust workspace | `scriptcraft-core`, `scriptcraft-app`, `scriptcraft-layout` (`Cargo.toml`, resolver 2) |
-| App crate version | `scriptcraft-app 0.8.0`; `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
-| Distribution | **v0.8.0 released 2026-11-10** — <https://github.com/MihailM17/scriptcraft/releases/tag/v0.8.0>. Assets: macOS arm64 DMG (ad-hoc signed, not notarised), Windows x64 zip and Linux x86_64 tar.gz from Packages run 43002697070, each with `.sha256`. No auto-update. |
+| App crate version | `scriptcraft-app 0.8.1`; `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
+| Distribution | **v0.8.1 released 2026-11-12** — <https://github.com/MihailM17/scriptcraft/releases/tag/v0.8.1>. Assets: macOS arm64 DMG (ad-hoc signed, not notarised), Windows x64 zip and Linux x86_64 tar.gz from Packages run 43196720047, each with `.sha256`. No auto-update. |
 | Current one-liner | Free, open-source, revision-first studio: one screenplay engine (Editor 2.0), crash-safe saves + recovery, revision colours/marks/pages, compare/restore, revision summary with scene counts + CSV + printable PDF, omitted scenes, smart screenplay paste, KIT version write/import, revision headers/title-page fields, production page locks with A/B page numbers and FDX revision metadata, dual dialogue side by side in editor/PDF with FDX interchange, a title-page editor whose A4 preview is the exporter's own layout, KIT-style editor/navigator settings, macOS standard selection keys, a compact file-focused Menu, OFL fonts, FDX/Fountain import/export; PDF export paginates exactly like the editor. |
-| Next release | **v0.8.1 / follow-up** — M9 extraction is complete on `main`; remaining work is Windows signing, optional release-binary/screenshot probe, Developer ID/notarisation and auto-update. |
+| Next release | **Post-v0.8.1** — Windows signing, optional release-binary/screenshot probe, Developer ID/notarisation and auto-update. |
 
 **Positioning (locked 2026-10-26):** the free, open-source, revision-first
 screenwriting studio. Moat = the production revision workflow (colours, locked
@@ -1675,3 +1675,24 @@ When a user prompt arrives:
     interaction, 19 snapshots) after each extraction, with no snapshot
     changes. Commits: `b284a78` (settings/export) and the research commit
     that follows this log entry.
+
+### 2026-11-12 — v0.8.1 released (M9 refactor)
+
+  - Maintenance release completing M9 with no behavior change: `settings.rs`,
+    `export.rs` and `research.rs` extracted; `app.rs` 8,483 → 7,225 lines.
+  - Gate: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets
+    -- -D warnings`, `cargo test --workspace` (app 23 lib + 52 interaction + 19
+    snapshots; core 100 lib + 49 integration; layout 26 unit + 25 integration),
+    `cargo deny check`, `git diff --check`. Bench smoke showed no change.
+  - Tag `v0.8.1` at `0fa598e` (prep commit), pushed `main`+tag.
+  - macOS arm64 DMG built via `packaging/macos/bundle.sh` (ad-hoc, not
+    notarised): `ScriptCraft-0.8.1-macos-arm64.dmg` (8,163,639 bytes) SHA-256
+    `59561ad64fad947177c2ad28b03a12f0956b2eabe025bd08046a11830bd588b8`;
+    `codesign --verify --deep --strict` passed.
+  - Windows/Linux packages from `Packages` run 43196720047 on tag `v0.8.1`:
+    `ScriptCraft-0.8.1-windows-x64.zip` (6,667,971 bytes) SHA-256
+    `77f09e72042c7f77f02f89e248dbf4fea7a500a881cb21b6c61989df0925e030`;
+    `ScriptCraft-0.8.1-linux-x86_64.tar.gz` (10,971,538 bytes) SHA-256
+    `2c6680559fb0baf1ece0f3781947fb03a618c22dda90f04c2b7a3877e4e398d8`.
+    Each asset has a matching `.sha256`.
+  - GitHub release: <https://github.com/MihailM17/scriptcraft/releases/tag/v0.8.1>
