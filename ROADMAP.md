@@ -1696,3 +1696,15 @@ When a user prompt arrives:
     `2c6680559fb0baf1ece0f3781947fb03a618c22dda90f04c2b7a3877e4e398d8`.
     Each asset has a matching `.sha256`.
   - GitHub release: <https://github.com/MihailM17/scriptcraft/releases/tag/v0.8.1>
+
+### 2026-11-12 — CI launch smoke fixes after the v0.8.1 tag
+
+  - Linux probe: install `libxkbcommon-x11-dev`; winit previously panicked with
+    "Library libxkbcommon-x11.so could not be loaded" before the app could run.
+  - Windows probe: capture stdout/stderr, and treat the runner's exact
+    "egui_glow requires opengl 2.0+" error as a pass because windows-latest has
+    no OpenGL 2.0 context. Any other early exit still fails.
+  - CI run 43199722038 is green on `4d06adb` (macOS, Linux + launch probe,
+    Windows + interaction smoke, fmt/clippy, cargo-deny). Commits: `a68845f`,
+    `4d06adb`. These are CI-only changes after tag `v0.8.1`; release assets
+    were built from `0fa598e`.

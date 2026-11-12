@@ -93,9 +93,10 @@ If signing lands later, sign `ScriptCraft.exe` before zipping and verify with
 
 ## 5. Linux
 
-The `Packages` workflow builds the tar.gz on Ubuntu 22.04. It is runtime-smoked
-only on macOS today; Linux/Windows GUI smoke tests remain an M8 item. Release
-notes should name the GTK3 requirement.
+The `Packages` workflow builds the tar.gz on Ubuntu 22.04. CI also runs the
+interaction suite and a launch probe under Xvfb; the probe needs
+`libxkbcommon-x11-dev` for winit. Release notes should name the GTK3
+requirement.
 
 ## 6. Updates
 
