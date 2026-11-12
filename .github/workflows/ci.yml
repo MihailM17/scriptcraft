@@ -44,7 +44,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install Linux deps
-        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev xvfb
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libxkbcommon-x11-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev xvfb
       - name: Core tests
         run: cargo test -p scriptcraft-core
       - name: Layout tests
@@ -89,13 +89,18 @@ jobs:
         shell: pwsh
         run: |
           cargo build -p scriptcraft-app
-          $p = Start-Process -FilePath "target\debug\scriptcraft-app.exe" -PassThru
+          $out = Join-Path $env:RUNNER_TEMP "scriptcraft-stdout.txt"
+          $err = Join-Path $env:RUNNER_TEMP "scriptcraft-stderr.txt"
+          $p = Start-Process -FilePath "target\debug\scriptcraft-app.exe" -PassThru `
+            -RedirectStandardOutput $out -RedirectStandardError $err
           if (-not $p.WaitForExit(8000)) {
             $p.Kill()
             Write-Host "Binary stayed alive for 8s without crashing (startup smoke OK)."
             exit 0
           }
           Write-Host "Binary exited with code $($p.ExitCode) before timeout."
+          if (Test-Path $out) { Write-Host "--- stdout ---"; Get-Content $out }
+          if (Test-Path $err) { Write-Host "--- stderr ---"; Get-Content $err }
           exit $p.ExitCode
       - name: Compile app and all test targets
         run: cargo check -p scriptcraft-app --all-targets
