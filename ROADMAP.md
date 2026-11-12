@@ -1738,3 +1738,35 @@ When a user prompt arrives:
     --all-targets -- -D warnings`, `cargo test --workspace` (app 29 lib + 52
     interaction + 20 snapshots; core 100 lib + 49 integration; layout 26 unit
     + 25 integration), `cargo deny check`, `git diff --check`.
+
+### 2026-11-12 — v0.8.2 released (redesigned Draft Comparison)
+
+  - Compare redesign shipped in `scriptcraft-app/src/compare_view.rs`: split
+    header (title + read-only badge, selection row, summary row), tinted diff
+    rows with rounded marker badges and selected accent bar, inline
+    prefix/suffix-split old→new highlighting (red strikethrough, green insert),
+    side-by-side cell tints + divider, filter chips and scene cards with
+    coloured counts; commit `6bf1983`.
+  - Release prep: version bumped to `0.8.2` (`scriptcraft-app/Cargo.toml` +
+    `Cargo.lock`), release notes `docs/releases/v0.8.2.md`, README and ROADMAP
+    updated; commit `ea5e39e`, tag `v0.8.2` at that commit.
+  - Gate before tagging: `cargo fmt --all -- --check`, `cargo clippy
+    --workspace --all-targets -- -D warnings`, `cargo test --workspace` (app 29
+    lib + 52 interaction + 20 snapshots; core 100 lib + 49 integration; layout
+    26 unit + 25 integration), `cargo deny check`, `git diff --check` — all
+    green.
+  - Tag `v0.8.2` at `ea5e39e`; `main` and tag pushed.
+  - macOS arm64 DMG via `packaging/macos/bundle.sh` (ad-hoc, not notarised):
+    `ScriptCraft-0.8.2-macos-arm64.dmg` (8,169,971 bytes) SHA-256
+    `a43f8fb864648de12451065cc1599e1cd1924c352b0d73b2f607e5537100d54a`;
+    `codesign --verify --deep --strict` passed.
+  - Windows/Linux from `Packages` workflow run `43296684808` on tag `v0.8.2`
+    (green): `ScriptCraft-0.8.2-windows-x64.zip` (6,681,323 bytes) SHA-256
+    `f3dc8c40d2644706832475d6d75d336b1add158a09803e3731b1d03d614b522b`;
+    `ScriptCraft-0.8.2-linux-x86_64.tar.gz` (10,971,932 bytes) SHA-256
+    `01d48f7e09451c84a1d2559f4e1b24891eab52d25a34aa43869af789801caf6b`; each
+    with a matching `.sha256`.
+  - GitHub release published: <https://github.com/MihailM17/scriptcraft/releases/tag/v0.8.2>
+    with all six assets; published assets re-downloaded and SHA-256 verified.
+  - Deferred (unchanged): Developer ID/notarisation, Windows code signing,
+    auto-update.
