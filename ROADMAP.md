@@ -18,15 +18,15 @@ Status legend: `[ ]` to do `[-]` in progress `[x]` done `[!]` blocked
 
 | Field | Value |
 |---|---|
-| Date | 2026-11-10 |
+| Date | 2026-11-12 |
 | Project | ScriptCraft — free, open-source, revision-first screenwriting studio |
 | Repo | `/Users/mihailmihaylov/Documents/Dev_work/scriptcraft` |
-| Branch / commit | `main` at v0.8.0; tags `v0.7.0` at `9ce2e0e`, `v0.7.1` at `d8b17de`, `v0.7.2` at `8b75f9a`; v0.8 M0–M7 at `9bd4839`–`9f4c833`; M8/M9 progress at `a44ace0`, `1fe8c21`, `9d791a7`, `3b61227`; release prep at `d36ae4b`. |
+| Branch / commit | `main` after v0.8.0 + M9; tags `v0.7.0` at `9ce2e0e`, `v0.7.1` at `d8b17de`, `v0.7.2` at `8b75f9a`, `v0.8.0` at `0052bba`; M8/M9 progress at `a44ace0`, `1fe8c21`, `9d791a7`, `3b61227`; release prep at `d36ae4b`; assets/checksums at `aaad983`; M9 settings/export at `b284a78`; M9 research at the commit that follows. |
 | Rust workspace | `scriptcraft-core`, `scriptcraft-app`, `scriptcraft-layout` (`Cargo.toml`, resolver 2) |
 | App crate version | `scriptcraft-app 0.8.0`; `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
 | Distribution | **v0.8.0 released 2026-11-10** — <https://github.com/MihailM17/scriptcraft/releases/tag/v0.8.0>. Assets: macOS arm64 DMG (ad-hoc signed, not notarised), Windows x64 zip and Linux x86_64 tar.gz from Packages run 43002697070, each with `.sha256`. No auto-update. |
 | Current one-liner | Free, open-source, revision-first studio: one screenplay engine (Editor 2.0), crash-safe saves + recovery, revision colours/marks/pages, compare/restore, revision summary with scene counts + CSV + printable PDF, omitted scenes, smart screenplay paste, KIT version write/import, revision headers/title-page fields, production page locks with A/B page numbers and FDX revision metadata, dual dialogue side by side in editor/PDF with FDX interchange, a title-page editor whose A4 preview is the exporter's own layout, KIT-style editor/navigator settings, macOS standard selection keys, a compact file-focused Menu, OFL fonts, FDX/Fountain import/export; PDF export paginates exactly like the editor. |
-| Next release | **v0.8.1 / follow-up** — finish M9 extraction (`export/settings/research`), Windows signing path, optional release-binary/screenshot probe, Developer ID/notarisation and auto-update when available. |
+| Next release | **v0.8.1 / follow-up** — M9 extraction is complete on `main`; remaining work is Windows signing, optional release-binary/screenshot probe, Developer ID/notarisation and auto-update. |
 
 **Positioning (locked 2026-10-26):** the free, open-source, revision-first
 screenwriting studio. Moat = the production revision workflow (colours, locked
@@ -1657,3 +1657,21 @@ When a user prompt arrives:
 4. Never delete history. Never mark something done that was not verified by a
    command; note the exact verification command in the log.
 5. Keep this file the only progress tracker so a new chat can resume from it alone.
+
+### 2026-11-12 — M9 complete: settings, export and research extracted
+
+  - `scriptcraft-app/src/settings.rs`: `AppSettings`, `SettingsPage`, persisted
+    `settings.conf` load/save and the Application/Scenario Editor/Navigator
+    pages (behavior unchanged).
+  - `scriptcraft-app/src/export.rs`: `ExportTab`, `ExportFormat`, and the
+    Export Scenario dialog; `ScriptCraftApp` passes borrowed state and runs
+    preview/export through the existing save paths.
+  - `scriptcraft-app/src/research.rs`: `ResearchPane`, `ResearchEdit`, the
+    research tree and every pane (script metadata/page locks, title page,
+    logline/synopsis, versions/revisions, entry editor and photos). Side
+    effects are returned as `ResearchAction` and applied after the frame.
+  - `app.rs` dropped from 8,483 to 7,225 lines. `cargo test -p
+    scriptcraft-app --test interaction --test ui_snapshots` passed (52
+    interaction, 19 snapshots) after each extraction, with no snapshot
+    changes. Commits: `b284a78` (settings/export) and the research commit
+    that follows this log entry.

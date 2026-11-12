@@ -4,6 +4,7 @@ pub mod dialogs;
 pub mod export;
 pub mod menu;
 pub mod quit_guard;
+pub mod research;
 pub mod revision_summary;
 pub mod script_view;
 pub mod settings;

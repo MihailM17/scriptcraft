@@ -13,7 +13,9 @@ macOS, Windows and Linux.
 > scenes, dual dialogue, title-page editor and revision summary (scene counts,
 > CSV and printable PDF). Layout metrics are derived from the bundled font,
 > `.kitsp` saves preserve unknown sidecar rows, and CI runs runtime interaction
-> smoke on macOS/Linux/Windows.
+> smoke on macOS/Linux/Windows. Source on `main` also completes the M9
+> refactor: settings, export and research now live in their own modules with
+> no behavior change.
 >
 > **Distribution note:** macOS builds in this release are ad-hoc signed (no
 > Developer ID/notarisation), Windows packages are unsigned, and auto-update is

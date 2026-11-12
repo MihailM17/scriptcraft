@@ -14,6 +14,8 @@ use scriptcraft_core::{
 pub use crate::compare_view::{ChangeFilter, CompareView};
 use crate::compare_view::{CompareAction, CompareState};
 use crate::export::{ExportAction, ExportDialog, ExportFormat, ExportTab};
+pub use crate::research::ResearchPane;
+use crate::research::{ResearchAction, ResearchEdit, ResearchView};
 use crate::settings::{AppSettings, SettingsPage};
 use crate::theme::*;
 pub use crate::theme::{apply_theme, kit_visuals, set_kit_theme};
@@ -36,20 +38,6 @@ pub(crate) fn bold_mono() -> egui::FontFamily {
 
 pub(crate) fn italic_mono() -> egui::FontFamily {
     egui::FontFamily::Name("ItalicMono".into())
-}
-
-/// Decode a stored KIT research picture (PNG or JPEG) into an egui image.
-fn decode_image(bytes: &[u8]) -> Option<egui::ColorImage> {
-    let img = image::load_from_memory(bytes).ok()?.to_rgba8();
-    let size = [img.width() as usize, img.height() as usize];
-    Some(egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw()))
-}
-
-fn image_hash(bytes: &[u8]) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    bytes.hash(&mut h);
-    h.finish()
 }
 
 pub fn run() -> eframe::Result<()> {
@@ -355,20 +343,6 @@ pub enum SideTab {
     Settings,
 }
 
-/// Research module selection (KIT's research tree).
-#[derive(PartialEq, Eq, Clone, Copy)]
-pub enum ResearchPane {
-    Script,
-    TitlePage,
-    Logline,
-    Synopsis,
-    Versions,
-    Characters,
-    Locations,
-    Documents,
-    Entry(i64),
-}
-
 /// Statistics module selection (KIT's report tree).
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub enum StatsPane {
@@ -379,16 +353,6 @@ pub enum StatsPane {
     SpeakingParts,
     Structure,
     Activity,
-}
-
-/// Editable buffer for one research entry (synced on selection).
-#[derive(Debug, Clone)]
-struct ResearchEdit {
-    id: i64,
-    kind: kitsp::ResearchKind,
-    name: String,
-    url: String,
-    description: String,
 }
 
 /// How the script zoom is chosen: free pinch/steps, or locked to the
@@ -2857,17 +2821,7 @@ impl ScriptCraftApp {
 
     /// Copy the selected research entry into the edit buffer.
     fn sync_research_buffer(&mut self) {
-        self.research_edit = self
-            .research
-            .iter()
-            .find(|e| Some(e.id) == self.research_sel)
-            .map(|e| ResearchEdit {
-                id: e.id,
-                kind: e.kind,
-                name: e.name.clone(),
-                url: e.url.clone(),
-                description: e.description.clone(),
-            });
+        self.research_edit = crate::research::sync_buffer(&self.research, self.research_sel);
     }
 
     fn save_research_edit(&mut self) {
@@ -3646,7 +3600,7 @@ pub(crate) enum KitIcon {
     Help,
 }
 
-fn draw_kit_icon(p: &egui::Painter, icon: KitIcon, c: egui::Pos2, color: egui::Color32) {
+pub(crate) fn draw_kit_icon(p: &egui::Painter, icon: KitIcon, c: egui::Pos2, color: egui::Color32) {
     let stroke = egui::Stroke::new(1.3_f32, color);
     let pt = |x: f32, y: f32| egui::pos2(c.x + x, c.y + y);
     let poly = |points: Vec<egui::Pos2>| {
@@ -3865,13 +3819,13 @@ fn draw_kit_icon(p: &egui::Painter, icon: KitIcon, c: egui::Pos2, color: egui::C
 
 /// One row in a KIT-style module tree; nest rows inside an indent block for
 /// expanded folders. Returns (row response, arrow clicked, plus clicked).
-struct KitTreeRow {
-    sel: bool,
-    arrow: Option<bool>,
-    plus: bool,
+pub(crate) struct KitTreeRow {
+    pub sel: bool,
+    pub arrow: Option<bool>,
+    pub plus: bool,
 }
 
-fn kit_tree_row(
+pub(crate) fn kit_tree_row(
     ui: &mut egui::Ui,
     row: KitTreeRow,
     icon: KitIcon,
@@ -3937,13 +3891,13 @@ fn kit_tree_row(
     (resp, arrow_hit, plus_hit)
 }
 
-enum StripItem<'a> {
+pub(crate) enum StripItem<'a> {
     Icon(KitIcon, &'a str),
     Sep,
 }
 
 /// KIT module strip ("Research" / "Statistics" + right-aligned icon buttons).
-fn kit_module_strip(
+pub(crate) fn kit_module_strip(
     ui: &mut egui::Ui,
     title: &str,
     items: &[StripItem<'_>],
@@ -4064,7 +4018,7 @@ pub(crate) fn kit_field_multi(
 }
 
 /// Filled monospace editor (logline / synopsis panes).
-fn kit_mono_editor(ui: &mut egui::Ui, text: &mut String, height: f32) -> bool {
+pub(crate) fn kit_mono_editor(ui: &mut egui::Ui, text: &mut String, height: f32) -> bool {
     let v = kit_field_visuals(ui);
     let size = egui::vec2(ui.available_width(), height);
     ui.scope(|ui| {
@@ -4080,7 +4034,7 @@ fn kit_mono_editor(ui: &mut egui::Ui, text: &mut String, height: f32) -> bool {
     .inner
 }
 
-fn kit_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
+pub(crate) fn kit_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
     let galley = ui.painter().layout_no_wrap(
         text.to_string(),
         egui::FontId::proportional(13.0),
@@ -4102,7 +4056,7 @@ fn kit_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
     resp
 }
 
-fn kit_icon_button(ui: &mut egui::Ui, icon: KitIcon, text: &str) -> egui::Response {
+pub(crate) fn kit_icon_button(ui: &mut egui::Ui, icon: KitIcon, text: &str) -> egui::Response {
     let galley = ui.painter().layout_no_wrap(
         text.to_string(),
         egui::FontId::proportional(13.0),
@@ -6011,630 +5965,80 @@ impl ScriptCraftApp {
     }
 
     fn research_view(&mut self, ctx: &egui::Context) {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            if self.project.is_none() {
-                ui.centered_and_justified(|ui| {
-                    ui.label("Open a .kitsp file to browse research.");
-                });
-                return;
+        let labels: Vec<String> = (0..self.scene_count())
+            .map(|i| self.scene_label(i))
+            .collect();
+        let latest = self.revisions.latest().cloned();
+        let read_only = self.path.is_empty() || Self::is_fixture_path(&self.path);
+        let actions = {
+            let mut view = ResearchView {
+                has_project: self.project.is_some(),
+                read_only,
+                entries: &self.research,
+                pane: &mut self.research_pane,
+                meta: &mut self.meta,
+                meta_dirty: &mut self.meta_dirty,
+                scene_labels: &labels,
+                path: &self.path,
+                versions: &self.versions,
+                revisions: &self.revisions,
+                latest: latest.as_ref(),
+                show_current_revision: &mut self.show_current_revision,
+                revision_marks_dirty: &mut self.revision_marks_dirty,
+                title_logline: &mut self.title_logline,
+                title_synopsis: &mut self.title_synopsis,
+                research_sel: &mut self.research_sel,
+                research_edit: &mut self.research_edit,
+                research_tex: &mut self.research_tex,
+                status: &mut self.status,
             };
-            ui.spacing_mut().item_spacing.y = 0.0;
-            kit_module_strip(ui, "Research", &[]);
-            ui.spacing_mut().item_spacing.y = 6.0;
-            let pane_h = ui.available_height();
-            ui.horizontal_top(|ui| {
-                ui.allocate_ui_with_layout(
-                    egui::vec2(330.0, pane_h),
-                    egui::Layout::top_down(egui::Align::Min),
-                    |ui| {
-                        ui.set_min_width(330.0);
-                        ui.set_max_width(330.0);
-                        egui::ScrollArea::vertical()
-                            .id_salt("research_tree")
-                            .auto_shrink([false, false])
-                            .show(ui, |ui| {
-                                self.research_tree(ui);
-                            });
-                    },
-                );
-                ui.add_space(8.0);
-                let (sep, _) =
-                    ui.allocate_exact_size(egui::vec2(1.0, pane_h), egui::Sense::hover());
-                ui.painter().rect_filled(sep, 0.0, kit().sep);
-                ui.add_space(4.0);
-                egui::Frame::new()
-                    .fill(kit().module_bg)
-                    .inner_margin(egui::Margin::symmetric(14, 12))
-                    .show(ui, |ui| {
-                        ui.vertical(|ui| {
-                            egui::ScrollArea::vertical()
-                                .id_salt("research_pane")
-                                .auto_shrink([false, false])
-                                .show(ui, |ui| {
-                                    self.research_pane_view(ui);
-                                });
-                        });
-                    });
-            });
-        });
+            crate::research::view(ctx, &mut view)
+        };
+        for action in actions {
+            self.apply_research_action(action);
+        }
+    }
+
+    fn apply_research_action(&mut self, action: ResearchAction) {
+        match action {
+            ResearchAction::AddEntry(kind, name) => self.add_research_entry(kind, name),
+            ResearchAction::ImportCharacters => self.import_characters_from_script(),
+            ResearchAction::ImportLocations => self.import_locations_from_script(),
+            ResearchAction::StartRevision => self.start_revision(),
+            ResearchAction::SaveVersionDialog => {
+                self.version_name =
+                    format!("Draft {}", chrono::Local::now().format("%Y-%m-%d %H:%M"));
+                self.version_description.clear();
+                self.version_error.clear();
+                self.show_version_dialog = true;
+            }
+            ResearchAction::ImportVersions => {
+                self.import_versions_as_revisions();
+            }
+            ResearchAction::ShowHistory => {
+                self.close_compare();
+                self.show_revisions = true;
+            }
+            ResearchAction::OpenCompare => {
+                self.open_compare();
+            }
+            ResearchAction::OpenSummary => {
+                self.open_revision_summary();
+            }
+            ResearchAction::ClearHistory => {
+                self.close_compare();
+                self.show_clear_revisions = true;
+            }
+            ResearchAction::SaveEntry => self.save_research_edit(),
+            ResearchAction::DeleteEntry => self.delete_selected_research(),
+            ResearchAction::SetPhoto(id, bytes) => self.set_research_photo(id, bytes.as_deref()),
+            ResearchAction::LockPages => self.lock_pages(),
+            ResearchAction::UnlockPages => self.unlock_pages(),
+        }
     }
 
     fn scene_count(&self) -> usize {
         self.project.as_ref().map(|p| p.scenes().len()).unwrap_or(0)
-    }
-
-    fn research_tree(&mut self, ui: &mut egui::Ui) {
-        ui.add_space(4.0);
-        let mut sel = self.research_pane;
-
-        // Script branch.
-        let mut open = ui.data(|d| {
-            d.get_temp::<bool>(egui::Id::new("rt_script"))
-                .unwrap_or(true)
-        });
-        let (row, arrow, _) = kit_tree_row(
-            ui,
-            KitTreeRow {
-                sel: false,
-                arrow: Some(open),
-                plus: false,
-            },
-            KitIcon::Script,
-            "Script",
-            "rt_script",
-        );
-        if row.clicked() || arrow {
-            open = !open;
-            ui.data_mut(|d| d.insert_temp(egui::Id::new("rt_script"), open));
-        }
-        if open {
-            ui.indent("rt_script_i", |ui| {
-                for (pane, icon, name) in [
-                    (ResearchPane::TitlePage, KitIcon::Book, "Title Page"),
-                    (ResearchPane::Logline, KitIcon::Text, "Logline"),
-                    (ResearchPane::Synopsis, KitIcon::Paragraph, "Synopsis"),
-                    (ResearchPane::Versions, KitIcon::Layers, "Versions"),
-                ] {
-                    let (r, _, _) = kit_tree_row(
-                        ui,
-                        KitTreeRow {
-                            sel: sel == pane,
-                            arrow: None,
-                            plus: false,
-                        },
-                        icon,
-                        name,
-                        name,
-                    );
-                    if r.clicked() {
-                        sel = pane;
-                    }
-                }
-            });
-        }
-
-        self.research_folder(
-            ui,
-            "rt_chars",
-            KitIcon::Person,
-            "Characters",
-            kitsp::ResearchKind::Character,
-            &mut sel,
-        );
-        self.research_folder(
-            ui,
-            "rt_locs",
-            KitIcon::House,
-            "Locations",
-            kitsp::ResearchKind::Location,
-            &mut sel,
-        );
-        self.research_folder(
-            ui,
-            "rt_docs",
-            KitIcon::Folder,
-            "Documents",
-            kitsp::ResearchKind::Other,
-            &mut sel,
-        );
-
-        ui.add_space(8.0);
-        self.research_pane = sel;
-    }
-
-    fn research_folder(
-        &mut self,
-        ui: &mut egui::Ui,
-        salt: &'static str,
-        icon: KitIcon,
-        title: &str,
-        kind: kitsp::ResearchKind,
-        sel: &mut ResearchPane,
-    ) {
-        let mut open = ui.data(|d| d.get_temp::<bool>(egui::Id::new(salt)).unwrap_or(true));
-        let (row, arrow, plus) = kit_tree_row(
-            ui,
-            KitTreeRow {
-                sel: false,
-                arrow: Some(open),
-                plus: true,
-            },
-            icon,
-            title,
-            salt,
-        );
-        if row.clicked() || arrow {
-            open = !open;
-            ui.data_mut(|d| d.insert_temp(egui::Id::new(salt), open));
-        }
-        if plus {
-            egui::Popup::menu(&row).show(|ui| {
-                ui.set_min_width(190.0);
-                match kind {
-                    kitsp::ResearchKind::Character => {
-                        if ui.button("Add character").clicked() {
-                            self.add_research_entry(
-                                kitsp::ResearchKind::Character,
-                                "New character",
-                            );
-                            ui.close();
-                        }
-                        if ui.button("Import characters from script").clicked() {
-                            self.import_characters_from_script();
-                            ui.close();
-                        }
-                    }
-                    kitsp::ResearchKind::Location => {
-                        if ui.button("Add location").clicked() {
-                            self.add_research_entry(kitsp::ResearchKind::Location, "New location");
-                            ui.close();
-                        }
-                        if ui.button("Import locations from script").clicked() {
-                            self.import_locations_from_script();
-                            ui.close();
-                        }
-                    }
-                    kitsp::ResearchKind::Other => {
-                        if ui.button("Add note").clicked() {
-                            self.add_research_entry(kitsp::ResearchKind::Other, "New entry");
-                            ui.close();
-                        }
-                    }
-                }
-            });
-        }
-        if open {
-            let ids: Vec<(i64, String)> = self
-                .research
-                .iter()
-                .filter(|e| e.kind == kind)
-                .map(|e| (e.id, e.name.clone()))
-                .collect();
-            ui.indent(salt, |ui| {
-                for (id, name) in &ids {
-                    let (c, _, _) = kit_tree_row(
-                        ui,
-                        KitTreeRow {
-                            sel: *sel == ResearchPane::Entry(*id),
-                            arrow: None,
-                            plus: false,
-                        },
-                        icon,
-                        name,
-                        (salt, *id),
-                    );
-                    if c.clicked() {
-                        *sel = ResearchPane::Entry(*id);
-                    }
-                }
-            });
-        }
-    }
-
-    fn research_pane_view(&mut self, ui: &mut egui::Ui) {
-        match self.research_pane {
-            ResearchPane::Script => self.research_script_pane(ui),
-            ResearchPane::TitlePage => self.research_titlepage_pane(ui),
-            ResearchPane::Logline => self.research_logline_pane(ui, false),
-            ResearchPane::Synopsis => self.research_logline_pane(ui, true),
-            ResearchPane::Versions => self.research_versions_pane(ui),
-            ResearchPane::Entry(id) => self.research_entry_pane(ui, id),
-            ResearchPane::Characters | ResearchPane::Locations | ResearchPane::Documents => {
-                ui.label("Select an entry to edit it.");
-            }
-        }
-    }
-
-    fn research_script_pane(&mut self, ui: &mut egui::Ui) {
-        let mut dirty = false;
-        kit_section(ui, "Script");
-        dirty |= kit_field(ui, "Script Name", &mut self.meta.title);
-        dirty |= kit_field(ui, "Header", &mut self.meta.header);
-        dirty |= kit_field(ui, "Footer", &mut self.meta.footer);
-        ui.label(
-            egui::RichText::new("Header/footer tokens: {revision} {date} {page}")
-                .size(11.0)
-                .color(egui::Color32::from_gray(0xA1)),
-        );
-        dirty |= kit_field(
-            ui,
-            "Scene Number Prefix",
-            &mut self.meta.scene_number_prefix,
-        );
-        dirty |= kit_field(
-            ui,
-            "Scene Numbering Starting at",
-            &mut self.meta.scene_number_start,
-        );
-        ui.add_space(6.0);
-        ui.horizontal_wrapped(|ui| {
-            if kit_icon_button(ui, KitIcon::LockClosed, "Lock scenes numbers").clicked() {
-                let n = self.scene_count();
-                if n > 0 {
-                    let labels: Vec<String> = (0..n)
-                        .map(|i| self.scene_label(i).trim_end_matches('.').to_string())
-                        .collect();
-                    self.meta.locked_scene_numbers = labels.join(",");
-                    dirty = true;
-                }
-            }
-            if kit_icon_button(ui, KitIcon::LockClosed, "Lock new scenes numbers").clicked() {
-                let n = self.scene_count();
-                let labels: Vec<String> = (0..n)
-                    .map(|i| self.scene_label(i).trim_end_matches('.').to_string())
-                    .collect();
-                self.meta.locked_scene_numbers = format!("*{}", labels.join(","));
-                dirty = true;
-            }
-            if kit_icon_button(ui, KitIcon::LockOpen, "Unlock scenes numbers").clicked() {
-                self.meta.locked_scene_numbers.clear();
-                dirty = true;
-            }
-        });
-        ui.add_space(6.0);
-        kit_section(ui, "Page Locks");
-        let page_lock = scriptcraft_core::page_lock::PageLock::from_json(&self.meta.locked_pages)
-            .ok()
-            .filter(|l| !l.is_empty());
-        if let Some(lock) = page_lock {
-            ui.label(format!(
-                "Locked: {} page{} (inserted pages use A/B labels).",
-                lock.pages,
-                if lock.pages == 1 { "" } else { "s" }
-            ));
-        } else {
-            ui.label(
-                egui::RichText::new(
-                    "Lock page starts before revisions so page references stay valid.",
-                )
-                .size(11.0)
-                .color(egui::Color32::from_gray(0xA1)),
-            );
-        }
-        ui.horizontal_wrapped(|ui| {
-            if kit_icon_button(ui, KitIcon::LockClosed, "Lock pages").clicked() {
-                self.lock_pages();
-            }
-            if kit_icon_button(ui, KitIcon::LockOpen, "Unlock pages").clicked() {
-                self.unlock_pages();
-            }
-        });
-        if dirty {
-            self.meta_dirty = true;
-        }
-    }
-
-    fn research_titlepage_pane(&mut self, ui: &mut egui::Ui) {
-        let latest = self.revisions.latest().cloned();
-        if crate::title_page::title_page_editor(ui, &mut self.meta, latest.as_ref()) {
-            self.meta_dirty = true;
-        }
-    }
-
-    fn research_logline_pane(&mut self, ui: &mut egui::Ui, synopsis: bool) {
-        let title = if synopsis { "Synopsis" } else { "Logline" };
-        let words = if synopsis {
-            self.title_synopsis.split_whitespace().count()
-        } else {
-            self.title_logline.split_whitespace().count()
-        };
-        ui.horizontal(|ui| {
-            ui.label(egui::RichText::new(title).size(15.0).strong());
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(egui::RichText::new(format!("words: {words}")).size(12.0));
-            });
-        });
-        ui.add_space(8.0);
-        let available = ui.available_height() - 8.0;
-        let text = if synopsis {
-            &mut self.title_synopsis
-        } else {
-            &mut self.title_logline
-        };
-        if kit_mono_editor(ui, text, available.max(120.0)) {
-            self.meta_dirty = true;
-        }
-    }
-
-    fn research_versions_pane(&mut self, ui: &mut egui::Ui) {
-        kit_section(ui, "Versions");
-        let can_write = !self.path.is_empty() && !Self::is_fixture_path(&self.path);
-        if ui
-            .add_enabled(can_write, egui::Button::new("Save Current as Version…"))
-            .on_disabled_hover_text("Save the project before creating a version.")
-            .clicked()
-        {
-            self.version_name = format!("Draft {}", chrono::Local::now().format("%Y-%m-%d %H:%M"));
-            self.version_description.clear();
-            self.version_error.clear();
-            self.show_version_dialog = true;
-        }
-        if !can_write {
-            ui.label(
-                egui::RichText::new("Save the project first — fixture is read-only.")
-                    .size(11.0)
-                    .color(egui::Color32::from_gray(0xA1)),
-            );
-        }
-        ui.add_space(8.0);
-        if self.versions.is_empty() {
-            ui.label(egui::RichText::new("No versions in this project.").size(13.0));
-        } else {
-            for (name, when) in &self.versions {
-                let (rect, _) = ui.allocate_exact_size(
-                    egui::vec2(ui.available_width(), 40.0),
-                    egui::Sense::hover(),
-                );
-                ui.painter().rect_filled(rect, 2.0, kit().strip);
-                draw_kit_icon(
-                    ui.painter(),
-                    KitIcon::Layers,
-                    egui::pos2(rect.left() + 18.0, rect.center().y),
-                    kit().text,
-                );
-                ui.painter().text(
-                    egui::pos2(rect.left() + 36.0, rect.center().y - 7.0),
-                    egui::Align2::LEFT_CENTER,
-                    name,
-                    egui::FontId::proportional(13.0),
-                    kit().text,
-                );
-                ui.painter().text(
-                    egui::pos2(rect.left() + 36.0, rect.center().y + 8.0),
-                    egui::Align2::LEFT_CENTER,
-                    when,
-                    egui::FontId::proportional(11.5),
-                    egui::Color32::from_gray(0xA1),
-                );
-                ui.add_space(6.0);
-            }
-        }
-        ui.add_space(4.0);
-        if ui
-            .add_enabled(can_write, egui::Button::new("Import Versions as Revisions"))
-            .clicked()
-        {
-            self.import_versions_as_revisions();
-        }
-        ui.label(
-            egui::RichText::new("Each saved KIT version becomes a revision baseline.")
-                .size(11.0)
-                .color(egui::Color32::from_gray(0xA1)),
-        );
-        ui.add_space(16.0);
-        kit_section(ui, "Revisions");
-        let has = self.project.is_some();
-        let mut start = false;
-        let mut history = false;
-        let mut compare = false;
-        let mut summary = false;
-        let mut clear = false;
-        let next_color = self.revisions.next_color();
-        if ui
-            .add_enabled(
-                has,
-                egui::Button::new(format!("Start {} Revision", next_color.label())),
-            )
-            .on_disabled_hover_text("Open a project to start a revision.")
-            .clicked()
-        {
-            start = true;
-        }
-        ui.add_space(4.0);
-        if ui
-            .add_enabled(has, egui::Button::new("Revision History…"))
-            .clicked()
-        {
-            history = true;
-        }
-        ui.add_space(4.0);
-        if ui
-            .add_enabled(
-                has && !self.revisions.is_empty(),
-                egui::Button::new("Compare Drafts…"),
-            )
-            .clicked()
-        {
-            compare = true;
-        }
-        ui.add_space(4.0);
-        if ui
-            .add_enabled(
-                has && !self.revisions.is_empty(),
-                egui::Button::new("Revision Summary…"),
-            )
-            .on_disabled_hover_text("Start a revision to summarize changes.")
-            .clicked()
-        {
-            summary = true;
-        }
-        if !self.revisions.is_empty() {
-            ui.add_space(6.0);
-            if ui
-                .checkbox(
-                    &mut self.show_current_revision,
-                    "Show current revision only",
-                )
-                .changed()
-            {
-                self.revision_marks_dirty = true;
-            }
-            ui.add_space(4.0);
-            if ui
-                .add_enabled(true, egui::Button::new("Clear Revision History…"))
-                .clicked()
-            {
-                clear = true;
-            }
-        }
-        ui.label(
-            egui::RichText::new(
-                "Revision colours mark changed lines and print in the PDF. Versions above are KIT's named snapshots.",
-            )
-            .size(11.0)
-            .color(egui::Color32::from_gray(0xA1)),
-        );
-        if start {
-            self.start_revision();
-        }
-        if history {
-            self.close_compare();
-            self.show_revisions = true;
-        }
-        if compare {
-            self.open_compare();
-        }
-        if summary {
-            self.open_revision_summary();
-        }
-        if clear {
-            self.close_compare();
-            self.show_clear_revisions = true;
-        }
-    }
-
-    fn research_entry_pane(&mut self, ui: &mut egui::Ui, id: i64) {
-        if self.research_sel != Some(id) {
-            self.research_sel = Some(id);
-            self.sync_research_buffer();
-        }
-        if self.research_edit.is_none() {
-            self.sync_research_buffer();
-        }
-        // Refresh the picture texture when the stored bytes change.
-        let photo = self
-            .research
-            .iter()
-            .find(|e| e.id == id)
-            .and_then(|e| e.image.clone());
-        let want = photo.as_ref().map(|b| (id, image_hash(b)));
-        if self.research_tex.as_ref().map(|(i, h, _)| (*i, *h)) != want {
-            self.research_tex = None;
-            if let Some(bytes) = &photo {
-                if let Some(img) = decode_image(bytes) {
-                    let tex = ui.ctx().load_texture(
-                        format!("research-photo-{id}"),
-                        img,
-                        egui::TextureOptions::LINEAR,
-                    );
-                    self.research_tex = Some((id, image_hash(bytes), tex));
-                }
-            }
-        }
-
-        let writable = !Self::is_fixture_path(&self.path) && !self.path.is_empty();
-        let mut save = false;
-        let mut del = false;
-        let mut pick_photo = false;
-        let mut remove_photo = false;
-        if let Some(edit) = self.research_edit.as_mut() {
-            let kind_label = match edit.kind {
-                kitsp::ResearchKind::Character => "Character",
-                kitsp::ResearchKind::Location => "Location",
-                kitsp::ResearchKind::Other => "Entry",
-            };
-            ui.horizontal_top(|ui| {
-                ui.vertical(|ui| {
-                    ui.label(egui::RichText::new(edit.name.clone()).size(17.0));
-                    ui.label(egui::RichText::new(kind_label).size(12.0));
-                });
-                ui.with_layout(egui::Layout::top_down(egui::Align::RIGHT), |ui| {
-                    let (rect, _) =
-                        ui.allocate_exact_size(egui::vec2(220.0, 150.0), egui::Sense::hover());
-                    let p = ui.painter();
-                    p.rect_filled(rect, 2.0, kit().base);
-                    p.rect_stroke(
-                        rect,
-                        2.0,
-                        egui::Stroke::new(1.0_f32, kit().field_stroke),
-                        egui::StrokeKind::Inside,
-                    );
-                    if let Some((_, _, tex)) = &self.research_tex {
-                        let size = tex.size_vec2();
-                        let scale = (rect.width() / size.x).min(rect.height() / size.y).min(2.0);
-                        let draw = egui::Rect::from_center_size(rect.center(), size * scale);
-                        p.image(
-                            tex.id(),
-                            draw,
-                            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                            egui::Color32::WHITE,
-                        );
-                    } else {
-                        p.text(
-                            rect.center(),
-                            egui::Align2::CENTER_CENTER,
-                            "No picture",
-                            egui::FontId::proportional(12.0),
-                            kit().disabled_text,
-                        );
-                    }
-                    ui.add_space(4.0);
-                    ui.horizontal(|ui| {
-                        pick_photo = kit_button(ui, "Picture…").clicked();
-                        remove_photo = ui
-                            .add_enabled(
-                                self.research_tex.is_some() && writable,
-                                egui::Button::new("Remove").min_size(egui::vec2(0.0, 22.0)),
-                            )
-                            .clicked();
-                    });
-                });
-            });
-            ui.add_space(8.0);
-            kit_field(ui, "Name", &mut edit.name);
-            kit_field(ui, "URL", &mut edit.url);
-            kit_field_multi(ui, "Description", &mut edit.description, 8);
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                save = kit_button(ui, "Save").clicked();
-                del = kit_button(ui, "Delete").clicked();
-            });
-        } else {
-            ui.label("Select an entry to edit it.");
-        }
-        if save {
-            self.save_research_edit();
-        }
-        if del {
-            self.delete_selected_research();
-        }
-        if pick_photo {
-            if let Some(f) = rfd::FileDialog::new()
-                .add_filter("Images", &["png", "jpg", "jpeg"])
-                .pick_file()
-            {
-                match std::fs::read(&f) {
-                    Ok(bytes) if decode_image(&bytes).is_some() => {
-                        self.set_research_photo(id, Some(&bytes));
-                    }
-                    Ok(_) => self.status = "Unsupported image file.".to_string(),
-                    Err(e) => self.status = format!("Can't read picture: {e}"),
-                }
-            }
-        }
-        if remove_photo {
-            self.set_research_photo(id, None);
-        }
     }
 
     /// Store (or clear) an entry's picture; fixture copies are read-only.
