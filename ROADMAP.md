@@ -1770,3 +1770,34 @@ When a user prompt arrives:
     with all six assets; published assets re-downloaded and SHA-256 verified.
   - Deferred (unchanged): Developer ID/notarisation, Windows code signing,
     auto-update.
+
+### 2026-11-13 — Compare replacement review; Research compare button
+
+  - Reviewed the external `compare_view.rs` replacement (1,208 lines, uses
+    `similar = "2"` and a new `Line`/`DiffModel` engine). It compiles and its
+    three tests pass in isolation, but it is not a drop-in replacement:
+    it discards the core `DraftDiff`/`DiffEntry` engine and stable block IDs,
+    so counts would no longer match the revision summary; it loses removed-
+    scene placement, dual dialogue, omitted scenes and revision marks; it
+    changes test-facing labels and keyboard behaviour (no filter chips, no
+    arrow/Enter handling); and it derives colours from `Visuals` instead of
+    `kit()`. Decision: keep the shipped `DraftDiff`-backed v0.8.2 workspace.
+    Useful ideas to port later against `DraftDiff`: collapse unchanged runs
+    with two lines of context, screenplay-aware indentation, and an explicit
+    “No differences” empty state.
+  - `scriptcraft-app/src/research.rs`: moved `Compare Drafts…` from the
+    bottom of Research ▸ Versions to the Research module header, so the
+    read-only compare workspace is reachable from every Research pane. The
+    button is disabled until a project has a revision; the adjacent hint
+    says “Start a revision to compare drafts.” when disabled and
+    “Read-only: latest revision vs current draft” when enabled.
+  - `scriptcraft-app/tests/interaction.rs`: added
+    `compare_opens_from_research_header`, which starts a revision, opens
+    Research without selecting Versions, clicks the header button and
+    asserts the compare workspace opened.
+  - Snapshots regenerated for the new header: `03_research`,
+    `10_research_character_photo`, `19_title_page`, `20_revision_summary`.
+  - Gate: `cargo fmt --all -- --check`, `cargo clippy --workspace
+    --all-targets -- -D warnings`, `cargo test --workspace` (app 29 lib + 53
+    interaction + 20 snapshots; core 100 lib + 49 integration; layout 26 unit
+    + 25 integration), `cargo deny check`, `git diff --check` — all green.

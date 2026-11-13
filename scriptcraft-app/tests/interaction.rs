@@ -1429,6 +1429,30 @@ fn save_version_writes_kit_row_and_refreshes_list() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The compare workspace is reachable from a button in the Research module
+/// header, not only from the Versions pane.
+#[test]
+fn compare_opens_from_research_header() {
+    let mut h = harness(SideTab::Script);
+    h.run();
+    h.state_mut().start_revision();
+    h.run();
+    h.state_mut().goto_tab(SideTab::Research);
+    h.run();
+
+    assert!(
+        h.query_by_label("Compare Drafts…").is_some(),
+        "Research must expose a Compare Drafts button"
+    );
+    h.get_by_label("Compare Drafts…").click();
+    h.run();
+
+    assert!(
+        h.state().compare_open_for_test(),
+        "the Research button must open the compare workspace"
+    );
+}
+
 /// The compare workspace opens from the menu, lists changes, filters them,
 /// navigates with keyboard, jumps to the editor, and closes without mutating
 /// the project.
@@ -1466,7 +1490,7 @@ fn compare_workspace_open_filter_navigate_jump_close() {
     assert!(after_edit.ends_with("REV"), "edit must append REV");
     assert!(h.state().is_dirty());
 
-    // Open compare workspace from Research ▸ Versions.
+    // Open compare workspace from the Research header.
     open_research_versions(&mut h);
     h.get_by_label("Compare Drafts…").click();
     h.run();

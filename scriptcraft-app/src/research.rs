@@ -98,6 +98,29 @@ pub(crate) fn view(ctx: &Context, state: &mut ResearchView<'_>) -> Vec<ResearchA
         ui.spacing_mut().item_spacing.y = 0.0;
         kit_module_strip(ui, "Research", &[]);
         ui.spacing_mut().item_spacing.y = 6.0;
+        // Compare is the one revision workspace that is useful from every
+        // Research pane, so keep it in the module header instead of burying it
+        // below the versions list.
+        ui.horizontal(|ui| {
+            let can_compare = state.has_project && !state.revisions.is_empty();
+            if ui
+                .add_enabled(can_compare, egui::Button::new("Compare Drafts…"))
+                .on_disabled_hover_text("Start a revision to compare drafts.")
+                .clicked()
+            {
+                actions.push(ResearchAction::OpenCompare);
+            }
+            ui.label(
+                egui::RichText::new(if can_compare {
+                    "Read-only: latest revision vs current draft"
+                } else {
+                    "Start a revision to compare drafts."
+                })
+                .size(11.0)
+                .color(egui::Color32::from_gray(0xA1)),
+            );
+        });
+        ui.add_space(2.0);
         let pane_h = ui.available_height();
         ui.horizontal_top(|ui| {
             ui.allocate_ui_with_layout(
@@ -522,16 +545,6 @@ fn versions_pane(ui: &mut Ui, state: &mut ResearchView<'_>, actions: &mut Vec<Re
         .clicked()
     {
         actions.push(ResearchAction::ShowHistory);
-    }
-    ui.add_space(4.0);
-    if ui
-        .add_enabled(
-            has && !state.revisions.is_empty(),
-            egui::Button::new("Compare Drafts…"),
-        )
-        .clicked()
-    {
-        actions.push(ResearchAction::OpenCompare);
     }
     ui.add_space(4.0);
     if ui
