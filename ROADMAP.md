@@ -21,10 +21,10 @@ Status legend: `[ ]` to do `[-]` in progress `[x]` done `[!]` blocked
 | Date | 2026-11-13 |
 | Project | ScriptCraft — free, open-source, revision-first screenwriting studio |
 | Repo | `/Users/mihailmihaylov/Documents/Dev_work/scriptcraft` |
-| Branch / commit | `main` at v0.8.2; tags `v0.7.0` at `9ce2e0e`, `v0.7.1` at `d8b17de`, `v0.7.2` at `8b75f9a`, `v0.8.0` at `0052bba`, `v0.8.1` at `0fa598e`, `v0.8.2` at `6bf1983`; M8/M9 progress at `a44ace0`, `1fe8c21`, `9d791a7`, `3b61227`; release prep at `d36ae4b`; assets/checksums at `aaad983`; M9 settings/export at `b284a78`; M9 research at `b9f9c21`. |
+| Branch / commit | `main` at v0.8.3; tags `v0.7.0` at `9ce2e0e`, `v0.7.1` at `d8b17de`, `v0.7.2` at `8b75f9a`, `v0.8.0` at `0052bba`, `v0.8.1` at `0fa598e`, `v0.8.2` at `6bf1983`, `v0.8.3` at `69c0329`; M8/M9 progress at `a44ace0`, `1fe8c21`, `9d791a7`, `3b61227`; release prep at `d36ae4b`; assets/checksums at `aaad983`; M9 settings/export at `b284a78`; M9 research at `b9f9c21`. |
 | Rust workspace | `scriptcraft-core`, `scriptcraft-app`, `scriptcraft-layout` (`Cargo.toml`, resolver 2) |
 | App crate version | `scriptcraft-app 0.8.3`; `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
-| Distribution | **v0.8.2 released 2026-11-12** — <https://github.com/MihailM17/scriptcraft/releases/tag/v0.8.2>. Assets: macOS arm64 DMG (ad-hoc signed, not notarised), Windows x64 zip and Linux x86_64 tar.gz from Packages run TBD, each with `.sha256`. No auto-update. |
+| Distribution | **v0.8.3 released 2026-11-13** — <https://github.com/MihailM17/scriptcraft/releases/tag/v0.8.3>. Assets: macOS arm64 DMG (ad-hoc signed, not notarised), Windows x64 zip and Linux x86_64 tar.gz from Packages run `43397818646`, each with `.sha256`. No auto-update. |
 | Current one-liner | Free, open-source, revision-first studio: one screenplay engine (Editor 2.0), crash-safe saves + recovery, revision colours/marks/pages, compare/restore, revision summary with scene counts + CSV + printable PDF, omitted scenes, smart screenplay paste, KIT version write/import, changes-only compare with context gaps and template indentation, revision headers/title-page fields, production page locks with A/B page numbers and FDX revision metadata, dual dialogue side by side in editor/PDF with FDX interchange, a title-page editor whose A4 preview is the exporter's own layout, KIT-style editor/navigator settings, macOS standard selection keys, a compact file-focused Menu, OFL fonts, FDX/Fountain import/export; PDF export paginates exactly like the editor. |
 | Next release | **Post-v0.8.3** — Windows signing, optional release-binary/screenshot probe, Developer ID/notarisation and auto-update. |
 
@@ -1835,3 +1835,23 @@ When a user prompt arrives:
     --all-targets -- -D warnings`, `cargo test --workspace` (app 34 lib + 55
     interaction + 21 snapshots; core 100 lib + 49 integration; layout 26 unit
     + 25 integration), `cargo deny check`, `git diff --check` — all green.
+
+  - Release: version bumped to `0.8.3` (`scriptcraft-app/Cargo.toml` +
+    `Cargo.lock`), notes `docs/releases/v0.8.3.md`, README status and ROADMAP
+    snapshot updated; commit `69c0329`, tag `v0.8.3` at that commit, `main`
+    and tag pushed (including `3a49a3f` and `569fd38`).
+  - macOS arm64 DMG via `packaging/macos/bundle.sh` (ad-hoc, not notarised):
+    `ScriptCraft-0.8.3-macos-arm64.dmg` (8,181,511 bytes) SHA-256
+    `04259e8216b1775915f81ac9ae8d96c994b52682f704bd0b5aca929b999be1b5`;
+    mounted app passed `codesign --verify --deep --strict`.
+  - Windows/Linux from `Packages` workflow run `43397818646` on tag `v0.8.3`
+    (green): `ScriptCraft-0.8.3-windows-x64.zip` (6,687,645 bytes) SHA-256
+    `dfb909da15cbbfbb6bbd3798b06e84e074268441f4cc3c78044aac25cd6d5a9b`;
+    `ScriptCraft-0.8.3-linux-x86_64.tar.gz` (10,979,287 bytes) SHA-256
+    `1d517b589f4a8302e2f6afba20b9b6dad3cd0d94fab3c851a77ab4eb4cea48c1`;
+    each with a matching `.sha256`.
+  - GitHub release published with all six assets; every asset re-downloaded
+    and SHA-256 verified. The macOS `.sha256` was re-uploaded with a bare file
+    name so `shasum -a 256 -c` works on a user machine.
+  - Deferred (unchanged): Developer ID/notarisation, Windows code signing,
+    auto-update.
