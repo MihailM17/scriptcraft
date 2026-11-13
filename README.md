@@ -8,15 +8,17 @@ production revisions. Open KIT projects, exchange Final Draft files, lock
 pages, issue coloured revisions, and export page-exact PDFs — offline, on
 macOS, Windows and Linux.
 
-> **Status — v0.8.2.** Revision-complete for the core production workflow:
+> **Status — v0.8.3.** Revision-complete for the core production workflow:
 > stable block/scene identity, draft diff and compare, restore-as-copy, omitted
 > scenes, dual dialogue, title-page editor and revision summary (scene counts,
 > CSV and printable PDF). Layout metrics are derived from the bundled font,
 > `.kitsp` saves preserve unknown sidecar rows, and CI runs runtime interaction
-> smoke on macOS/Linux/Windows. v0.8.2 redesigns the Draft Comparison workspace
-> (tinted diff rows, inline old/new highlighting, side-by-side tints and
-> dividers, read-only badge) with no behavior change; the M9 refactor of
-> settings, export and research shipped in v0.8.1.
+> smoke on macOS/Linux/Windows. v0.8.3 makes Draft Comparison changes-only by
+> default (two blocks of context around each change, clickable gaps, a
+> whole-script toggle and a dedicated identical-drafts state) and indents
+> diff rows with the real screenplay template columns; v0.8.2 redesigned the
+> workspace and v0.8.1 shipped the M9 refactor of settings, export and
+> research.
 >
 > **Distribution note:** macOS builds in this release are ad-hoc signed (no
 > Developer ID/notarisation), Windows packages are unsigned, and auto-update is
