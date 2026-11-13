@@ -1801,3 +1801,37 @@ When a user prompt arrives:
     --all-targets -- -D warnings`, `cargo test --workspace` (app 29 lib + 53
     interaction + 20 snapshots; core 100 lib + 49 integration; layout 26 unit
     + 25 integration), `cargo deny check`, `git diff --check` — all green.
+
+### 2026-11-13 — Compare UX: changes-only, screenplay indentation, empty state
+
+  - `scriptcraft-app/src/compare_view.rs`: compare now opens in changes-only
+    mode. `display_items` keeps `CONTEXT_BLOCKS = 2` unchanged blocks above and
+    below every change, always keeps the first block of each affected scene as
+    a scene anchor, and collapses every other unchanged run into one clickable
+    gap row (“N unchanged blocks · click to show”). Expanding a gap records
+    those entries in `CompareState::expanded`; `sync` clears them when the
+    diff is recomputed. A header checkbox (“Show unchanged”) switches back to
+    the whole script and hides the gap rows.
+  - Indentation now derives from the printed screenplay template:
+    `CUE_INDENT`, `PAREN_INDENT`, `DIALOGUE_INDENT` are
+    `RUSSIAN_GEOMETRY.cue_mm` / `paren_mm` / `dialog_mm` divided by
+    `TEXT_W_MM` (67.5/147.5, 55/147.5, 37.5/147.5). The same left column and a
+    reduced right pad apply in unified and side-by-side modes; removed blocks
+    take their element type from the base revision.
+  - Identical drafts now show a dedicated “No differences” state with a
+    “Show full script” button instead of a dense list of unchanged rows.
+  - Tests: four `display_items` unit tests (context + collapsing, gap
+    expansion, full script, scene anchoring), one indentation test pinning the
+    template ratios, and two interaction tests
+    (`compare_identical_drafts_show_empty_state_and_full_script`,
+    `compare_gap_row_reveals_unchanged_blocks`). The gap row is a real
+    frameless button so it is both clickable and visible to accessibility
+    queries.
+  - Snapshots regenerated for the new default layout: `14_compare_drafts`,
+    `15_compare_side_by_side`, `21_compare_light`, and new
+    `22_compare_identical`. Compare snapshot tests settle two extra frames so
+    the top toolbar is fully laid out in the capture.
+  - Gate: `cargo fmt --all -- --check`, `cargo clippy --workspace
+    --all-targets -- -D warnings`, `cargo test --workspace` (app 34 lib + 55
+    interaction + 21 snapshots; core 100 lib + 49 integration; layout 26 unit
+    + 25 integration), `cargo deny check`, `git diff --check` — all green.

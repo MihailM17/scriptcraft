@@ -293,6 +293,7 @@ fn snap_14_compare_drafts() {
         .set_block_text_for_test(bi + 1, &format!("{action} (revised action)"));
     h.state_mut().open_compare();
     h.run();
+    h.run_steps(2);
     h.snapshot("14_compare_drafts");
 }
 
@@ -314,6 +315,7 @@ fn snap_15_compare_side_by_side() {
         .set_block_text_for_test(bi + 1, &format!("{action} (revised action)"));
     h.state_mut().open_compare();
     h.run();
+    h.run_steps(2);
     h.key_press(egui::Key::V);
     h.run();
     h.snapshot("15_compare_side_by_side");
@@ -348,7 +350,23 @@ fn snap_21_compare_light() {
         .set_block_text_for_test(bi + 1, &format!("{action} (revised action)"));
     h.state_mut().open_compare();
     h.run();
+    h.run_steps(2);
     h.snapshot("21_compare_light");
+}
+
+/// Identical drafts: the workspace replaces an empty diff with a clear
+/// "No differences" state and a way into the full script.
+#[test]
+fn snap_22_compare_identical() {
+    let mut h = harness(SideTab::Script, None);
+    h.run();
+    h.state_mut()
+        .start_revision_at_for_test("Blue Revision", "28.10.2026 11:58");
+    h.run();
+    h.state_mut().open_compare();
+    h.run();
+    h.run_steps(2);
+    h.snapshot("22_compare_identical");
 }
 
 /// A real dual-dialogue pair rendered side by side in the editor.

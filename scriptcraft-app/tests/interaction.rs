@@ -1705,6 +1705,78 @@ fn compare_workspace_closes_on_project_change() {
     );
 }
 
+/// An identical draft pair shows a dedicated empty state, and “Show full
+/// script” switches the workspace to the complete script.
+#[test]
+fn compare_identical_drafts_show_empty_state_and_full_script() {
+    let mut h = harness(SideTab::Script);
+    h.run();
+    h.state_mut().start_revision();
+    h.run();
+    h.state_mut().goto_tab(SideTab::Research);
+    h.run();
+    h.get_by_label("Compare Drafts…").click();
+    h.run();
+
+    assert!(h.state().compare_open_for_test());
+    assert!(
+        h.query_by_label("No differences").is_some(),
+        "identical drafts must show the empty state"
+    );
+    assert!(h.query_by_label("Show unchanged").is_some());
+
+    h.get_by_label("Show full script").click();
+    h.run();
+
+    assert!(
+        h.query_by_label("No differences").is_none(),
+        "showing the full script must leave the empty state"
+    );
+}
+
+/// Changes-only mode collapses long unchanged runs; clicking a gap reveals
+/// its blocks.
+#[test]
+fn compare_gap_row_reveals_unchanged_blocks() {
+    let mut h = harness(SideTab::Script);
+    h.run();
+    h.state_mut().start_revision();
+    h.run();
+
+    let bi = h
+        .state()
+        .find_first_heading_block()
+        .expect("A95 should contain a scene heading");
+    let heading = h.state().block_text(bi).unwrap();
+    let action = h.state().block_text(bi + 1).unwrap();
+    h.state_mut()
+        .set_block_text_for_test(bi, &format!("{heading} — REVISED"));
+    h.state_mut()
+        .set_block_text_for_test(bi + 1, &format!("{action} (revised)"));
+    h.state_mut().open_compare();
+    h.run();
+
+    let before = h
+        .query_all_by_label_contains("unchanged blocks · click to show")
+        .count();
+    assert!(
+        before > 0,
+        "a long unchanged run must collapse into at least one gap row"
+    );
+    h.query_all_by_label_contains("unchanged blocks · click to show")
+        .next()
+        .expect("gap row")
+        .click();
+    h.run();
+    let after = h
+        .query_all_by_label_contains("unchanged blocks · click to show")
+        .count();
+    assert!(
+        after < before,
+        "clicking a gap must reveal its blocks ({before} -> {after})"
+    );
+}
+
 /// Revision summary counts come from the same diff as compare, group by
 /// scene, and show the live page baseline.
 #[test]

@@ -10,6 +10,7 @@ use egui::{
 };
 use scriptcraft_core::revision::{DiffEntry, DiffKind, DraftDiff, RevisionHistory, RevisionSet};
 use scriptcraft_core::{ElementType, Project, ScriptBlock};
+use std::collections::HashSet;
 use uuid::Uuid;
 
 use crate::theme::{kit, kit_is_light};
@@ -17,6 +18,18 @@ use crate::theme::{kit, kit_is_light};
 const ROW_HEIGHT: f32 = 26.0;
 const LIST_ROW_HEIGHT: f32 = 21.0;
 const DIFF_FONT_SIZE: f32 = 12.5;
+/// Unchanged blocks kept above and below each change in changes-only mode.
+const CONTEXT_BLOCKS: usize = 2;
+
+/// Left columns match the Russian screenplay template. The right padding is
+/// reduced from the printed column width so diff text stays readable.
+const CUE_INDENT: f32 = scriptcraft_layout::RUSSIAN_GEOMETRY.cue_mm / scriptcraft_layout::TEXT_W_MM;
+const PAREN_INDENT: f32 =
+    scriptcraft_layout::RUSSIAN_GEOMETRY.paren_mm / scriptcraft_layout::TEXT_W_MM;
+const DIALOGUE_INDENT: f32 =
+    scriptcraft_layout::RUSSIAN_GEOMETRY.dialog_mm / scriptcraft_layout::TEXT_W_MM;
+const PAREN_RIGHT: f32 = 0.12;
+const DIALOGUE_RIGHT: f32 = 0.10;
 
 const KEYBOARD_HINT: &str = "J/K navigate · V switch view · Enter open · Esc close";
 
@@ -73,6 +86,10 @@ pub struct CompareState {
     scroll_to: Option<usize>,
     /// Entry index the change list should reveal on the next frame.
     reveal_in_list: Option<usize>,
+    /// Show the whole script instead of changes with context.
+    show_unchanged: bool,
+    /// Unchanged entries the user explicitly expanded from a gap row.
+    expanded: HashSet<usize>,
     diff: Option<DraftDiff>,
     dirty: bool,
 }
@@ -89,6 +106,8 @@ impl CompareState {
             selected: None,
             scroll_to: None,
             reveal_in_list: None,
+            show_unchanged: false,
+            expanded: HashSet::new(),
             diff: None,
             dirty: true,
         };
@@ -106,6 +125,7 @@ impl CompareState {
             return;
         }
         self.dirty = false;
+        self.expanded.clear();
         if history.sets.is_empty() {
             self.diff = None;
             self.selected = None;
@@ -190,6 +210,23 @@ impl CompareState {
 
     pub fn set_filter(&mut self, filter: ChangeFilter) {
         self.filter = filter;
+    }
+
+    /// Whether the main view shows the whole script or changes with context.
+    pub fn show_unchanged(&self) -> bool {
+        self.show_unchanged
+    }
+
+    pub fn set_show_unchanged(&mut self, show: bool) {
+        self.show_unchanged = show;
+        if !show {
+            self.expanded.clear();
+        }
+    }
+
+    /// Reveal a run of unchanged entries behind a gap row.
+    pub fn expand_range(&mut self, start: usize, end: usize) {
+        self.expanded.extend(start..end);
     }
 
     /// Indices of the changes matching the active filter.
@@ -681,6 +718,79 @@ fn scene_count_label(ui: &mut Ui, value: usize, kind: DiffKind) {
     );
 }
 
+/// A row in the main comparison: either one diff entry or a collapsed run of
+/// unchanged entries.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DisplayItem {
+    Entry(usize),
+    Gap { start: usize, end: usize },
+}
+
+/// Build the main-view rows. In changes-only mode every change keeps
+/// [`CONTEXT_BLOCKS`] unchanged entries above and below it, the first block of
+/// each affected scene is always shown, and every other unchanged run becomes
+/// a single clickable gap.
+fn display_items(
+    diff: &DraftDiff,
+    show_unchanged: bool,
+    expanded: &HashSet<usize>,
+) -> Vec<DisplayItem> {
+    let n = diff.entries.len();
+    if show_unchanged {
+        return (0..n).map(DisplayItem::Entry).collect();
+    }
+
+    let mut visible = vec![false; n];
+    for (index, entry) in diff.entries.iter().enumerate() {
+        if !entry.kind.is_change() {
+            continue;
+        }
+        let start = index.saturating_sub(CONTEXT_BLOCKS);
+        let end = (index + CONTEXT_BLOCKS).min(n.saturating_sub(1));
+        for slot in &mut visible[start..=end] {
+            *slot = true;
+        }
+    }
+    for &index in expanded {
+        if index < n {
+            visible[index] = true;
+        }
+    }
+
+    // A change deep in a scene should still say which scene it belongs to.
+    // Scenes are contiguous in the diff, keyed by scene index and heading.
+    let mut start = 0;
+    while start < n {
+        let mut end = start + 1;
+        while end < n
+            && diff.entries[end].scene_index == diff.entries[start].scene_index
+            && diff.entries[end].scene_heading == diff.entries[start].scene_heading
+        {
+            end += 1;
+        }
+        if visible[start..end].iter().any(|visible| *visible) {
+            visible[start] = true;
+        }
+        start = end;
+    }
+
+    let mut items = Vec::new();
+    let mut index = 0;
+    while index < n {
+        if visible[index] {
+            items.push(DisplayItem::Entry(index));
+            index += 1;
+        } else {
+            let start = index;
+            while index < n && !visible[index] {
+                index += 1;
+            }
+            items.push(DisplayItem::Gap { start, end: index });
+        }
+    }
+    items
+}
+
 /// Draw the compare workspace. Returns an action for the app to apply after
 /// the frame (close the workspace or open a block in the editor).
 pub fn show(
@@ -835,6 +945,16 @@ pub fn show(
                             state.set_view(CompareView::SideBySide);
                         }
                     });
+
+                ui.add_space(8.0);
+                let mut show_unchanged = state.show_unchanged;
+                if ui
+                    .checkbox(&mut show_unchanged, "Show unchanged")
+                    .on_hover_text("Show the whole script instead of changes with context.")
+                    .changed()
+                {
+                    state.set_show_unchanged(show_unchanged);
+                }
 
                 ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                     let can_jump = state.selected.is_some();
@@ -1043,10 +1163,16 @@ pub fn show(
         )
         .show(ctx, |ui| {
             let scroll_row = state.take_scroll_row();
-            let Some(diff) = state.diff() else {
-                return;
-            };
-            if diff.entries.is_empty() {
+            let entry_count = state.diff().map_or(0, |diff| diff.entries.len());
+            let has_changes = state.diff().is_some_and(|diff| diff.has_changes());
+            let base_name = history
+                .sets
+                .get(state.base)
+                .map(set_label)
+                .unwrap_or_default();
+            let target_name = target_label(state.target, history);
+
+            if entry_count == 0 {
                 ui.centered_and_justified(|ui| {
                     ui.vertical_centered(|ui| {
                         ui.label(
@@ -1065,12 +1191,37 @@ pub fn show(
                 });
                 return;
             }
-            let base_name = history
-                .sets
-                .get(state.base)
-                .map(set_label)
-                .unwrap_or_default();
-            let target_name = target_label(state.target, history);
+
+            if !has_changes && !state.show_unchanged {
+                ui.centered_and_justified(|ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.label(
+                            RichText::new("No differences")
+                                .strong()
+                                .size(18.0)
+                                .color(kit().heading_text),
+                        );
+                        ui.add_space(4.0);
+                        ui.label(
+                            RichText::new(format!(
+                                "“{base_name}” and “{target_name}” contain the same text."
+                            ))
+                            .small()
+                            .color(kit().disabled_text),
+                        );
+                        ui.add_space(12.0);
+                        if ui.button("Show full script").clicked() {
+                            state.set_show_unchanged(true);
+                        }
+                    });
+                });
+                return;
+            }
+
+            let Some(diff) = state.diff() else {
+                return;
+            };
+            let items = display_items(diff, state.show_unchanged, &state.expanded);
             let mut clicked = None;
             let mut double_clicked = None;
             let selected = state.selected;
@@ -1121,25 +1272,43 @@ pub fn show(
             let mut area = ScrollArea::vertical()
                 .id_salt("compare_main")
                 .auto_shrink([false, false]);
-            if let Some(row) = scroll_row {
+            let scroll_index = scroll_row.and_then(|entry| {
+                items
+                    .iter()
+                    .position(|item| matches!(item, DisplayItem::Entry(index) if *index == entry))
+            });
+            if let Some(row) = scroll_index {
                 let viewport = ui.available_height();
                 let offset = (row as f32 * ROW_HEIGHT - viewport * 0.35).max(0.0);
                 area = area.vertical_scroll_offset(offset);
             }
             ui.spacing_mut().item_spacing.y = 0.0;
-            area.show_rows(ui, ROW_HEIGHT, diff.entries.len(), |ui, range| {
+            let mut gap_clicked = None;
+            area.show_rows(ui, ROW_HEIGHT, items.len(), |ui, range| {
                 ui.spacing_mut().item_spacing.y = 0.0;
-                for index in range {
-                    let entry = &diff.entries[index];
-                    let response = diff_row(ui, entry, view, selected == Some(index));
-                    if response.clicked() {
-                        clicked = Some(index);
-                    }
-                    if response.double_clicked() {
-                        double_clicked = Some(index);
+                for row in range {
+                    match items[row] {
+                        DisplayItem::Entry(index) => {
+                            let entry = &diff.entries[index];
+                            let response = diff_row(ui, entry, view, selected == Some(index));
+                            if response.clicked() {
+                                clicked = Some(index);
+                            }
+                            if response.double_clicked() {
+                                double_clicked = Some(index);
+                            }
+                        }
+                        DisplayItem::Gap { start, end } => {
+                            if gap_row(ui, end - start).clicked() {
+                                gap_clicked = Some((start, end));
+                            }
+                        }
                     }
                 }
             });
+            if let Some((start, end)) = gap_clicked {
+                state.expand_range(start, end);
+            }
             if let Some(index) = clicked {
                 state.select_entry(index);
             }
@@ -1276,6 +1445,47 @@ fn change_list_row(ui: &mut Ui, entry: &DiffEntry, selected: bool) -> egui::Resp
     ))
 }
 
+fn entry_indent(entry: &DiffEntry) -> (f32, f32) {
+    let element = entry
+        .current
+        .as_ref()
+        .map(|block| block.element_type)
+        .or_else(|| entry.base.as_ref().map(|block| block.element_type));
+    match element {
+        Some(ElementType::Character) | Some(ElementType::NonPrintable) => (CUE_INDENT, 0.0),
+        Some(ElementType::Parenthetical) => (PAREN_INDENT, PAREN_RIGHT),
+        Some(ElementType::Dialogue) | Some(ElementType::Lyrics) => {
+            (DIALOGUE_INDENT, DIALOGUE_RIGHT)
+        }
+        Some(ElementType::Transition) => (0.50, 0.0),
+        _ => (0.0, 0.0),
+    }
+}
+
+/// Collapsed run of unchanged blocks. Clicking it reveals the whole run.
+fn gap_row(ui: &mut Ui, count: usize) -> egui::Response {
+    let width = ui.available_width().max(160.0);
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, ROW_HEIGHT), Sense::hover());
+    let label = format!(
+        "{count} unchanged {} · click to show",
+        if count == 1 { "block" } else { "blocks" }
+    );
+    if ui.rect_contains_pointer(rect) {
+        ui.painter()
+            .rect_filled(rect.shrink2(Vec2::new(4.0, 2.0)), 6.0, kit().hover_light);
+    }
+    let mut cell = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(rect)
+            .layout(egui::Layout::left_to_right(Align::Center).with_main_align(Align::Min)),
+    );
+    let response = cell.add_sized(
+        [width, ROW_HEIGHT],
+        egui::Button::new(RichText::new(label).size(11.0).color(kit().disabled_text)).frame(false),
+    );
+    response.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
 fn diff_row(ui: &mut Ui, entry: &DiffEntry, view: CompareView, selected: bool) -> egui::Response {
     let width = ui.available_width().max(160.0);
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, ROW_HEIGHT), Sense::click());
@@ -1313,13 +1523,22 @@ fn diff_row(ui: &mut Ui, entry: &DiffEntry, view: CompareView, selected: bool) -
 
     match view {
         CompareView::Unified => {
-            let text_width = row.available_width().max(40.0);
+            let available = row.available_width().max(40.0);
+            let (left, right) = entry_indent(entry);
+            let (indent, pad) = if available > 120.0 {
+                (available * left, available * right)
+            } else {
+                (0.0, 0.0)
+            };
+            let text_width = (available - indent - pad).max(40.0);
+            row.add_space(indent);
             add_text_cell(
                 &mut row,
                 text_width,
                 ROW_HEIGHT,
                 unified_job(entry, text_width),
             );
+            row.add_space(pad);
         }
         CompareView::SideBySide => {
             let available = row.available_width().max(80.0);
@@ -1352,9 +1571,30 @@ fn diff_row(ui: &mut Ui, entry: &DiffEntry, view: CompareView, selected: bool) -
                     Stroke::new(1.0_f32, kit().field_stroke),
                 );
             }
-            add_text_cell(&mut row, column, ROW_HEIGHT, side_job(entry, true, column));
+            let (left, right) = entry_indent(entry);
+            let (indent, pad) = if column > 120.0 {
+                (column * left, column * right)
+            } else {
+                (0.0, 0.0)
+            };
+            let text_width = (column - indent - pad).max(40.0);
+            row.add_space(indent);
+            add_text_cell(
+                &mut row,
+                text_width,
+                ROW_HEIGHT,
+                side_job(entry, true, text_width),
+            );
+            row.add_space((column - indent - text_width).max(0.0));
             row.add_space(12.0);
-            add_text_cell(&mut row, column, ROW_HEIGHT, side_job(entry, false, column));
+            row.add_space(indent);
+            add_text_cell(
+                &mut row,
+                text_width,
+                ROW_HEIGHT,
+                side_job(entry, false, text_width),
+            );
+            row.add_space((column - indent - text_width).max(0.0));
         }
     }
 
@@ -1376,7 +1616,145 @@ fn diff_row(ui: &mut Ui, entry: &DiffEntry, view: CompareView, selected: bool) -
 
 #[cfg(test)]
 mod tests {
-    use super::inline_diff;
+    use super::*;
+    use scriptcraft_core::revision::RevisionBlock;
+
+    fn entry(kind: DiffKind, scene: usize, heading: &str) -> DiffEntry {
+        DiffEntry {
+            kind,
+            scene_index: scene,
+            scene_heading: heading.to_string(),
+            base: None,
+            current: None,
+            current_block: None,
+        }
+    }
+
+    fn diff(kinds: &[DiffKind]) -> DraftDiff {
+        let entries = kinds
+            .iter()
+            .map(|kind| entry(*kind, 0, "INT. ROOM - DAY"))
+            .collect();
+        let added = kinds
+            .iter()
+            .filter(|kind| **kind == DiffKind::Added)
+            .count();
+        let removed = kinds
+            .iter()
+            .filter(|kind| **kind == DiffKind::Removed)
+            .count();
+        let changed = kinds
+            .iter()
+            .filter(|kind| **kind == DiffKind::Changed)
+            .count();
+        DraftDiff {
+            entries,
+            added,
+            removed,
+            changed,
+            scenes_changed: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn changes_only_keeps_context_and_collapses_runs() {
+        let mut kinds = vec![DiffKind::Unchanged; 12];
+        kinds[6] = DiffKind::Changed;
+        let items = display_items(&diff(&kinds), false, &HashSet::new());
+
+        // The first block of the affected scene is always visible.
+        assert!(items.contains(&DisplayItem::Entry(0)));
+        // Two blocks of context on either side of the change.
+        for index in 4..=8 {
+            assert!(
+                items.contains(&DisplayItem::Entry(index)),
+                "context block {index} must stay visible: {items:?}"
+            );
+        }
+        assert!(items.contains(&DisplayItem::Gap { start: 1, end: 4 }));
+        assert!(items.contains(&DisplayItem::Gap { start: 9, end: 12 }));
+    }
+
+    #[test]
+    fn expanding_a_gap_reveals_its_blocks() {
+        let mut kinds = vec![DiffKind::Unchanged; 12];
+        kinds[6] = DiffKind::Changed;
+        let mut expanded = HashSet::new();
+        expanded.extend(1..4);
+        let items = display_items(&diff(&kinds), false, &expanded);
+
+        for index in 1..4 {
+            assert!(
+                items.contains(&DisplayItem::Entry(index)),
+                "expanded block {index} must be visible"
+            );
+        }
+        assert!(!items
+            .iter()
+            .any(|item| matches!(item, DisplayItem::Gap { start: 1, .. })));
+    }
+
+    #[test]
+    fn indentation_follows_the_screenplay_template() {
+        // Ratios, not arbitrary percentages: the same millimetre columns the
+        // PDF/editor use for cue, parenthetical and dialogue.
+        assert!((CUE_INDENT - 67.5 / 147.5).abs() < 1e-6);
+        assert!((PAREN_INDENT - 55.0 / 147.5).abs() < 1e-6);
+        assert!((DIALOGUE_INDENT - 37.5 / 147.5).abs() < 1e-6);
+
+        let mut changed = entry(DiffKind::Changed, 0, "INT. ROOM - DAY");
+        changed.current = Some(ScriptBlock::new(ElementType::Character, "IVAN".into()));
+        assert_eq!(entry_indent(&changed), (CUE_INDENT, 0.0));
+
+        changed.current = Some(ScriptBlock::new(
+            ElementType::Parenthetical,
+            "(beat)".into(),
+        ));
+        assert_eq!(entry_indent(&changed), (PAREN_INDENT, PAREN_RIGHT));
+
+        changed.current = Some(ScriptBlock::new(ElementType::Dialogue, "Hi.".into()));
+        assert_eq!(entry_indent(&changed), (DIALOGUE_INDENT, DIALOGUE_RIGHT));
+
+        changed.current = Some(ScriptBlock::new(ElementType::Action, "He runs.".into()));
+        assert_eq!(entry_indent(&changed), (0.0, 0.0));
+
+        // Removed blocks have no current side; they read the base revision.
+        let mut removed = entry(DiffKind::Removed, 0, "INT. ROOM - DAY");
+        removed.base = Some(RevisionBlock::from(&ScriptBlock::new(
+            ElementType::Dialogue,
+            "Gone.".into(),
+        )));
+        assert_eq!(entry_indent(&removed), (DIALOGUE_INDENT, DIALOGUE_RIGHT));
+    }
+
+    #[test]
+    fn show_unchanged_lists_every_block() {
+        let mut kinds = vec![DiffKind::Unchanged; 12];
+        kinds[6] = DiffKind::Changed;
+        let items = display_items(&diff(&kinds), true, &HashSet::new());
+        assert_eq!(items, (0..12).map(DisplayItem::Entry).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn a_change_shows_the_heading_of_its_scene() {
+        let mut kinds = vec![DiffKind::Unchanged; 14];
+        // Scene 0 occupies 0..4, scene 1 starts at 4, the change is at 11.
+        kinds[11] = DiffKind::Changed;
+        let mut model = diff(&kinds);
+        for (index, entry) in model.entries.iter_mut().enumerate() {
+            entry.scene_index = if index < 4 { 0 } else { 1 };
+            entry.scene_heading = if index < 4 {
+                "INT. ROOM - DAY".to_string()
+            } else {
+                "EXT. STREET - NIGHT".to_string()
+            };
+        }
+        let items = display_items(&model, false, &HashSet::new());
+        assert!(
+            items.contains(&DisplayItem::Entry(4)),
+            "the second scene heading must stay visible: {items:?}"
+        );
+    }
 
     #[test]
     fn inline_diff_isolates_replaced_word() {
