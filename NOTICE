@@ -34,3 +34,29 @@ scriptcraft-app/assets/fonts/licenses/ for full texts):
 ScriptCraft is a clean-room implementation. It is inspired by the workflow and
 typography of KIT Scenarist and interoperates with the .kitsp file format, but
 contains no KIT Scenarist code.
+
+--------------------------------------------------------------------------------
+Bundled spellcheck dictionaries (shipped as data files in
+scriptcraft-app/assets/dictionaries/, not linked into the binary):
+
+- English (US), en_US
+  From SCOWL via the LibreOffice dictionaries collection.
+  Copyright 2000-2018 Kevin Atkinson and contributors; the affix file derives
+  from Geoff Kuenning's Ispell (BSD). Permission to use, copy, modify,
+  distribute and sell the word lists is granted provided the copyright notice
+  is retained.
+  Licence text: scriptcraft-app/assets/dictionaries/en_US/README_en_US.txt
+
+- Bulgarian, bg_BG
+  From the LibreOffice dictionaries collection (version 2017.09.30).
+  Licensed under the GNU General Public License, version 2.0.
+  Licence text: scriptcraft-app/assets/dictionaries/bg_BG/COPYING
+
+- Russian, ru_RU
+  Copyright (c) 1997-2008 Alexander I. Lebedev; TRY-line modifications by
+  Laszlo Nemeth (2012). All rights reserved; redistribution in source and
+  binary forms is permitted with the copyright notice retained.
+  Licence text: scriptcraft-app/assets/dictionaries/ru_RU/README_ru_RU.txt
+
+The dictionaries are separate data files: removing a folder removes that
+language, and the application does not link any of them into its executable.

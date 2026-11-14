@@ -18,15 +18,15 @@ Status legend: `[ ]` to do `[-]` in progress `[x]` done `[!]` blocked
 
 | Field | Value |
 |---|---|
-| Date | 2026-11-13 |
+| Date | 2026-11-14 |
 | Project | ScriptCraft — free, open-source, revision-first screenwriting studio |
 | Repo | `/Users/mihailmihaylov/Documents/Dev_work/scriptcraft` |
 | Branch / commit | `main` at v0.8.3; tags `v0.7.0` at `9ce2e0e`, `v0.7.1` at `d8b17de`, `v0.7.2` at `8b75f9a`, `v0.8.0` at `0052bba`, `v0.8.1` at `0fa598e`, `v0.8.2` at `6bf1983`, `v0.8.3` at `69c0329`; M8/M9 progress at `a44ace0`, `1fe8c21`, `9d791a7`, `3b61227`; release prep at `d36ae4b`; assets/checksums at `aaad983`; M9 settings/export at `b284a78`; M9 research at `b9f9c21`. |
 | Rust workspace | `scriptcraft-core`, `scriptcraft-app`, `scriptcraft-layout` (`Cargo.toml`, resolver 2) |
-| App crate version | `scriptcraft-app 0.8.3`; `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
+| App crate version | `scriptcraft-app 0.8.4`; `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
 | Distribution | **v0.8.3 released 2026-11-13** — <https://github.com/MihailM17/scriptcraft/releases/tag/v0.8.3>. Assets: macOS arm64 DMG (ad-hoc signed, not notarised), Windows x64 zip and Linux x86_64 tar.gz from Packages run `43397818646`, each with `.sha256`. No auto-update. |
-| Current one-liner | Free, open-source, revision-first studio: one screenplay engine (Editor 2.0), crash-safe saves + recovery, revision colours/marks/pages, compare/restore, revision summary with scene counts + CSV + printable PDF, omitted scenes, smart screenplay paste, KIT version write/import, changes-only compare with context gaps and template indentation, revision headers/title-page fields, production page locks with A/B page numbers and FDX revision metadata, dual dialogue side by side in editor/PDF with FDX interchange, a title-page editor whose A4 preview is the exporter's own layout, KIT-style editor/navigator settings, macOS standard selection keys, a compact file-focused Menu, OFL fonts, FDX/Fountain import/export; PDF export paginates exactly like the editor. |
-| Next release | **Post-v0.8.3** — Windows signing, optional release-binary/screenshot probe, Developer ID/notarisation and auto-update. |
+| Current one-liner | Free, open-source, revision-first studio: one screenplay engine (Editor 2.0), crash-safe saves + recovery, revision colours/marks/pages, compare/restore, revision summary with scene counts + CSV + printable PDF, omitted scenes, smart screenplay paste, KIT version write/import, changes-only compare with context gaps and template indentation, revision headers/title-page fields, production page locks with A/B page numbers and FDX revision metadata, dual dialogue side by side in editor/PDF with FDX interchange, a title-page editor whose A4 preview is the exporter's own layout, KIT-style editor/navigator settings, macOS standard selection keys, a compact file-focused Menu, OFL fonts, FDX/Fountain import/export; PDF export paginates exactly like the editor; eight contrast-tested themes with revision marks legible on every palette, and live spellchecking in English, Bulgarian and Russian with screenplay-aware ALL-CAPS skipping, right-click suggestions and per-language custom dictionaries. |
+| Next release | **Post-v0.8.4** — Windows signing, optional release-binary/screenshot probe, Developer ID/notarisation and auto-update. |
 
 **Positioning (locked 2026-10-26):** the free, open-source, revision-first
 screenwriting studio. Moat = the production revision workflow (colours, locked
@@ -1855,3 +1855,82 @@ When a user prompt arrives:
     name so `shasum -a 256 -c` works on a user machine.
   - Deferred (unchanged): Developer ID/notarisation, Windows code signing,
     auto-update.
+
+### 2026-11-14 — Theme table: eight palettes, revision marks legible everywhere
+
+- `theme.rs`: `Theme` now carries eight palettes — Midnight, Tokyo Night, Nord,
+  Gruvbox, Rosé Pine, Light, Sepia, High Contrast — behind `Theme::ALL`,
+  `Theme::palette()` and `Theme::from_key()`. `KIT_DARK` is now `KIT_MIDNIGHT`;
+  the active palette lives in one thread-local (`KIT_THEME`), so `kit_is_light()`
+  derives from the theme instead of a parallel bool.
+- `kit_visuals()` and `script_view.rs`: the selection tint and the current-line
+  band come from `kit().accent` instead of a hard-coded `#4294F8`. Midnight and
+  Light render byte-identically because their accent is that blue.
+- Revision marks: `paint_revision()` fills the margin bar or legend swatch and
+  adds a 1 px edge in the opposite direction of the page (`revision_mark_edge`).
+  Pale revision colours (yellow, buff, goldenrod) sit under 2:1 on white, and
+  the edge is what clears 3:1 on every palette. The colours themselves remain
+  unthemed.
+- `app.rs`: the update loop compares `current_theme()` with the setting, so
+  switching between two dark palettes repaints. A `dark_mode`-only check painted
+  Tokyo Night with the light palette.
+- `settings.rs`: the dropdown iterates `Theme::ALL`; `settings.conf` parses keys
+  through `Theme::from_key`, and unknown keys keep the current theme.
+- Tests: 8 new lib tests (WCAG floors for text, muted text, accent and accent
+  text per palette; light/dark page check; revision edge ≥ 3:1 per palette;
+  revision colours invariant across palettes; accent-driven selection; key
+  round-trip) and interaction `theme_dropdown_switches_between_dark_palettes`.
+  Snapshots `23_script_tokyo_night` and `24_script_sepia` added; `13`, `14`,
+  `15`, `20`, `21` and `22` regenerated for the revision edge — the diffs were
+  confirmed to be the margin bars and status-bar swatch only.
+
+### 2026-11-14 — Spellchecking: English, Bulgarian, Russian (v0.8.4)
+
+- `scriptcraft-app/src/spell.rs` (new): `SpellLang` (`en_US`, `bg_BG`, `ru_RU`;
+  the key is the Hunspell locale and the folder name), a screenplay-aware
+  tokenizer (apostrophes and hyphens stay inside words, digits stay attached so
+  `3rd` is skipped whole, offsets are char offsets), ALL-CAPS skipping, and a
+  thread-local `Engine`. The engine parses a dictionary lazily on the first
+  paint that needs it, caches misspellings per `(block, paragraph)` keyed by the
+  paragraph text hash, and keeps per-language custom and ignored word sets.
+  `spellbook = "=0.4.2"` (MPL-2.0, already in `deny.toml`) is the checker.
+- Dictionaries ship as data files in
+  `scriptcraft-app/assets/dictionaries/{en_US,bg_BG,ru_RU}` (Aff/Dic plus each
+  upstream's licence text). `dictionary_search_paths()` looks at
+  `SCRIPTCRAFT_DICTIONARIES`, next to the executable, macOS
+  `Contents/Resources`, then `CARGO_MANIFEST_DIR` for `cargo run`/tests. No
+  dictionary is compiled into the binary.
+- `script_view.rs`: body lines paint a zigzag in `kit().spell_error` under each
+  flagged run, intersected with the line's `SourceSpan` so wrapped and dual
+  dialogue lines mark the right cells. Right-click on a flagged word opens a
+  `egui::Popup` with up to six suggestions, **Add to dictionary** and
+  **Ignore**; a pick emits `DeleteRange` + `InsertText`, so it goes through the
+  normal undo pipeline. `EditState` gained `spell_menu` and
+  `debug_spell_menu`; `char_point()` is the test hook that maps a document
+  position to a screen point.
+- `app.rs`: `spell::configure(...)` runs every frame (cheap when unchanged).
+  Test hooks: `set_spellcheck_for_test`, `spell_flags_for_test`,
+  `editor2_spell_menu_rows`, `editor2_char_point`.
+- `settings.rs`: `spellcheck` (off by default), `spell_language` (English) and
+  `spell_ignore_caps` (on) parse/save in `settings.conf`; Settings ▸ Scenario
+  Editor gained a **Spelling** section with the enable toggle, dictionary
+  chooser, ALL-CAPS toggle and dictionary load errors.
+- `theme.rs`: `spell_error` is the 26th `KitColors` field, per palette, and
+  `every_theme_is_legible` asserts it clears 3:1 against the page.
+- Packaging: `packaging/macos/bundle.sh` copies the folder to
+  `Contents/Resources/dictionaries`; `packages.yml` copies it next to the
+  Windows `.exe` and into the Linux tarball. `NOTICE` documents each
+  dictionary's licence; the Bulgarian GPL-2.0 files stay unmodified in their own
+  folder (the user accepted shipping them).
+- Tests: 8 new lib tests (tokenizer cases, ALL-CAPS, word-at-click, every
+  shipped dictionary loads, custom-dictionary file round trip), interaction
+  `spellcheck_menu_replaces_a_misspelled_word`, snapshot `25_spelling_marks`
+  (Bulgarian marks on the page). `16_settings_editor` regenerated for the new
+  section.
+- Gate: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets
+  -- -D warnings`, `cargo test --workspace` (app 50 lib + 57 interaction + 24
+  snapshots; core 100 lib + 49 integration; layout 26 unit + 25 integration),
+  `cargo deny check`, `git diff --check` — all green.
+- Release: version bumped to `0.8.4` (`scriptcraft-app/Cargo.toml` +
+  `Cargo.lock`), notes `docs/releases/v0.8.4.md`, README status and ROADMAP
+  snapshot updated.

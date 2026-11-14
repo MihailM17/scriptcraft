@@ -1,6 +1,6 @@
 [package]
 name = "scriptcraft-app"
-version = "0.8.3"
+version = "0.8.4"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/MihailM17/scriptcraft"
@@ -24,6 +24,9 @@ scriptcraft-core = { path = "../scriptcraft-core", version = "0.1.0" }
 scriptcraft-layout = { path = "../scriptcraft-layout", version = "0.1.0" }
 muda = "0.21.2"
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
+# Hunspell-compatible spellchecking (MPL-2.0, already in deny.toml's allow
+# list). Pinned: the crate is pre-1.0 and its API still moves.
+spellbook = "=0.4.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

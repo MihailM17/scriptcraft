@@ -30,7 +30,7 @@ use scriptcraft_layout::place::{
 };
 
 use crate::app::{bold_mono, italic_mono, MONO};
-use crate::theme::{kit, paint_page, revision_color, KitColors};
+use crate::theme::{kit, paint_page, paint_revision, KitColors};
 
 /// Points per millimetre at zoom 1.0: 12 pt Courier prime metrics make the
 /// Russian template's text column exactly A4 width at 72 dpi.
@@ -117,6 +117,20 @@ pub struct Auto {
     pub caret: Pos,
 }
 
+/// An open spellcheck menu: the flagged word a right-click landed on and
+/// where the popup was asked to open.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SpellMenu {
+    pub bi: usize,
+    pub para: usize,
+    /// Char offsets of the word inside its paragraph.
+    pub start: usize,
+    pub end: usize,
+    pub word: String,
+    /// Screen position of the right-click (the popup anchor).
+    pub pos: egui::Pos2,
+}
+
 /// Persistent Editor 2.0 state owned by the app.
 #[derive(Debug, Default)]
 pub struct EditState {
@@ -130,6 +144,8 @@ pub struct EditState {
     pub scroll_caret: bool,
     /// Open autocomplete dropdown, if any.
     pub autocomplete: Option<Auto>,
+    /// Open spellcheck menu, if any.
+    pub spell_menu: Option<SpellMenu>,
     /// Caret screen rect from the last painted frame (popup anchor, IME).
     pub caret_rect: Option<egui::Rect>,
     /// Zoom and scroll state of the previous frame, used to keep the
@@ -149,6 +165,10 @@ pub struct EditState {
     /// interaction tests click these.
     #[doc(hidden)]
     pub debug_autocomplete: Vec<(String, egui::Rect)>,
+    /// Suggestion rows of the last painted spellcheck menu: `(text, rect)`;
+    /// interaction tests click these.
+    #[doc(hidden)]
+    pub debug_spell_menu: Vec<(String, egui::Rect)>,
 }
 
 /// KIT Scenario Editor preferences that change typing or painting.
@@ -438,6 +458,11 @@ pub fn script_view(
         let sel_fill = ui.visuals().selection.bg_fill;
         let caret_color = ui.visuals().text_cursor.stroke.color;
         let caret_w = ui.visuals().text_cursor.stroke.width.max(1.0);
+        // Current-line tint follows the theme accent; Midnight and Light both
+        // use #4294F8, so their pixels are unchanged.
+        let accent = kit().accent;
+        let line_band =
+            egui::Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), 26);
         for (pi, page_lay) in doc.pages.iter().enumerate() {
             let prect = page_rects[pi];
             if !clip.intersects(prect) {
@@ -452,11 +477,7 @@ pub fn script_view(
                             egui::pos2(page_rect.left() + PAD_L_MM * scale, caret.top()),
                             egui::pos2(page_rect.right() - PAD_R_MM * scale, caret.top() + row_h),
                         );
-                        painter.rect_filled(
-                            band,
-                            2.0,
-                            egui::Color32::from_rgba_unmultiplied(0x42, 0x94, 0xF8, 26),
-                        );
+                        painter.rect_filled(band, 2.0, line_band);
                     }
                 }
             }
@@ -479,18 +500,16 @@ pub fn script_view(
                 let revision = line
                     .source_bi
                     .and_then(|bi| revision_colors.get(bi).copied().flatten());
-                paint_line(
-                    painter,
-                    prect,
-                    blocks,
-                    line,
-                    LinePaint {
-                        body,
-                        scale,
-                        row_h,
-                        revision,
-                    },
-                );
+                let paint = LinePaint {
+                    body,
+                    scale,
+                    row_h,
+                    revision,
+                };
+                paint_line(painter, prect, blocks, line, paint);
+                if line.role == LineRole::Body {
+                    paint_spelling(painter, prect, blocks, line, paint, cell_w);
+                }
             }
             if focused {
                 if let Some((cpi, _, caret)) = caret_geo {
@@ -504,6 +523,101 @@ pub fn script_view(
                 }
             }
         }
+
+        // Spellcheck menu: right-click a flagged word for suggestions and
+        // the two ways to teach the dictionary. Only flagged words open it,
+        // so the editor's right-click stays inert everywhere else.
+        if resp.secondary_clicked() {
+            state.spell_menu = resp
+                .interact_pointer_pos()
+                .and_then(|p| hit_test(doc, &page_rects, scale, row_h, cell_w, p).map(|at| (at, p)))
+                .and_then(|(at, p)| {
+                    let text = blocks.get(at.bi)?.text.split('\n').nth(at.para)?;
+                    let token = crate::spell::word_at(text, at.ch)?;
+                    let flagged = crate::spell::flags(at.bi, at.para, text)
+                        .iter()
+                        .any(|m| m.contains(at.ch));
+                    flagged.then(|| SpellMenu {
+                        bi: at.bi,
+                        para: at.para,
+                        start: token.start,
+                        end: token.end,
+                        word: token.word.to_string(),
+                        pos: p,
+                    })
+                });
+        }
+        let mut spell_rows: Vec<(String, egui::Rect)> = Vec::new();
+        if let Some(menu) = state.spell_menu.clone() {
+            let open = if resp.secondary_clicked() {
+                Some(egui::SetOpenCommand::Bool(true))
+            } else if resp.clicked() {
+                Some(egui::SetOpenCommand::Bool(false))
+            } else {
+                None
+            };
+            let shown = egui::Popup::from_response(&resp)
+                .at_position(menu.pos)
+                .open_memory(open)
+                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+                .show(|ui| {
+                    ui.set_min_width(200.0);
+                    ui.spacing_mut().item_spacing.y = 2.0;
+                    let suggestions = crate::spell::suggestions(&menu.word, 6);
+                    let mut picked: Option<String> = None;
+                    let mut add_error: Option<String> = None;
+                    if suggestions.is_empty() {
+                        ui.add_enabled(false, egui::Label::new("No suggestions"));
+                    }
+                    for s in &suggestions {
+                        let r = ui.selectable_label(false, s);
+                        spell_rows.push((s.clone(), r.rect));
+                        if r.clicked() {
+                            picked = Some(s.clone());
+                            ui.close();
+                        }
+                    }
+                    ui.separator();
+                    if ui.button("Add to dictionary").clicked() {
+                        match crate::spell::add_word(&menu.word) {
+                            Ok(()) => ui.close(),
+                            Err(err) => add_error = Some(err),
+                        }
+                    }
+                    if ui.button("Ignore").clicked() {
+                        crate::spell::ignore_word(&menu.word);
+                        ui.close();
+                    }
+                    if let Some(err) = &add_error {
+                        ui.label(egui::RichText::new(err).color(kit().spell_error));
+                    }
+                    picked
+                });
+            match shown {
+                Some(inner) => {
+                    if let Some(word) = inner.inner {
+                        let at = Pos {
+                            bi: menu.bi,
+                            para: menu.para,
+                            ch: menu.start,
+                        };
+                        let end = Pos {
+                            bi: menu.bi,
+                            para: menu.para,
+                            ch: menu.end,
+                        };
+                        out.commands
+                            .push(EditCommand::DeleteRange { start: at, end });
+                        out.commands
+                            .push(EditCommand::InsertText { at, text: word });
+                        state.spell_menu = None;
+                    }
+                }
+                // The popup closed itself (Escape or a click elsewhere).
+                None => state.spell_menu = None,
+            }
+        }
+        state.debug_spell_menu = spell_rows;
 
         // Floating autocomplete at the caret (KIT-style dropdown). The
         // widget owns the state because the popup lives in the same
@@ -1901,6 +2015,34 @@ fn line_origin_x(prect: egui::Rect, line: &PlacedLine, scale: f32, cell_w: f32) 
     }
 }
 
+/// Screen point at the middle of the character `at`; interaction tests
+/// right-click through this.
+#[doc(hidden)]
+pub fn char_point(
+    doc: &DocLayout,
+    page_rects: &[egui::Rect],
+    scale: f32,
+    row_h: f32,
+    cell_w: f32,
+    at: Pos,
+) -> Option<egui::Pos2> {
+    for (pi, page) in doc.pages.iter().enumerate() {
+        for line in &page.lines {
+            let Some(span) = line.span else {
+                continue;
+            };
+            if span.bi == at.bi && span.para == at.para && span.start <= at.ch && at.ch < span.end {
+                let prect = *page_rects.get(pi)?;
+                let origin = line_origin_x(prect, line, scale, cell_w);
+                let x = origin + (at.ch - span.start) as f32 * cell_w + cell_w * 0.5;
+                let y = prect.top() + PAD_T_MM * scale + line.row as f32 * row_h + row_h * 0.5;
+                return Some(egui::pos2(x, y));
+            }
+        }
+    }
+    None
+}
+
 /// Columns `[c0, c1)` of `line` covered by the selection `[a, f)`.
 fn selection_columns(line: &PlacedLine, a: Pos, f: Pos) -> Option<(usize, usize)> {
     let s = line.span?;
@@ -2116,7 +2258,7 @@ fn paint_line(
                 egui::pos2(prect.left() + REVISION_BAR_X_MM * scale, y),
                 egui::vec2(REVISION_BAR_W_MM * scale, row_h),
             );
-            painter.rect_filled(mark, 0.0, revision_color(revision));
+            paint_revision(painter, mark, revision, 0.0);
         }
     }
     let pos = match line.role {
@@ -2127,6 +2269,81 @@ fn paint_line(
         _ => egui::pos2(x, y),
     };
     painter.galley(pos, galley, color);
+}
+
+/// Underline the misspellings that fall inside one painted body line.
+///
+/// `flags` is cached per `(block, paragraph)` and keyed by the paragraph's
+/// text hash, so repeated lines of a wrapped paragraph are cheap and an edit
+/// invalidates them automatically.
+fn paint_spelling(
+    painter: &egui::Painter,
+    prect: egui::Rect,
+    blocks: &[ScriptBlock],
+    line: &PlacedLine,
+    paint: LinePaint,
+    cell_w: f32,
+) {
+    if !crate::spell::is_enabled() {
+        return;
+    }
+    let Some(span) = line.span else {
+        return;
+    };
+    let Some(para_text) = blocks
+        .get(span.bi)
+        .and_then(|b| b.text.split('\n').nth(span.para))
+    else {
+        return;
+    };
+    let marks = crate::spell::flags(span.bi, span.para, para_text);
+    if marks.is_empty() {
+        return;
+    }
+    let color = kit().spell_error;
+    let origin = line_origin_x(prect, line, paint.scale, cell_w);
+    let y = prect.top() + PAD_T_MM * paint.scale + line.row as f32 * paint.row_h;
+    let underline_y = y + paint.row_h * 0.82;
+    for mark in marks {
+        let c0 = mark.start.max(span.start);
+        let c1 = mark.end.min(span.end);
+        if c1 > c0 {
+            paint_squiggle(
+                painter,
+                origin + (c0 - span.start) as f32 * cell_w,
+                origin + (c1 - span.start) as f32 * cell_w,
+                underline_y,
+                color,
+                paint.row_h,
+            );
+        }
+    }
+}
+
+/// A small zigzag, the familiar "this word is not in the dictionary" mark.
+fn paint_squiggle(
+    painter: &egui::Painter,
+    x0: f32,
+    x1: f32,
+    y: f32,
+    color: egui::Color32,
+    row_h: f32,
+) {
+    let step = (row_h * 0.22).max(2.0);
+    let amp = (row_h * 0.08).max(0.8);
+    let mut points = Vec::new();
+    let mut x = x0;
+    let mut up = true;
+    while x < x1 {
+        points.push(egui::pos2(x, if up { y - amp } else { y + amp }));
+        up = !up;
+        x += step;
+    }
+    points.push(egui::pos2(x1.max(x0 + 1.0), y));
+    painter.add(egui::Shape::line(
+        points,
+        egui::Stroke::new((row_h * 0.09).max(1.0), color),
+    ));
 }
 
 /// One galley per line with every character pinned to the monospace cell

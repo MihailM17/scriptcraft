@@ -2591,3 +2591,106 @@ fn title_page_form_accepts_typed_text() {
         "typing in the form must edit the title: {title:?}"
     );
 }
+
+/// Two dark palettes share `dark_mode`, so switching between them must still
+/// repaint the app. The update loop compares the theme itself, not brightness.
+#[test]
+fn theme_dropdown_switches_between_dark_palettes() {
+    let mut h = harness(SideTab::Settings);
+    h.run();
+
+    h.get_all_by_role(egui::accesskit::Role::ComboBox)
+        .find(|n| !n.accesskit_node().is_disabled())
+        .expect("theme chooser should be an enabled combo box")
+        .click();
+    h.run();
+    h.get_by_label("Tokyo Night").click();
+    h.run_steps(2);
+
+    assert!(
+        h.ctx.style().visuals.dark_mode,
+        "Tokyo Night is a dark palette"
+    );
+    assert_eq!(
+        h.ctx.style().visuals.panel_fill,
+        egui::Color32::from_rgb(0x1A, 0x1B, 0x26),
+        "panel fill must come from the Tokyo Night palette"
+    );
+
+    // Same brightness class as Midnight: a dark_mode-only check would leave
+    // the previous palette painted, so this is the regression to catch.
+    h.get_all_by_role(egui::accesskit::Role::ComboBox)
+        .find(|n| !n.accesskit_node().is_disabled())
+        .expect("theme chooser should still be enabled")
+        .click();
+    h.run();
+    h.get_by_label("Midnight").click();
+    h.run_steps(2);
+
+    assert!(h.ctx.style().visuals.dark_mode);
+    assert_eq!(
+        h.ctx.style().visuals.panel_fill,
+        egui::Color32::from_rgb(0x16, 0x18, 0x1D),
+        "switching back must repaint with the Midnight palette"
+    );
+}
+
+/// Right-click a flagged word and pick a suggestion: the menu replaces the
+/// word through the normal edit pipeline (so undo still works).
+#[test]
+fn spellcheck_menu_replaces_a_misspelled_word() {
+    use scriptcraft_app::spell::SpellLang;
+
+    let mut h = harness(SideTab::Script);
+    h.run();
+    let bi = h.state().find_first_heading_block().expect("heading");
+    h.state_mut().set_spellcheck_for_test(true, SpellLang::EnUs);
+    h.state_mut()
+        .set_block_text_for_test(bi, "The reciever is broken.");
+    h.state_mut().scroll_to_block(bi);
+    h.run_steps(2);
+
+    let flags = h.state().spell_flags_for_test(bi, 0);
+    assert_eq!(
+        flags.len(),
+        1,
+        "only 'reciever' should be flagged: {flags:?}"
+    );
+    let start = flags[0].start;
+    let pos = h
+        .state()
+        .editor2_char_point((bi, 0, start + 2))
+        .expect("the misspelled word must have a painted character");
+
+    h.input_mut().events.push(egui::Event::PointerMoved(pos));
+    h.run();
+    h.input_mut().events.push(egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Secondary,
+        pressed: true,
+        modifiers: egui::Modifiers::NONE,
+    });
+    h.run();
+    h.input_mut().events.push(egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Secondary,
+        pressed: false,
+        modifiers: egui::Modifiers::NONE,
+    });
+    h.run();
+
+    let rows = h.state().editor2_spell_menu_rows();
+    assert!(
+        !rows.is_empty(),
+        "the menu should offer suggestions for 'reciever'"
+    );
+    let first = rows[0].0.clone();
+    h.get_by_label(&first).click();
+    h.run_steps(2);
+
+    let text = h.state().block_text(bi).unwrap_or_default();
+    assert!(
+        text.contains(&first) && !text.contains("reciever"),
+        "picking '{first}' should replace the word: {text:?}"
+    );
+}

@@ -34,6 +34,9 @@ rm -rf "$STAGE" "$DMG"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$ROOT/target/release/scriptcraft-app" "$APP/Contents/MacOS/ScriptCraft"
 cp "$ROOT/scriptcraft-app/assets/ScriptCraft.icns" "$APP/Contents/Resources/"
+# Spellcheck dictionaries stay data files (their licences differ from the
+# app's); `spell::dictionary_search_paths` finds them in Contents/Resources.
+cp -R "$ROOT/scriptcraft-app/assets/dictionaries" "$APP/Contents/Resources/dictionaries"
 sed "s/__VERSION__/$VERSION/g" "$ROOT/packaging/macos/Info.plist.in" \
   > "$APP/Contents/Info.plist"
 ln -s /Applications "$STAGE/Applications"

@@ -8,7 +8,7 @@ use egui::Context;
 use scriptcraft_core::revision::RevisionSet;
 use scriptcraft_core::summary::RevisionSummary;
 
-use crate::theme::revision_color;
+use crate::theme::paint_revision;
 
 /// What the user asked the window to do this frame.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -63,8 +63,7 @@ pub fn window(
             ui.horizontal(|ui| {
                 let (swatch, _) =
                     ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
-                ui.painter()
-                    .rect_filled(swatch, 2.0, revision_color(summary.color));
+                paint_revision(ui.painter(), swatch, summary.color, 2.0);
                 let name = if summary.name.trim().is_empty() {
                     format!("{} Revision", summary.color.label())
                 } else {

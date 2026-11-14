@@ -34,6 +34,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path $dir | Out-Null
           Copy-Item target/release/scriptcraft-app.exe "$dir/ScriptCraft.exe"
           Copy-Item LICENSE, NOTICE, README.md $dir
+          Copy-Item scriptcraft-app/assets/dictionaries "$dir/dictionaries" -Recurse
           Compress-Archive -Path $dir -DestinationPath "dist/ScriptCraft-$env:VERSION-windows-x64.zip"
           $zipName = "ScriptCraft-$env:VERSION-windows-x64.zip"
           $zip = "dist/$zipName"
@@ -69,6 +70,7 @@ jobs:
           cp LICENSE NOTICE README.md "$dir"
           cp scriptcraft-app/assets/ScriptCraft-1024.png "$dir/scriptcraft.png"
           cp packaging/linux/scriptcraft.desktop "$dir/"
+          cp -R scriptcraft-app/assets/dictionaries "$dir/dictionaries"
           tar -C dist -czf "dist/ScriptCraft-${VERSION}-linux-x86_64.tar.gz" "ScriptCraft-${VERSION}-linux-x86_64"
           (cd dist && sha256sum "ScriptCraft-${VERSION}-linux-x86_64.tar.gz" > "ScriptCraft-${VERSION}-linux-x86_64.tar.gz.sha256")
       - uses: actions/upload-artifact@v4

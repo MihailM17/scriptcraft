@@ -45,6 +45,13 @@ pub struct AppSettings {
     pub smart_quotes: bool,
     pub navigator_preview: bool,
     pub navigator_show_numbers: bool,
+    /// Spellchecking. Off by default: a Bulgarian or Russian script would
+    /// light up red on the first run before the writer picks a language.
+    pub spellcheck: bool,
+    pub spell_language: crate::spell::SpellLang,
+    /// Screenplay slugs, cues and sound effects are ALL CAPS and are not
+    /// prose. On by default.
+    pub spell_ignore_caps: bool,
 }
 
 impl Default for AppSettings {
@@ -63,6 +70,9 @@ impl Default for AppSettings {
             smart_quotes: false,
             navigator_preview: true,
             navigator_show_numbers: true,
+            spellcheck: false,
+            spell_language: crate::spell::SpellLang::default(),
+            spell_ignore_caps: true,
         }
     }
 }
@@ -106,12 +116,14 @@ impl AppSettings {
                     "smart_quotes" => s.smart_quotes = v == "1",
                     "navigator_preview" => s.navigator_preview = v != "0",
                     "navigator_show_numbers" => s.navigator_show_numbers = v != "0",
+                    "spellcheck" => s.spellcheck = v == "1",
+                    "spell_language" => {
+                        s.spell_language =
+                            crate::spell::SpellLang::from_key(v).unwrap_or(s.spell_language);
+                    }
+                    "spell_ignore_caps" => s.spell_ignore_caps = v != "0",
                     "theme" => {
-                        s.theme = match v {
-                            "light" => Theme::Light,
-                            "midnight" => Theme::Midnight,
-                            _ => s.theme,
-                        };
+                        s.theme = Theme::from_key(v).unwrap_or(s.theme);
                         theme_seen = true;
                     }
                     // Pre-theme-picker setting: 1 = Midnight, 0 = Light.
@@ -136,7 +148,7 @@ impl AppSettings {
             "autosave={}\nautosave_minutes={}\nbackups={}\nbackups_dir={}\ntheme={}\n\
              show_scene_numbers={}\nhighlight_current_line={}\ncapitalize_first_word={}\n\
              correct_double_capitals={}\nreplace_three_dots={}\nsmart_quotes={}\nnavigator_preview={}\n\
-             navigator_show_numbers={}\n",
+             navigator_show_numbers={}\nspellcheck={}\nspell_language={}\nspell_ignore_caps={}\n",
             self.autosave as u8,
             self.autosave_minutes.clamp(1, 60),
             self.backups as u8,
@@ -150,6 +162,9 @@ impl AppSettings {
             self.smart_quotes as u8,
             self.navigator_preview as u8,
             self.navigator_show_numbers as u8,
+            self.spellcheck as u8,
+            self.spell_language.key(),
+            self.spell_ignore_caps as u8,
         );
         let _ = std::fs::write(crate::app::config_dir().join("settings.conf"), text);
     }
@@ -280,7 +295,7 @@ fn settings_application(ui: &mut Ui, settings: &mut AppSettings) -> (bool, bool)
             .selected_text(settings.theme.label())
             .width(140.0)
             .show_ui(ui, |ui| {
-                for theme in [Theme::Light, Theme::Midnight] {
+                for theme in Theme::ALL {
                     changed |= ui
                         .selectable_value(&mut settings.theme, theme, theme.label())
                         .changed();
@@ -371,6 +386,58 @@ fn settings_editor(ui: &mut Ui, settings: &mut AppSettings) -> (bool, bool) {
             .on_hover_text("Tint the line holding the caret, like KIT's editor.")
             .changed();
     });
+    ui.add_space(20.0);
+    kit_section(ui, "Spelling");
+    ui.horizontal(|ui| {
+        ui.add_space(16.0);
+        changed |= ui
+            .checkbox(&mut settings.spellcheck, "Check spelling as you type")
+            .on_hover_text(
+                "Underlines words the dictionary doesn't know. Right-click one for suggestions.",
+            )
+            .changed();
+    });
+    ui.add_space(8.0);
+    ui.horizontal(|ui| {
+        ui.add_space(16.0);
+        ui.label("Dictionary:");
+        ui.add_space(6.0);
+        ui.add_enabled_ui(settings.spellcheck, |ui| {
+            changed |= egui::ComboBox::from_id_salt("spell_language")
+                .selected_text(settings.spell_language.label())
+                .width(150.0)
+                .show_ui(ui, |ui| {
+                    let mut picked = false;
+                    for lang in crate::spell::SpellLang::ALL {
+                        picked |= ui
+                            .selectable_value(&mut settings.spell_language, lang, lang.label())
+                            .changed();
+                    }
+                    picked
+                })
+                .inner
+                .unwrap_or(false);
+        });
+    });
+    ui.add_space(8.0);
+    ui.horizontal(|ui| {
+        ui.add_space(16.0);
+        ui.add_enabled_ui(settings.spellcheck, |ui| {
+            changed |= ui
+                .checkbox(&mut settings.spell_ignore_caps, "Ignore ALL-CAPS words")
+                .on_hover_text("Scene headings, character cues and sound effects are not prose.")
+                .changed();
+        });
+    });
+    if settings.spellcheck {
+        if let Some(err) = crate::spell::error() {
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                ui.add_space(16.0);
+                ui.label(egui::RichText::new(err).size(11.0).color(kit().spell_error));
+            });
+        }
+    }
     ui.add_space(20.0);
     kit_section(ui, "Automatic corrections");
     ui.horizontal(|ui| {

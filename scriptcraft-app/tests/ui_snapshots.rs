@@ -389,3 +389,62 @@ fn snap_18_dual_dialogue() {
     h.run_steps(2);
     h.snapshot("18_dual_dialogue");
 }
+
+/// A second dark palette. Proves the theme table reaches the page, the
+/// margins, the panels and the revision bars, not just the settings chrome.
+#[test]
+fn snap_23_script_tokyo_night() {
+    use scriptcraft_app::theme::Theme;
+
+    let mut h = Harness::builder()
+        .with_size(egui::Vec2::new(1360.0, 880.0))
+        .build_eframe(|cc| {
+            app::apply_theme(&cc.egui_ctx);
+            app::install_fonts(&cc.egui_ctx);
+            let mut a = ScriptCraftApp::default();
+            assert!(a.open_fixture(), "A95 fixture not found");
+            a.set_theme(Theme::TokyoNight);
+            a.goto_tab(SideTab::Script);
+            a
+        });
+    h.run();
+    h.snapshot("23_script_tokyo_night");
+}
+
+/// A second light palette: warm paper, where the pale revision colours are
+/// hardest to keep visible.
+#[test]
+fn snap_24_script_sepia() {
+    use scriptcraft_app::theme::Theme;
+
+    let mut h = Harness::builder()
+        .with_size(egui::Vec2::new(1360.0, 880.0))
+        .build_eframe(|cc| {
+            app::apply_theme(&cc.egui_ctx);
+            app::install_fonts(&cc.egui_ctx);
+            let mut a = ScriptCraftApp::default();
+            assert!(a.open_fixture(), "A95 fixture not found");
+            a.set_theme(Theme::Sepia);
+            a.goto_tab(SideTab::Script);
+            a
+        });
+    h.run();
+    h.snapshot("24_script_sepia");
+}
+
+/// Bulgarian spellchecking: unknown words carry the palette's squiggle
+/// colour, so the mark stays readable on every theme.
+#[test]
+fn snap_25_spelling_marks() {
+    use scriptcraft_app::spell::SpellLang;
+
+    let mut h = harness(SideTab::Script, None);
+    h.run();
+    let bi = h.state().find_first_heading_block().expect("heading") + 1;
+    h.state_mut().set_spellcheck_for_test(true, SpellLang::BgBg);
+    h.state_mut()
+        .set_block_text_for_test(bi, "Иван откри грешкаф в сценария и кюфтеф на масата.");
+    h.state_mut().scroll_to_block(bi);
+    h.run_steps(2);
+    h.snapshot("25_spelling_marks");
+}

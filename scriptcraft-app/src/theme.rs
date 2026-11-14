@@ -3,8 +3,12 @@
 //!
 //! Design language: calm neutral surfaces, one icon-blue accent, generous
 //! radii, tinted (not solid) selection, soft shadows on floating things.
-//! Everything reads colors through [`kit()`], so the dark/light switch in
-//! Settings keeps working exactly as before.
+//! Everything reads colors through [`kit()`], so switching the theme in
+//! Settings repaints the whole app from one palette table.
+//!
+//! Revision colours are *not* part of a theme: they carry meaning on a real
+//! production (blue revision, pink revision…) and must stay identical in
+//! every palette.
 
 use egui::{
     Align2, Color32, CornerRadius, FontId, Margin, Painter, Pos2, Rect, Response, Sense, Shadow,
@@ -56,12 +60,15 @@ pub struct KitColors {
     pub accent_soft: Color32,
     /// Accent-colored text/icons that stay readable on the soft tint.
     pub accent_text: Color32,
+    /// Misspelling underline. Must clear 3:1 against the page on every
+    /// palette, so it is part of the palette rather than a fixed red.
+    pub spell_error: Color32,
 }
 
 /// Far-left module rail width; matches the toolbar Menu button.
 pub const RAIL_WIDTH: f32 = 82.0;
 
-pub const KIT_DARK: KitColors = KitColors {
+pub const KIT_MIDNIGHT: KitColors = KitColors {
     window: hex(0x16181D),
     desk: hex(0x0F1114),
     page: hex(0x20232A),
@@ -87,6 +94,7 @@ pub const KIT_DARK: KitColors = KitColors {
     surface: hex(0x1D2027),
     accent_soft: Color32::from_rgba_premultiplied(15, 34, 56, 58),
     accent_text: hex(0x9BC8FF),
+    spell_error: hex(0xFF6B6B),
 };
 
 pub const KIT_LIGHT: KitColors = KitColors {
@@ -115,61 +123,332 @@ pub const KIT_LIGHT: KitColors = KitColors {
     surface: hex(0xFFFFFF),
     accent_soft: Color32::from_rgba_premultiplied(10, 23, 39, 40),
     accent_text: hex(0x1B64C4),
+    spell_error: hex(0xC62F2F),
 };
 
-/// User-selectable theme. Persisted by name (`light` / `midnight`); the old
+// ---- additional palettes ---------------------------------------------------
+//
+// Each palette keeps the same semantic roles as Midnight and Light, so every
+// widget reads correctly without a per-theme branch. Values are start points
+// tuned against the UI snapshots; `every_theme_is_legible` in the tests keeps
+// text, muted text and accents above their contrast floors.
+
+/// Tokyo Night: deep navy surfaces with an electric blue accent.
+pub const KIT_TOKYO_NIGHT: KitColors = KitColors {
+    window: hex(0x1A1B26),
+    desk: hex(0x16161E),
+    page: hex(0x1F2335),
+    page_edge: hex(0x292E42),
+    start_tab_active: hex(0x1A1B26),
+    rail: hex(0x16161E),
+    text: hex(0xC0CAF5),
+    button: hex(0x24283B),
+    button_hover: hex(0x2E3350),
+    base: hex(0x1F2335),
+    faint: hex(0x1B1E2E),
+    accent: hex(0x7AA2F7),
+    disabled_text: hex(0x787C99),
+    stroke: hex(0x292E42),
+    sep: hex(0x24283B),
+    module_bg: hex(0x1F2335),
+    strip: hex(0x1B1E2E),
+    field_stroke: hex(0x3B4261),
+    hover_light: hex(0x24283B),
+    elt_bg: hex(0x1F2335),
+    elt_stroke: hex(0x292E42),
+    heading_text: Color32::WHITE,
+    surface: hex(0x1F2335),
+    accent_soft: Color32::from_rgba_premultiplied(22, 29, 44, 45),
+    accent_text: hex(0xA9C1FF),
+    spell_error: hex(0xFF6B6B),
+};
+
+/// Nord: arctic blue-grey, low saturation, frost accent.
+pub const KIT_NORD: KitColors = KitColors {
+    window: hex(0x2E3440),
+    desk: hex(0x272C36),
+    page: hex(0x3B4252),
+    page_edge: hex(0x4C566A),
+    start_tab_active: hex(0x2E3440),
+    rail: hex(0x272C36),
+    text: hex(0xECEFF4),
+    button: hex(0x3B4252),
+    button_hover: hex(0x434C5E),
+    base: hex(0x2E3440),
+    faint: hex(0x2B313B),
+    accent: hex(0x88C0D0),
+    disabled_text: hex(0x8A97AC),
+    stroke: hex(0x434C5E),
+    sep: hex(0x3B4252),
+    module_bg: hex(0x343B48),
+    strip: hex(0x2B313B),
+    field_stroke: hex(0x4C566A),
+    hover_light: hex(0x39414F),
+    elt_bg: hex(0x343B48),
+    elt_stroke: hex(0x434C5E),
+    heading_text: Color32::WHITE,
+    surface: hex(0x353C4A),
+    accent_soft: Color32::from_rgba_premultiplied(24, 34, 37, 45),
+    accent_text: hex(0x9FD3DE),
+    spell_error: hex(0xE07A84),
+};
+
+/// Gruvbox Dark: warm retro surfaces, golden accent, low glare.
+pub const KIT_GRUVBOX: KitColors = KitColors {
+    window: hex(0x282828),
+    desk: hex(0x1D2021),
+    page: hex(0x32302F),
+    page_edge: hex(0x3C3836),
+    start_tab_active: hex(0x282828),
+    rail: hex(0x1D2021),
+    text: hex(0xEBDBB2),
+    button: hex(0x3C3836),
+    button_hover: hex(0x504945),
+    base: hex(0x2A2827),
+    faint: hex(0x2A2827),
+    accent: hex(0xFABD2F),
+    disabled_text: hex(0xA89984),
+    stroke: hex(0x3C3836),
+    sep: hex(0x3C3836),
+    module_bg: hex(0x32302F),
+    strip: hex(0x2A2827),
+    field_stroke: hex(0x504945),
+    hover_light: hex(0x3A3735),
+    elt_bg: hex(0x32302F),
+    elt_stroke: hex(0x3C3836),
+    heading_text: hex(0xFBF1C7),
+    surface: hex(0x32302F),
+    accent_soft: Color32::from_rgba_premultiplied(37, 28, 7, 38),
+    accent_text: hex(0xFFD866),
+    spell_error: hex(0xFB4934),
+};
+
+/// Rosé Pine: muted plum surfaces, iris accent, soft on long sessions.
+pub const KIT_ROSE_PINE: KitColors = KitColors {
+    window: hex(0x191724),
+    desk: hex(0x14131F),
+    page: hex(0x1F1D2E),
+    page_edge: hex(0x26233A),
+    start_tab_active: hex(0x191724),
+    rail: hex(0x14131F),
+    text: hex(0xE0DEF4),
+    button: hex(0x26233A),
+    button_hover: hex(0x2E2B44),
+    base: hex(0x1F1D2E),
+    faint: hex(0x1B1928),
+    accent: hex(0xC4A7E7),
+    disabled_text: hex(0x8B87A8),
+    stroke: hex(0x26233A),
+    sep: hex(0x26233A),
+    module_bg: hex(0x1F1D2E),
+    strip: hex(0x1B1928),
+    field_stroke: hex(0x34314A),
+    hover_light: hex(0x241F35),
+    elt_bg: hex(0x1F1D2E),
+    elt_stroke: hex(0x26233A),
+    heading_text: Color32::WHITE,
+    surface: hex(0x1F1D2E),
+    accent_soft: Color32::from_rgba_premultiplied(32, 28, 38, 42),
+    accent_text: hex(0xD9C2F0),
+    spell_error: hex(0xEB6F92),
+};
+
+/// Sepia: warm paper for daylight writing, burnt-orange ink accent.
+pub const KIT_SEPIA: KitColors = KitColors {
+    window: hex(0xF4EDDF),
+    desk: hex(0xE6DCC8),
+    page: hex(0xFDF8EC),
+    page_edge: hex(0xE3D8C2),
+    start_tab_active: hex(0xF4EDDF),
+    rail: hex(0xEEE5D4),
+    text: hex(0x3A3226),
+    button: hex(0xEEE5D4),
+    button_hover: hex(0xE6DBC6),
+    base: hex(0xFFFDF7),
+    faint: hex(0xF0E8D8),
+    accent: hex(0xA85A2E),
+    disabled_text: hex(0x7A6E5C),
+    stroke: hex(0xDFD3BC),
+    sep: hex(0xE7DDC9),
+    module_bg: hex(0xFDF8EC),
+    strip: hex(0xF1EADD),
+    field_stroke: hex(0xD6C8AE),
+    hover_light: hex(0xF0E7D5),
+    elt_bg: hex(0xF3EBDB),
+    elt_stroke: hex(0xE0D4BE),
+    heading_text: hex(0x241E15),
+    surface: hex(0xFFFDF7),
+    accent_soft: Color32::from_rgba_premultiplied(25, 13, 7, 38),
+    accent_text: hex(0x8A4622),
+    spell_error: hex(0xB23A2E),
+};
+
+/// High contrast: pure black, white text, a bright accent. For set monitors
+/// and for anyone who needs maximum separation.
+pub const KIT_HIGH_CONTRAST: KitColors = KitColors {
+    window: hex(0x000000),
+    desk: hex(0x000000),
+    page: hex(0x111111),
+    page_edge: hex(0x3A3A3A),
+    start_tab_active: hex(0x000000),
+    rail: hex(0x000000),
+    text: Color32::WHITE,
+    button: hex(0x1A1A1A),
+    button_hover: hex(0x2A2A2A),
+    base: hex(0x0A0A0A),
+    faint: hex(0x141414),
+    accent: hex(0x4DA3FF),
+    disabled_text: hex(0xC8C8C8),
+    stroke: hex(0x6A6A6A),
+    sep: hex(0x4A4A4A),
+    module_bg: hex(0x0A0A0A),
+    strip: hex(0x0E0E0E),
+    field_stroke: hex(0x8A8A8A),
+    hover_light: hex(0x1F1F1F),
+    elt_bg: hex(0x141414),
+    elt_stroke: hex(0x6A6A6A),
+    heading_text: Color32::WHITE,
+    surface: hex(0x141414),
+    accent_soft: Color32::from_rgba_premultiplied(17, 35, 55, 55),
+    accent_text: hex(0x9CCBFF),
+    spell_error: hex(0xFF6B6B),
+};
+
+/// User-selectable theme. Persisted by name in `settings.conf`; the old
 /// `dark_mode` setting is still honoured as a fallback.
+///
+/// `ALL` is also the Settings dropdown order: darks first, then lights.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Theme {
-    Light,
     #[default]
     Midnight,
+    TokyoNight,
+    Nord,
+    Gruvbox,
+    RosePine,
+    Light,
+    Sepia,
+    HighContrast,
 }
 
 impl Theme {
+    pub const ALL: [Theme; 8] = [
+        Theme::Midnight,
+        Theme::TokyoNight,
+        Theme::Nord,
+        Theme::Gruvbox,
+        Theme::RosePine,
+        Theme::Light,
+        Theme::Sepia,
+        Theme::HighContrast,
+    ];
+
     pub fn label(self) -> &'static str {
         match self {
-            Theme::Light => "Light",
             Theme::Midnight => "Midnight",
+            Theme::TokyoNight => "Tokyo Night",
+            Theme::Nord => "Nord",
+            Theme::Gruvbox => "Gruvbox",
+            Theme::RosePine => "Rosé Pine",
+            Theme::Light => "Light",
+            Theme::Sepia => "Sepia",
+            Theme::HighContrast => "High Contrast",
         }
     }
 
     /// Stable key used in `settings.conf`.
     pub fn key(self) -> &'static str {
         match self {
-            Theme::Light => "light",
             Theme::Midnight => "midnight",
+            Theme::TokyoNight => "tokyo-night",
+            Theme::Nord => "nord",
+            Theme::Gruvbox => "gruvbox",
+            Theme::RosePine => "rose-pine",
+            Theme::Light => "light",
+            Theme::Sepia => "sepia",
+            Theme::HighContrast => "high-contrast",
         }
     }
 
+    /// Parse a stored key. `None` for keys this build doesn't know, so an
+    /// older or newer settings file can't silently change the theme.
+    pub fn from_key(key: &str) -> Option<Theme> {
+        Theme::ALL.into_iter().find(|t| t.key() == key)
+    }
+
+    /// Palette every widget reads through [`kit()`].
+    pub fn palette(self) -> &'static KitColors {
+        match self {
+            Theme::Midnight => &KIT_MIDNIGHT,
+            Theme::TokyoNight => &KIT_TOKYO_NIGHT,
+            Theme::Nord => &KIT_NORD,
+            Theme::Gruvbox => &KIT_GRUVBOX,
+            Theme::RosePine => &KIT_ROSE_PINE,
+            Theme::Light => &KIT_LIGHT,
+            Theme::Sepia => &KIT_SEPIA,
+            Theme::HighContrast => &KIT_HIGH_CONTRAST,
+        }
+    }
+
+    /// Light palettes need dark ink; everything in `kit_visuals` branches on
+    /// this instead of the old single `Light` variant.
     pub fn is_light(self) -> bool {
-        matches!(self, Theme::Light)
+        matches!(self, Theme::Light | Theme::Sepia)
     }
 }
 
 thread_local! {
-    static KIT_PAL: std::cell::Cell<KitColors> = const { std::cell::Cell::new(KIT_DARK) };
-    static KIT_LIGHT_ON: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static KIT_PAL: std::cell::Cell<KitColors> = const { std::cell::Cell::new(KIT_MIDNIGHT) };
+    static KIT_THEME: std::cell::Cell<Theme> = const { std::cell::Cell::new(Theme::Midnight) };
 }
 
-/// Active theme palette.
+/// Industry-standard revision colour. Never themed: a blue revision is blue
+/// on every production, whatever the app's palette.
 pub fn revision_color(color: RevisionColor) -> Color32 {
     let (r, g, b) = color.rgb();
     Color32::from_rgb(r, g, b)
+}
+
+/// Hairline edge for revision marks. Pale revision colours (yellow, buff,
+/// goldenrod) sit well under 2:1 against a white or cream page, so the mark
+/// carries an edge in the opposite direction of the page. That keeps its
+/// boundary visible on every palette without changing the colour itself.
+pub fn revision_mark_edge() -> Color32 {
+    if kit_is_light() {
+        Color32::from_black_alpha(120)
+    } else {
+        Color32::from_white_alpha(120)
+    }
+}
+
+/// Fill a revision-coloured region (margin bar, legend swatch) with its edge.
+pub fn paint_revision(painter: &Painter, rect: Rect, color: RevisionColor, radius: f32) {
+    painter.rect_filled(rect, radius, revision_color(color));
+    painter.rect_stroke(
+        rect,
+        radius,
+        Stroke::new(1.0_f32, revision_mark_edge()),
+        StrokeKind::Inside,
+    );
 }
 
 pub fn kit() -> KitColors {
     KIT_PAL.with(|p| p.get())
 }
 
+/// Theme currently backing [`kit()`].
+pub fn current_theme() -> Theme {
+    KIT_THEME.with(|c| c.get())
+}
+
 pub fn kit_is_light() -> bool {
-    KIT_LIGHT_ON.with(|c| c.get())
+    current_theme().is_light()
 }
 
 /// Switch the palette; the caller re-applies the style via [`apply_theme`].
-pub fn set_kit_theme(light: bool) {
-    KIT_LIGHT_ON.with(|c| c.set(light));
-    KIT_PAL.with(|p| p.set(if light { KIT_LIGHT } else { KIT_DARK }));
+pub fn set_kit_theme(theme: Theme) {
+    KIT_THEME.with(|c| c.set(theme));
+    KIT_PAL.with(|p| p.set(*theme.palette()));
 }
 
 /// Global egui visuals for the active palette.
@@ -203,12 +482,12 @@ pub fn kit_visuals() -> egui::Visuals {
         spread: 0,
         color: Color32::from_black_alpha(shadow_a),
     };
-    // Text selection and selected widgets: translucent accent.
-    v.selection.bg_fill = if light {
-        Color32::from_rgba_unmultiplied(0x42, 0x94, 0xF8, 70)
-    } else {
-        Color32::from_rgba_unmultiplied(0x42, 0x94, 0xF8, 105)
-    };
+    // Text selection and selected widgets: translucent accent. Each theme's
+    // own accent keeps selection readable; Midnight and Light both use
+    // #4294F8, so their rendering is unchanged.
+    let a = c.accent;
+    v.selection.bg_fill =
+        Color32::from_rgba_unmultiplied(a.r(), a.g(), a.b(), if light { 70 } else { 105 });
     v.selection.stroke = Stroke::new(1.0_f32, c.accent_text);
     v.hyperlink_color = c.accent_text;
     v.text_cursor.stroke = Stroke::new(2.0_f32, c.accent_text);
@@ -631,5 +910,184 @@ pub fn project_card(ui: &mut Ui, name: &str, path: &str, when: &str) -> ProjectC
     ProjectCard {
         response: resp.on_hover_cursor(egui::CursorIcon::PointingHand),
         remove_clicked: remove.clicked(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// sRGB channel → linear light, per WCAG 2.1.
+    fn linear(c: u8) -> f32 {
+        let s = c as f32 / 255.0;
+        if s <= 0.04045 {
+            s / 12.92
+        } else {
+            ((s + 0.055) / 1.055).powf(2.4)
+        }
+    }
+
+    fn luminance(c: Color32) -> f32 {
+        0.2126 * linear(c.r()) + 0.7152 * linear(c.g()) + 0.0722 * linear(c.b())
+    }
+
+    fn contrast(a: Color32, b: Color32) -> f32 {
+        let (la, lb) = (luminance(a), luminance(b));
+        let (hi, lo) = if la >= lb { (la, lb) } else { (lb, la) };
+        (hi + 0.05) / (lo + 0.05)
+    }
+
+    /// `Color32` is premultiplied, so compositing a translucent foreground
+    /// means adding the background scaled by the remaining opacity.
+    fn over(fg: Color32, bg: Color32) -> Color32 {
+        let inv = 1.0 - fg.a() as f32 / 255.0;
+        let mix = |f: u8, b: u8| (f as f32 + b as f32 * inv).round().clamp(0.0, 255.0) as u8;
+        Color32::from_rgb(
+            mix(fg.r(), bg.r()),
+            mix(fg.g(), bg.g()),
+            mix(fg.b(), bg.b()),
+        )
+    }
+
+    #[test]
+    fn theme_keys_round_trip() {
+        for theme in Theme::ALL {
+            assert_eq!(Theme::from_key(theme.key()), Some(theme), "{}", theme.key());
+        }
+        // A key this build doesn't know must not silently pick a theme.
+        assert_eq!(Theme::from_key("solarized"), None);
+        assert_eq!(Theme::from_key("Nord"), None, "keys are case-sensitive");
+    }
+
+    #[test]
+    fn theme_keys_and_labels_are_unique() {
+        for (i, a) in Theme::ALL.iter().enumerate() {
+            for b in &Theme::ALL[i + 1..] {
+                assert_ne!(a.key(), b.key());
+                assert_ne!(a.label(), b.label());
+            }
+        }
+    }
+
+    #[test]
+    fn every_theme_paints_from_its_own_palette() {
+        for theme in Theme::ALL {
+            set_kit_theme(theme);
+            assert_eq!(current_theme(), theme);
+            assert_eq!(kit().window, theme.palette().window, "{}", theme.label());
+            assert_eq!(kit_is_light(), theme.is_light(), "{}", theme.label());
+        }
+    }
+
+    #[test]
+    fn light_themes_have_light_pages() {
+        for theme in Theme::ALL {
+            let page = theme.palette().page;
+            if theme.is_light() {
+                assert!(
+                    luminance(page) > 0.5,
+                    "{}: light theme needs a light page",
+                    theme.label()
+                );
+            } else {
+                assert!(
+                    luminance(page) < 0.5,
+                    "{}: dark theme needs a dark page",
+                    theme.label()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn every_theme_is_legible() {
+        for theme in Theme::ALL {
+            let c = *theme.palette();
+            let name = theme.label();
+            let body = contrast(c.text, c.window);
+            let heading = contrast(c.heading_text, c.window);
+            let muted = contrast(c.disabled_text, c.window);
+            let accent = contrast(c.accent, c.page);
+            let accent_text = contrast(c.accent_text, c.page);
+            assert!(body >= 7.0, "{name}: body text is {body:.2}:1 on panels");
+            assert!(
+                heading >= 7.0,
+                "{name}: heading text is {heading:.2}:1 on panels"
+            );
+            assert!(muted >= 3.0, "{name}: secondary text is {muted:.2}:1");
+            assert!(accent >= 3.0, "{name}: accent is {accent:.2}:1 on the page");
+            assert!(
+                accent_text >= 4.5,
+                "{name}: accent text is {accent_text:.2}:1 on the page"
+            );
+            assert_ne!(
+                c.page, c.desk,
+                "{name}: the sheet must separate from the desk"
+            );
+            assert_ne!(c.page_edge, c.page, "{name}: the sheet needs an edge");
+            let squiggle = contrast(c.spell_error, c.page);
+            assert!(
+                squiggle >= 3.0,
+                "{name}: misspelling underline is {squiggle:.2}:1 on the page"
+            );
+        }
+    }
+
+    /// Pale revision colours (yellow, buff, goldenrod) are far under 3:1 on a
+    /// white or cream page. The mark's edge is what keeps it locatable, so the
+    /// edge — not the colour — has to clear the bar on every palette.
+    #[test]
+    fn revision_marks_stay_visible_on_every_palette() {
+        for theme in Theme::ALL {
+            set_kit_theme(theme);
+            let page = kit().page;
+            let edge = over(revision_mark_edge(), page);
+            let ratio = contrast(edge, page);
+            assert!(
+                ratio >= 3.0,
+                "{}: revision edge is {ratio:.2}:1 against the page",
+                theme.label()
+            );
+        }
+    }
+
+    /// Revision colours carry meaning, so no palette may change them.
+    #[test]
+    fn revision_colours_do_not_follow_the_theme() {
+        let mut baseline: Option<Vec<(u8, u8, u8)>> = None;
+        for theme in Theme::ALL {
+            set_kit_theme(theme);
+            let row: Vec<(u8, u8, u8)> = RevisionColor::ALL
+                .iter()
+                .map(|color| {
+                    let c = revision_color(*color);
+                    (c.r(), c.g(), c.b())
+                })
+                .collect();
+            match &baseline {
+                None => baseline = Some(row),
+                Some(first) => assert_eq!(
+                    &row,
+                    first,
+                    "revision colours changed with the {} palette",
+                    theme.label()
+                ),
+            }
+        }
+    }
+
+    /// Selection must follow the theme accent instead of a hard-coded blue.
+    #[test]
+    fn selection_tint_follows_the_accent() {
+        set_kit_theme(Theme::Sepia); // warm accent: red channel leads
+        let sepia = kit_visuals().selection.bg_fill;
+        assert!(sepia.r() > sepia.b(), "Sepia selection should be warm");
+
+        set_kit_theme(Theme::TokyoNight); // cool accent: blue channel leads
+        let tokyo = kit_visuals().selection.bg_fill;
+        assert!(
+            tokyo.b() > tokyo.r(),
+            "Tokyo Night selection should be cool"
+        );
     }
 }

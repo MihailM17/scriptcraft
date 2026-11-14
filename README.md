@@ -8,17 +8,17 @@ production revisions. Open KIT projects, exchange Final Draft files, lock
 pages, issue coloured revisions, and export page-exact PDFs — offline, on
 macOS, Windows and Linux.
 
-> **Status — v0.8.3.** Revision-complete for the core production workflow:
+> **Status — v0.8.4.** Revision-complete for the core production workflow:
 > stable block/scene identity, draft diff and compare, restore-as-copy, omitted
 > scenes, dual dialogue, title-page editor and revision summary (scene counts,
 > CSV and printable PDF). Layout metrics are derived from the bundled font,
 > `.kitsp` saves preserve unknown sidecar rows, and CI runs runtime interaction
-> smoke on macOS/Linux/Windows. v0.8.3 makes Draft Comparison changes-only by
-> default (two blocks of context around each change, clickable gaps, a
-> whole-script toggle and a dedicated identical-drafts state) and indents
-> diff rows with the real screenplay template columns; v0.8.2 redesigned the
-> workspace and v0.8.1 shipped the M9 refactor of settings, export and
-> research.
+> smoke on macOS/Linux/Windows. v0.8.4 adds live spellchecking in English,
+> Bulgarian and Russian (Hunspell dictionaries shipped as removable data files,
+> ALL-CAPS screenplay lines ignored, right-click suggestions, custom and
+> session dictionaries) and eight contrast-tested themes; v0.8.3 made Draft
+> Comparison changes-only with clickable gaps, and v0.8.2 redesigned the
+> workspace.
 >
 > **Distribution note:** macOS builds in this release are ad-hoc signed (no
 > Developer ID/notarisation), Windows packages are unsigned, and auto-update is
@@ -82,9 +82,17 @@ app on day one.
   autosave, and crash recovery from atomic saves.
 - Script, Research, Cards, Statistics and Settings modules, plus a Start page
   with recent projects and a one-click Open Projects Folder button.
-- Light and Midnight themes, picked in Settings ▸ Theme, with the ScriptCraft
-  icon-blue accent. Settings lists only controls that take effect — language
-  and feature stubs that changed nothing are gone.
+- Spellchecking while you type in English (US), Bulgarian and Russian, with
+  Hunspell dictionaries shipped as removable data files. Right-click a flagged
+  word for suggestions, **Add to dictionary** (saved per language) or
+  **Ignore**; scene headings, cues and sound effects in ALL CAPS are skipped so
+  screenplay formatting is not flagged as prose.
+- Eight themes — Midnight, Tokyo Night, Nord, Gruvbox, Rosé Pine, Light, Sepia
+  and High Contrast — picked in Settings ▸ Theme. Every palette is
+  contrast-tested, and revision colours stay industry-standard on all of them
+  (pale marks get an edge so they remain locatable on white and cream pages).
+  Settings lists only controls that take effect — language and feature stubs
+  that changed nothing are gone.
 - FastFormat shortcuts: select one or more blocks and press `Cmd+1`…`Cmd+0`
   (`Ctrl+1`…`Ctrl+0` on Windows/Linux) for scene heading, action, character,
   parenthetical, dialogue, transition, shot, scene characters, lyrics and
@@ -125,7 +133,7 @@ It is not yet:
 - a feature-for-feature Final Draft clone;
 - a collaboration, cloud or account product;
 - a production breakdown/tagging tool;
-- a DOCX/RTF converter or a spellchecker;
+- a DOCX/RTF converter;
 - a plugin platform;
 - fully signed and notarised on every platform. macOS builds are ad-hoc signed
   (no Developer ID certificate in this build pipeline), Windows packages are

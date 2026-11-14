@@ -8,5 +8,6 @@ pub mod research;
 pub mod revision_summary;
 pub mod script_view;
 pub mod settings;
+pub mod spell;
 pub mod theme;
 pub mod title_page;

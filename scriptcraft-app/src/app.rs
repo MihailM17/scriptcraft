@@ -844,6 +844,11 @@ impl ScriptCraftApp {
     }
 
     /// Test hook: set the persisted theme choice.
+    pub fn set_theme(&mut self, theme: Theme) {
+        self.settings.theme = theme;
+    }
+
+    /// Test hook: pick one of the two original palettes by brightness.
     pub fn set_dark_mode(&mut self, dark: bool) {
         self.settings.theme = if dark { Theme::Midnight } else { Theme::Light };
     }
@@ -1190,6 +1195,56 @@ impl ScriptCraftApp {
     #[doc(hidden)]
     pub fn editor2_autocomplete_rows(&self) -> Vec<(String, egui::Rect)> {
         self.editor2.debug_autocomplete.clone()
+    }
+
+    /// Turn spellchecking on (or off) without going through Settings
+    /// (interaction and snapshot tests).
+    #[doc(hidden)]
+    pub fn set_spellcheck_for_test(&mut self, enabled: bool, lang: crate::spell::SpellLang) {
+        self.settings.spellcheck = enabled;
+        self.settings.spell_language = lang;
+        crate::spell::configure(enabled, lang, self.settings.spell_ignore_caps);
+    }
+
+    /// Flags the engine reports for one paragraph (interaction tests).
+    #[doc(hidden)]
+    pub fn spell_flags_for_test(&self, bi: usize, para: usize) -> Vec<crate::spell::Misspelling> {
+        let Some(text) = self
+            .project
+            .as_ref()
+            .and_then(|p| p.blocks.get(bi))
+            .and_then(|b| b.text.split('\n').nth(para))
+        else {
+            return Vec::new();
+        };
+        crate::spell::flags(bi, para, text)
+    }
+
+    /// Suggestion rows of the last painted spellcheck menu (interaction
+    /// tests).
+    #[doc(hidden)]
+    pub fn editor2_spell_menu_rows(&self) -> Vec<(String, egui::Rect)> {
+        self.editor2.debug_spell_menu.clone()
+    }
+
+    /// Screen point at the middle of the character `at` (interaction tests
+    /// right-click through this).
+    #[doc(hidden)]
+    pub fn editor2_char_point(&self, at: PosTuple) -> Option<egui::Pos2> {
+        let zoom = self.last_render_zoom;
+        let scale = crate::script_view::PT_PER_MM * zoom;
+        crate::script_view::char_point(
+            self.doc.as_ref()?,
+            &self.editor2.debug_pages,
+            scale,
+            scriptcraft_layout::place::ROW_MM * scale,
+            scriptcraft_layout::place::MM_PER_CELL * scale,
+            edit::Pos {
+                bi: at.0,
+                para: at.1,
+                ch: at.2,
+            },
+        )
     }
 
     /// Open the read-only compare workspace with the latest revision as the
@@ -4429,12 +4484,22 @@ fn scene_preview(p: &Project, s: &Scene) -> String {
 
 impl eframe::App for ScriptCraftApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Theme: keep the palette/Visuals in sync with the setting.
-        let want_dark = self.settings.theme == Theme::Midnight;
-        set_kit_theme(!want_dark);
-        if ctx.style().visuals.dark_mode != want_dark {
+        // Theme: keep the palette/Visuals in sync with the setting. Comparing
+        // the theme (not just dark/light) matters now that several palettes
+        // share a brightness class.
+        let want = self.settings.theme;
+        if crate::theme::current_theme() != want {
+            set_kit_theme(want);
             apply_theme(ctx);
         }
+        // Spellcheck: push the settings into the engine every frame. Cheap
+        // when nothing changed; the dictionary is parsed lazily on the first
+        // paint that needs it.
+        crate::spell::configure(
+            self.settings.spellcheck,
+            self.settings.spell_language,
+            self.settings.spell_ignore_caps,
+        );
         // Window close (red button, Alt+F4, File ▸ Quit) must not discard
         // unsaved work. Cancel the close, ask, and close again once resolved.
         if ctx.input(|i| i.viewport().close_requested()) && !self.allow_close {
@@ -4824,8 +4889,7 @@ impl ScriptCraftApp {
                         ui.add_space(8.0);
                         let (swatch, _) =
                             ui.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::hover());
-                        ui.painter()
-                            .rect_filled(swatch, 2.0, revision_color(latest.color));
+                        paint_revision(ui.painter(), swatch, latest.color, 2.0);
                         ui.label(
                             egui::RichText::new(format!("{} revision", latest.color.label()))
                                 .small()
@@ -5099,11 +5163,7 @@ impl ScriptCraftApp {
                                         egui::vec2(10.0, 10.0),
                                         egui::Sense::hover(),
                                     );
-                                    ui.painter().rect_filled(
-                                        swatch,
-                                        2.0,
-                                        revision_color(set.color),
-                                    );
+                                    paint_revision(ui.painter(), swatch, set.color, 2.0);
                                     ui.vertical(|ui| {
                                         ui.horizontal(|ui| {
                                             let name = if set.name.is_empty() {
