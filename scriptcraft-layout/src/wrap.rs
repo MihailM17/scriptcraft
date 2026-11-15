@@ -19,10 +19,15 @@
 /// paragraph's char count. Whitespace at a wrap boundary belongs to the line
 /// before it (so a caret at the start of the next line can still be expressed
 /// as the previous line's end).
+///
+/// Display text is the source text: every space the writer typed occupies its
+/// own cell. Only the whitespace run that *causes* a wrap is left out of the
+/// display (it stays inside the previous line's span), and that run is not
+/// selectable because the line break already separates the two rows.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WrappedLine {
-    /// Display text: source words joined by single spaces (hyphen pieces
-    /// rejoin without one). Blank paragraphs render as one empty line.
+    /// Display text: a slice of the source paragraph, one cell per character,
+    /// including every space. Blank paragraphs render as one empty line.
     pub text: String,
     /// Char offset (not bytes) into the paragraph where this line starts.
     pub start: usize,
@@ -31,35 +36,65 @@ pub struct WrappedLine {
     /// Source char offset for every display boundary, `text.chars().count() + 1`
     /// entries.
     ///
-    /// The display collapses runs of whitespace to one space, so display
-    /// columns are **not** `ch - start`. Hit-testing, the caret and selection
-    /// painting all go through this map; `cols[col]` is the source offset of
-    /// display column `col`, and the last entry is the offset after the last
-    /// displayed character (before any trailing wrap whitespace).
+    /// Display columns are source columns — `cols[col] == start + col` — since
+    /// nothing is collapsed. The map stays on the public line type because
+    /// hit-testing, the caret and selection painting read it; the last entry
+    /// is the offset after the last displayed character (before any trailing
+    /// wrap whitespace that the line break swallowed).
     pub cols: Vec<usize>,
 }
 
 /// Wrap one paragraph (no `\n` expected) into display lines.
+///
+/// Spaces are content: a run of spaces is kept and displayed as one cell per
+/// space. The only whitespace that is not displayed is the run at which a
+/// line breaks, because that break is already visible as the row change.
 pub fn wrap_paragraph(para: &str, chars_per_line: usize) -> Vec<WrappedLine> {
     let cpl = chars_per_line.max(1);
     let total = para.chars().count();
-    if para.trim().is_empty() {
+    if total == 0 {
         return vec![WrappedLine {
             text: String::new(),
             start: 0,
-            end: total,
+            end: 0,
             cols: vec![0],
         }];
     }
+    let tokens = tokens_with_spans(para);
     let mut out: Vec<WrappedLine> = Vec::new();
     let mut line = String::new();
     let mut len = 0usize;
     let mut start = 0usize;
     let mut end = 0usize;
-    for (word, w_start, w_end) in words_with_spans(para) {
-        push_word(
-            &mut out, &mut line, &mut len, &mut start, &mut end, word, w_start, w_end, cpl,
+
+    // The paragraph's leading whitespace is content too (a writer can indent
+    // with spaces). Keep it even if the line is already at the limit.
+    if let Some(first) = tokens.first() {
+        if first.ws_start == 0 && first.word_start > 0 {
+            line.extend(para.chars().take(first.word_start));
+            len = first.word_start;
+            end = first.word_start;
+        }
+    }
+
+    for token in &tokens {
+        // The paragraph's leading run was already placed above.
+        let ws = if token.ws_start == 0 && start == 0 {
+            ""
+        } else {
+            token.ws
+        };
+        place_token(
+            &mut out, &mut line, &mut len, &mut start, &mut end, ws, token, cpl,
         );
+    }
+
+    // Trailing whitespace is content too: the writer may be about to type
+    // there, and the caret must be able to sit after it.
+    if end < total {
+        let tail: String = para.chars().skip(end).take(total - end).collect();
+        line.push_str(&tail);
+        end = total;
     }
     out.push(WrappedLine {
         text: line,
@@ -68,44 +103,10 @@ pub fn wrap_paragraph(para: &str, chars_per_line: usize) -> Vec<WrappedLine> {
         cols: Vec::new(),
     });
     for line in &mut out {
-        line.cols = line_cols(para, line.start, line.end, &line.text);
+        let shown = line.text.chars().count();
+        line.cols = (line.start..=line.start + shown).collect();
     }
     out
-}
-
-/// Align a display line with its source span: one source offset per display
-/// boundary. Whitespace runs collapse to a single display space, and a
-/// line-break gap is not displayed at all, so this is the only reliable
-/// column map for clicks, carets and selection.
-fn line_cols(para: &str, start: usize, end: usize, display: &str) -> Vec<usize> {
-    let src: Vec<char> = para.chars().skip(start).take(end - start).collect();
-    let mut cols = Vec::with_capacity(display.chars().count() + 1);
-    cols.push(start);
-    let mut i = 0usize;
-    for dc in display.chars() {
-        if dc == ' ' {
-            // One display space stands for a whole source whitespace run; the
-            // boundary after it is the first char of the next word.
-            while src.get(i).is_some_and(|c| c.is_whitespace()) {
-                i += 1;
-            }
-        } else {
-            // Only a line's first displayed char can have whitespace before
-            // it (indentation); words themselves are contiguous in the source.
-            while src.get(i).is_some_and(|c| c.is_whitespace()) {
-                i += 1;
-            }
-            if src.get(i) == Some(&dc) {
-                i += 1;
-            } else {
-                // Defensive: never run past the span if the display and source
-                // ever disagree (they are built from the same words).
-                i = (i + 1).min(src.len());
-            }
-        }
-        cols.push(start + i);
-    }
-    cols
 }
 
 /// How many grid rows a text (paragraphs split on `\n`) needs in a column of
@@ -121,148 +122,170 @@ pub fn wrap_rows(text: &str, chars_per_line: usize) -> usize {
 /// runs this on every block of every relayout, so it must never allocate.
 pub fn row_count(para: &str, chars_per_line: usize) -> usize {
     let cpl = chars_per_line.max(1);
-    if para.trim().is_empty() {
+    if para.is_empty() {
         return 1;
     }
+    let tokens = tokens_with_spans(para);
     let mut rows = 1usize;
     let mut len = 0usize;
-    for w in para.split_whitespace() {
-        let wl = w.chars().count();
-        let space = usize::from(len > 0);
-        if len + space + wl <= cpl {
-            len += space + wl;
+    if let Some(first) = tokens.first() {
+        if first.ws_start == 0 && first.word_start > 0 {
+            len = first.word_start;
+        }
+    }
+    for (i, tok) in tokens.iter().enumerate() {
+        let wsl = if i == 0 { 0 } else { tok.ws_chars };
+        let wl = tok.word.chars().count();
+        if len + wsl + wl <= cpl {
+            len += wsl + wl;
             continue;
         }
-        let pieces = hyphen_pieces(w);
-        if pieces.len() > 1 {
-            for (k, piece) in pieces.iter().enumerate() {
-                let space = if k == 0 { usize::from(len > 0) } else { 0 };
-                let pl = piece.chars().count();
-                if len + space + pl <= cpl {
-                    len += space + pl;
-                } else {
-                    if len > 0 {
-                        rows += 1;
-                    }
-                    len = pl;
-                }
-            }
-        } else {
+        let pieces = hyphen_pieces(tok.word);
+        if pieces.len() == 1 {
             if len > 0 {
                 rows += 1;
             }
             len = wl;
+            continue;
+        }
+        for (k, piece) in pieces.iter().enumerate() {
+            let lead = if k == 0 { wsl } else { 0 };
+            let pl = piece.chars().count();
+            if len + lead + pl <= cpl {
+                len += lead + pl;
+            } else {
+                if len > 0 {
+                    rows += 1;
+                }
+                len = pl;
+            }
         }
     }
     rows
 }
 
-/// The paragraph's words as `(slice, char_start, char_end)`.
-fn words_with_spans(para: &str) -> Vec<(&str, usize, usize)> {
+/// One word plus the exact whitespace run before it.
+#[derive(Clone, Copy, Debug)]
+struct Token<'a> {
+    ws: &'a str,
+    ws_chars: usize,
+    ws_start: usize,
+    word: &'a str,
+    word_start: usize,
+    word_end: usize,
+}
+
+/// The paragraph's words with the whitespace that precedes each of them.
+fn tokens_with_spans(para: &str) -> Vec<Token<'_>> {
     let chars: Vec<(usize, char)> = para.char_indices().collect();
     let mut out = Vec::new();
     let mut i = 0usize;
     while i < chars.len() {
+        let ws_start = i;
         while i < chars.len() && chars[i].1.is_whitespace() {
             i += 1;
         }
-        let start = i;
+        let ws_end = i;
+        let word_start = i;
         while i < chars.len() && !chars[i].1.is_whitespace() {
             i += 1;
         }
-        if i > start {
-            let bs = chars[start].0;
-            let be = if i < chars.len() {
+        if i > word_start {
+            let ws_bs = chars
+                .get(ws_start)
+                .map(|(b, _)| *b)
+                .unwrap_or_else(|| para.len());
+            let word_bs = chars[word_start].0;
+            let word_be = if i < chars.len() {
                 chars[i].0
             } else {
                 para.len()
             };
-            out.push((&para[bs..be], start, i));
+            out.push(Token {
+                ws: &para[ws_bs..word_bs],
+                ws_chars: ws_end - ws_start,
+                ws_start,
+                word: &para[word_bs..word_be],
+                word_start,
+                word_end: i,
+            });
         }
     }
     out
 }
 
-/// Greedy placement of one word, breaking at internal hyphens (Qt/KIT break
-/// "по-малко" as "по-" + "малко" when the whole word doesn't fit).
-#[allow(clippy::too_many_arguments)]
-fn push_word(
+/// Place one token (its whitespace run plus the word) on the current line,
+/// wrapping first at word boundaries and then at internal hyphens.
+fn place_token(
     out: &mut Vec<WrappedLine>,
     line: &mut String,
     len: &mut usize,
     start: &mut usize,
     end: &mut usize,
-    w: &str,
-    w_start: usize,
-    w_end: usize,
+    ws: &str,
+    tok: &Token<'_>,
     cpl: usize,
 ) {
-    let wl = w.chars().count();
-    let space = usize::from(!line.is_empty());
-    if *len + space + wl <= cpl {
-        if space == 1 {
-            line.push(' ');
-        }
-        line.push_str(w);
-        *len += space + wl;
-        *end = w_end;
+    let wsl = ws.chars().count();
+    let wl = tok.word.chars().count();
+    if *len + wsl + wl <= cpl {
+        line.push_str(ws);
+        line.push_str(tok.word);
+        *len += wsl + wl;
+        *end = tok.word_end;
         return;
     }
-    let pieces = hyphen_pieces(w);
-    if pieces.len() > 1 {
-        let mut off = w_start;
-        for (k, piece) in pieces.iter().enumerate() {
-            if k > 0 {
-                off += pieces[k - 1].chars().count();
-            }
-            // Only the first piece takes a leading space; the rest rejoin
-            // directly after the hyphen ("10-" + "литровите").
-            let space = if k == 0 {
-                usize::from(!line.is_empty())
-            } else {
-                0
-            };
-            let pl = piece.chars().count();
-            if *len + space + pl <= cpl {
-                if space == 1 {
-                    line.push(' ');
-                }
-                line.push_str(piece);
-                *len += space + pl;
-                *end = off + pl;
-            } else {
-                if !line.is_empty() {
-                    *end = off;
-                    out.push(WrappedLine {
-                        text: std::mem::take(line),
-                        start: *start,
-                        end: *end,
-                        cols: Vec::new(),
-                    });
-                    *start = off;
-                }
-                line.push_str(piece);
-                *len = pl;
-                *end = off + pl;
-            }
+    let pieces = hyphen_pieces(tok.word);
+    if pieces.len() == 1 {
+        // No break opportunity: move the word to the next line whole.
+        if *len > 0 {
+            // The whitespace run that forced the break stays inside the
+            // previous line's source span; the row break separates the lines.
+            *end = tok.word_start;
+            out.push(WrappedLine {
+                text: std::mem::take(line),
+                start: *start,
+                end: *end,
+                cols: Vec::new(),
+            });
+            *start = tok.word_start;
         }
+        line.push_str(tok.word);
+        *len = wl;
+        *end = tok.word_end;
         return;
     }
-    // No break opportunity: move the word to the next line whole.
-    if !line.is_empty() {
-        *end = w_start;
-        out.push(WrappedLine {
-            text: std::mem::take(line),
-            start: *start,
-            end: *end,
-            cols: Vec::new(),
-        });
-        *start = w_start;
-        *len = 0;
+    // Break after internal hyphens (Qt/KIT rule), even when the whole word
+    // would fit on a fresh line on its own.
+    let mut off = tok.word_start;
+    for (k, piece) in pieces.iter().enumerate() {
+        if k > 0 {
+            off += pieces[k - 1].chars().count();
+        }
+        let lead = if k == 0 { wsl } else { 0 };
+        let lead_str = if k == 0 { ws } else { "" };
+        let pl = piece.chars().count();
+        if *len + lead + pl <= cpl {
+            line.push_str(lead_str);
+            line.push_str(piece);
+            *len += lead + pl;
+            *end = off + pl;
+        } else {
+            if *len > 0 {
+                *end = off;
+                out.push(WrappedLine {
+                    text: std::mem::take(line),
+                    start: *start,
+                    end: *end,
+                    cols: Vec::new(),
+                });
+                *start = off;
+            }
+            line.push_str(piece);
+            *len = pl;
+            *end = off + pl;
+        }
     }
-    line.push_str(w);
-    *len = wl;
-    *end = w_end;
 }
 
 /// Split a word after each internal hyphen: "по-малко" -> ["по-", "малко"].
@@ -297,15 +320,13 @@ pub fn wrap_lines(text: &str, chars_per_line: usize) -> Vec<String> {
 mod tests {
     use super::*;
 
-    /// Join a span's source chars the way the display text is produced.
-    fn joined_source(para: &str, start: usize, end: usize) -> String {
+    /// The display must be the source span itself, minus only the whitespace
+    /// run that the line break swallowed at the end.
+    fn joined_source<'a>(para: &'a str, start: usize, end: usize) -> String {
         para.chars()
             .skip(start)
             .take(end.saturating_sub(start))
-            .collect::<String>()
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ")
+            .collect()
     }
 
     fn assert_tiles(para: &str, cpl: usize) {
@@ -317,38 +338,19 @@ mod tests {
             assert_eq!(w[0].end, w[1].start, "gap/overlap in {para:?}");
         }
         for l in &lines {
-            assert_eq!(l.text, joined_source(para, l.start, l.end), "para {para:?}");
-            // Column map: one entry per display boundary, monotonic, inside the
-            // span, and each display char maps back to its source char (with
-            // whitespace runs collapsed into the single space).
-            let src: Vec<char> = para.chars().collect();
-            let disp: Vec<char> = l.text.chars().collect();
-            assert_eq!(l.cols.len(), disp.len() + 1, "para {para:?} line {l:?}");
-            assert_eq!(l.cols[0], l.start, "para {para:?} line {l:?}");
+            let span = joined_source(para, l.start, l.end);
+            let shown: String = span.chars().take(l.text.chars().count()).collect();
+            assert_eq!(l.text, shown, "para {para:?}");
+            let swallowed: String = span.chars().skip(l.text.chars().count()).collect();
             assert!(
-                l.cols.windows(2).all(|w| w[0] <= w[1]),
-                "para {para:?} line {l:?}"
+                swallowed.chars().all(char::is_whitespace),
+                "only a wrap gap may be undisplayed in {para:?}: {l:?}"
             );
+            // Display columns are source columns: nothing collapses.
+            let disp = l.text.chars().count();
+            let expect: Vec<usize> = (l.start..=l.start + disp).collect();
+            assert_eq!(l.cols, expect, "para {para:?} line {l:?}");
             assert!(*l.cols.last().unwrap() <= l.end, "para {para:?} line {l:?}");
-            for (k, dc) in disp.iter().enumerate() {
-                let (a, b) = (l.cols[k], l.cols[k + 1]);
-                if *dc == ' ' {
-                    assert!(
-                        src[a..b].iter().all(|c| c.is_whitespace()),
-                        "space must cover a source whitespace run in {para:?}: {l:?}"
-                    );
-                } else {
-                    assert_eq!(
-                        src[b - 1],
-                        *dc,
-                        "char must map to itself in {para:?}: {l:?}"
-                    );
-                    assert!(
-                        src[a..b - 1].iter().all(|c| c.is_whitespace()),
-                        "only indentation may precede the first char in {para:?}: {l:?}"
-                    );
-                }
-            }
         }
     }
 
@@ -380,26 +382,40 @@ mod tests {
     }
 
     #[test]
-    fn cols_map_display_columns_across_collapsed_whitespace() {
-        // Two source spaces render as one cell; a click on "cd" must still map
-        // to the source chars, not to `start + display_column`.
+    fn every_space_keeps_its_own_cell() {
+        // A writer typed two spaces after the period; both must survive, and
+        // the map must be the identity so a click on "cd" lands on "c".
         let lines = wrap_paragraph("ab  cd", 10);
         assert_eq!(lines.len(), 1);
-        assert_eq!(lines[0].text, "ab cd");
-        assert_eq!(lines[0].cols, vec![0, 1, 2, 4, 5, 6]);
+        assert_eq!(lines[0].text, "ab  cd");
+        assert_eq!(lines[0].cols, vec![0, 1, 2, 3, 4, 5, 6]);
 
-        // Leading indentation is dropped from the display and the map.
+        // Leading spaces are content, not indentation to be dropped.
         let lines = wrap_paragraph("   abc", 10);
-        assert_eq!(lines[0].text, "abc");
-        assert_eq!(lines[0].cols, vec![0, 4, 5, 6]);
+        assert_eq!(lines[0].text, "   abc");
+        assert_eq!(lines[0].cols, vec![0, 1, 2, 3, 4, 5, 6]);
 
-        // The wrap gap belongs to the previous span but its caret maps to the
-        // end of the displayed text, never into the invisible gap.
+        // Trailing spaces stay reachable by the caret.
+        let lines = wrap_paragraph("abc   ", 10);
+        assert_eq!(lines[0].text, "abc   ");
+        assert_eq!(lines[0].cols, vec![0, 1, 2, 3, 4, 5, 6]);
+
+        // Only the run that causes a wrap is swallowed by the row break.
         let lines = wrap_paragraph("aaa bbb", 3);
         assert_eq!(lines[0].text, "aaa");
         assert_eq!(lines[0].cols, vec![0, 1, 2, 3]);
         assert_eq!(lines[1].text, "bbb");
         assert_eq!(lines[1].cols, vec![4, 5, 6, 7]);
+
+        // A multi-space run that fits is kept whole; when it cannot fit, the
+        // break swallows it exactly like a single space.
+        let lines = wrap_paragraph("aa    bb", 8);
+        assert_eq!(lines[0].text, "aa    bb");
+        let lines = wrap_paragraph("aaaa    bb", 9);
+        assert_eq!(lines[0].text, "aaaa");
+        assert_eq!(lines[1].text, "bb");
+        assert_eq!((lines[0].start, lines[0].end), (0, 8));
+        assert_eq!((lines[1].start, lines[1].end), (8, 10));
     }
 
     #[test]
@@ -410,12 +426,15 @@ mod tests {
             (empty[0].text.as_str(), empty[0].start, empty[0].end),
             ("", 0, 0)
         );
+        // A line holding only spaces still carries them, so the caret can sit
+        // at the end of the run.
         let spaces = wrap_paragraph("   ", 10);
         assert_eq!(spaces.len(), 1);
         assert_eq!(
             (spaces[0].text.as_str(), spaces[0].start, spaces[0].end),
-            ("", 0, 3)
+            ("   ", 0, 3)
         );
+        assert_eq!(spaces[0].cols, vec![0, 1, 2, 3]);
     }
 
     #[test]
@@ -429,6 +448,9 @@ mod tests {
             "единственадумабезинтервали",
             "x",
             "край-",
+            "две  интервала   тук",
+            "   ",
+            "a\t\tb",
         ] {
             for cpl in [1usize, 2, 3, 5, 7, 10, 18, 28, 58] {
                 assert_tiles(para, cpl);
@@ -462,6 +484,11 @@ mod tests {
             "край-",
             "",
             "   ",
+            "ab  cd",
+            "aaaa    bb",
+            "   leading",
+            "trailing   ",
+            "a\t\tb",
         ] {
             for cpl in [1usize, 2, 3, 5, 7, 10, 18, 24, 28, 35, 58] {
                 assert_eq!(

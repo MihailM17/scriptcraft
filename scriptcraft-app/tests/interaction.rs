@@ -2838,13 +2838,14 @@ fn drag_selection_starts_at_the_press_not_after_the_threshold() {
 #[test]
 fn space_after_a_click_lands_on_the_clicked_character() {
     let mut h = focused_harness();
-    // Four source spaces collapse to one screen cell; clicking past them must
-    // still map to the visible word, not into the invisible run.
+    // Spaces are real cells now: clicking the third space of the run must put
+    // the caret on it, and typing adds one more space there instead of the
+    // keystroke vanishing into a collapsed gap.
     let bi = action_paragraph(&mut h, "alpha    beta gamma");
     let point = h
         .state()
         .editor2_display_point((bi, 0, 7))
-        .expect("beta must be on the visible page");
+        .expect("the space run must be on the visible page");
 
     click_at(&mut h, point);
     h.input_mut().events.push(egui::Event::Text(" ".into()));
@@ -2852,7 +2853,30 @@ fn space_after_a_click_lands_on_the_clicked_character() {
 
     assert_eq!(
         h.state().block_text(bi).as_deref(),
-        Some("alpha    b eta gamma"),
-        "the space must split the clicked word, not vanish into the gap"
+        Some("alpha     beta gamma"),
+        "the typed space must be inserted where the caret landed"
     );
+}
+
+#[test]
+fn typing_many_spaces_keeps_every_one() {
+    // Like any text editor: four spaces tapped at the end of a line are four
+    // characters, and the caret ends past all of them.
+    let mut h = focused_harness();
+    let bi = action_paragraph(&mut h, "ab");
+    let point = h
+        .state()
+        .editor2_display_point((bi, 0, 0))
+        .expect("the start of the line must be on the page");
+    click_at(&mut h, point);
+    for _ in 0..4 {
+        h.input_mut().events.push(egui::Event::Text(" ".into()));
+        h.run();
+    }
+    assert_eq!(h.state().block_text(bi).as_deref(), Some("    ab"));
+    let (_, focus) = h
+        .state()
+        .editor2_selection()
+        .expect("typing must leave a caret");
+    assert_eq!(focus, (bi, 0, 4));
 }

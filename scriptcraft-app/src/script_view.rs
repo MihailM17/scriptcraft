@@ -2992,9 +2992,10 @@ mod tests {
     }
 
     #[test]
-    fn hit_test_maps_through_collapsed_whitespace() {
-        // Four source spaces render as one screen cell. Clicks on the visible
-        // word must land on its characters, not `start + display_column`.
+    fn hit_test_maps_every_space_to_its_own_cell() {
+        // Four source spaces are four real cells: the paragraph a writer
+        // typed renders exactly as typed, so display columns are source
+        // columns and a click on "beta" lands on its "b".
         let blocks = vec![ScriptBlock::new(
             ElementType::Action,
             "alpha    beta gamma".into(),
@@ -3009,7 +3010,7 @@ mod tests {
             page_size_pt(1.0),
         )];
         let line = body_lines(&doc)[0];
-        assert_eq!(line.text, "alpha beta gamma");
+        assert_eq!(line.text, "alpha    beta gamma");
         let origin = line_origin_x(rects[0], line, scale, cell_w);
         let y = rects[0].top() + PAD_T_MM * scale + line.row as f32 * row_h + row_h * 0.5;
         let click = |col: f32| {
@@ -3024,17 +3025,18 @@ mod tests {
             .expect("click hits the line")
         };
 
-        // Display column 6 is 'b'; the source offset is 9.
-        assert_eq!(click(6.1).ch, 9);
-        // Display column 7 is 'e'; the source offset is 10.
-        assert_eq!(click(7.1).ch, 10);
-        // Display column 11 is 'g'; the source offset is 14.
-        assert_eq!(click(11.1).ch, 14);
+        // Display column 6 is the third space; source offset 6.
+        assert_eq!(click(6.1).ch, 6);
+        // Display column 9 is 'b'; source offset 9.
+        assert_eq!(click(9.1).ch, 9);
+        // Display column 14 is 'g'; source offset 14.
+        assert_eq!(click(14.1).ch, 14);
+        // The empty cell after the last char is the paragraph end.
+        assert_eq!(click(19.1).ch, 19);
 
-        // Carets inside the collapsed run sit on its single display space;
-        // the wrap gap maps to the line end, never into invisible chars.
-        assert_eq!(display_col(line, 7), 5);
-        assert_eq!(display_col(line, 13), 10);
+        // Caret geometry is the identity too: every space is reachable.
+        assert_eq!(display_col(line, 7), 7);
+        assert_eq!(display_col(line, 13), 13);
         assert_eq!(line_end_ch(line), Some(19));
 
         // Selection painting uses the same map.
@@ -3052,7 +3054,7 @@ mod tests {
                     ch: 13
                 },
             ),
-            Some((6, 10))
+            Some((9, 13))
         );
     }
 
