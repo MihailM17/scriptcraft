@@ -18,10 +18,10 @@ Status legend: `[ ]` to do `[-]` in progress `[x]` done `[!]` blocked
 
 | Field | Value |
 |---|---|
-| Date | 2026-11-14 |
+| Date | 2026-11-15 |
 | Project | ScriptCraft — free, open-source, revision-first screenwriting studio |
 | Repo | `/Users/mihailmihaylov/Documents/Dev_work/scriptcraft` |
-| Branch / commit | `main` at v0.8.4; tags `v0.7.0` at `9ce2e0e`, `v0.7.1` at `d8b17de`, `v0.7.2` at `8b75f9a`, `v0.8.0` at `0052bba`, `v0.8.1` at `0fa598e`, `v0.8.2` at `6bf1983`, `v0.8.3` at `69c0329`, `v0.8.4` at `b178e00`; M8/M9 progress at `a44ace0`, `1fe8c21`, `9d791a7`, `3b61227`; release prep at `d36ae4b`; assets/checksums at `aaad983`; M9 settings/export at `b284a78`; M9 research at `b9f9c21`. |
+| Branch / commit | `main` at v0.8.4; tags `v0.7.0` at `9ce2e0e`, `v0.7.1` at `d8b17de`, `v0.7.2` at `8b75f9a`, `v0.8.0` at `0052bba`, `v0.8.1` at `0fa598e`, `v0.8.2` at `6bf1983`, `v0.8.3` at `69c0329`, `v0.8.4` at `b178e00`; M8/M9 progress at `a44ace0`, `1fe8c21`, `9d791a7`, `3b61227`; release prep at `d36ae4b`; assets/checksums at `aaad983`; M9 settings/export at `b284a78`; M9 research at `b9f9c21`; editor-input fixes at `6732bd0`. |
 | Rust workspace | `scriptcraft-core`, `scriptcraft-app`, `scriptcraft-layout` (`Cargo.toml`, resolver 2) |
 | App crate version | `scriptcraft-app 0.8.4`; `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
 | Distribution | **v0.8.4 released 2026-11-14** — <https://github.com/MihailM17/scriptcraft/releases/tag/v0.8.4>. Assets: macOS arm64 DMG (ad-hoc signed, not notarised), Windows x64 zip and Linux x86_64 tar.gz from Packages run `43589937336`, each with `.sha256`. No auto-update. |
