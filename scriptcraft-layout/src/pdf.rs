@@ -64,7 +64,13 @@ pub const REVISION_BAR_W_MM: f32 = 3.0;
 const TITLE_DY: f32 = 1.4;
 const TITLE_VALUE_DY: f32 = 1.5;
 const TITLE_CONTACT_DY: f32 = 1.8;
-const TITLE_YEAR_DY: f32 = 2.6;
+/// Bottom-anchored title-page rows (mm above the page edge). KIT's slot grid
+/// puts the draft date at a negative height on A4, which clipped it; these
+/// keep the date and the REVISED block on the page in both the preview and
+/// the exported PDF.
+const TITLE_YEAR_Y_MM: f32 = 22.0;
+const TITLE_REVISED_Y_MM: f32 = 40.0;
+const TITLE_REVISED_STEP_MM: f32 = 5.0;
 
 /// Geometry the title-page editor preview needs to paint the same page as
 /// the PDF exporter. Sharing it keeps the preview from drifting.
@@ -90,7 +96,14 @@ pub const TITLE_PAGE_METRICS: TitlePageMetrics = TitlePageMetrics {
 };
 
 /// Baseline of title-page line `index` measured from the page bottom (mm).
+///
+/// Lines with an explicit `y_from_bottom_mm` anchor (the draft date and the
+/// REVISED block) ignore the slot grid: the grid's slot 57 sits at a negative
+/// height on A4, which is why the draft date used to fall off the page.
 pub fn title_page_line_y_mm(index: usize, line: &PrintLine) -> f32 {
+    if let Some(y) = line.y_from_bottom_mm {
+        return y;
+    }
     PAGE_H - MARGIN_T - BASELINE_OFF - index as f32 * PITCH_MM - line.dy_mm
 }
 
@@ -146,6 +159,11 @@ pub struct PrintLine {
     pub revision: Option<RevisionColor>,
     /// Header/footer text: drawn in the page margin, never advances the body.
     pub margin: Option<MarginBand>,
+    /// Title-page lines that sit at a fixed height above the page bottom
+    /// instead of a grid slot. The title-page grid runs out of page before
+    /// KIT's draft-date slot, so the date and the REVISED block are anchored
+    /// to the bottom edge explicitly (see [`title_page_line_y_mm`]).
+    pub y_from_bottom_mm: Option<f32>,
 }
 
 impl PrintLine {
@@ -161,6 +179,7 @@ impl PrintLine {
             share_row: false,
             revision: None,
             margin: None,
+            y_from_bottom_mm: None,
         }
     }
 
@@ -608,6 +627,7 @@ pub fn layout_title_page_with_latest(
             share_row: false,
             revision: None,
             margin: None,
+            y_from_bottom_mm: None,
         }
     }
     let max_chars = (TEXT_W_MM / CHAR_MM) as usize;
@@ -660,25 +680,31 @@ pub fn layout_title_page_with_latest(
     while lines.len() < year_slot {
         lines.push(PrintLine::blank());
     }
-    lines.push(centered(
-        meta.year.trim().to_string(),
-        false,
-        false,
-        TITLE_YEAR_DY,
-    ));
+    // The draft date keeps KIT's slot index (so the line list shape is
+    // unchanged) but is painted at a fixed height above the page bottom: slot
+    // 57 on the 4.754 mm pitch is already below the paper edge.
+    let mut year = centered(meta.year.trim().to_string(), false, false, 0.0);
+    year.y_from_bottom_mm = Some(TITLE_YEAR_Y_MM);
+    lines.push(year);
     if let Some(set) = latest {
         let revised_slot = lines.len().max(60);
         while lines.len() < revised_slot {
             lines.push(PrintLine::blank());
         }
-        lines.push(centered("REVISED".to_string(), true, false, TITLE_DY));
+        let mut heading = centered("REVISED".to_string(), true, false, 0.0);
+        heading.y_from_bottom_mm = Some(TITLE_REVISED_Y_MM);
+        lines.push(heading);
         let name = set.name.trim();
         if !name.is_empty() {
-            lines.push(centered(name.to_string(), false, false, TITLE_VALUE_DY));
+            let mut line = centered(name.to_string(), false, false, 0.0);
+            line.y_from_bottom_mm = Some(TITLE_REVISED_Y_MM - TITLE_REVISED_STEP_MM);
+            lines.push(line);
         }
         let date = revision_date(set);
         if !date.is_empty() {
-            lines.push(centered(date, false, false, TITLE_VALUE_DY));
+            let mut line = centered(date, false, false, 0.0);
+            line.y_from_bottom_mm = Some(TITLE_REVISED_Y_MM - 2.0 * TITLE_REVISED_STEP_MM);
+            lines.push(line);
         }
     }
     lines
@@ -878,7 +904,7 @@ pub fn to_pdf_bytes_with_marks_and_latest(
                 }
                 continue;
             }
-            let yy = y - line.dy_mm;
+            let yy = line.y_from_bottom_mm.unwrap_or(y - line.dy_mm);
             if let Some(revision) = line.revision {
                 let (r, g, b) = revision.rgb();
                 ops.push(Op::SetFillColor {
@@ -1545,6 +1571,67 @@ mod tests {
         assert_eq!(lines[61].text, "Blue Revision");
         assert_eq!(lines[62].text, "21.10.2026");
         assert!(lines[60].bold);
+    }
+
+    /// Everything on the title page must print inside the paper. The draft
+    /// date used to sit at slot 57 on the 4.754 mm pitch, which is -2.3 mm —
+    /// below the bottom edge — and the REVISED block was further out still.
+    #[test]
+    fn title_page_lines_all_sit_on_the_page() {
+        let set = RevisionSet {
+            color: RevisionColor::Blue,
+            name: "Blue Revision".into(),
+            started: "21.10.2026 16:03".into(),
+            pages: 342,
+            baseline: vec![],
+        };
+        for latest in [None, Some(&set)] {
+            let lines = layout_title_page_with_latest(&sample_meta(), latest);
+            for (i, line) in lines.iter().enumerate() {
+                if line.text.is_empty() {
+                    continue;
+                }
+                let y = title_page_line_y_mm(i, line);
+                assert!(
+                    y > 0.0 && y < PAGE_H,
+                    "title line {i} {:?} prints at {y} mm, off the page",
+                    line.text
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn draft_date_is_bottom_anchored_not_on_the_slot_grid() {
+        let lines = layout_title_page(&sample_meta());
+        let year = &lines[57];
+        assert_eq!(year.text, "2026");
+        assert_eq!(year.y_from_bottom_mm, Some(TITLE_YEAR_Y_MM));
+        assert_eq!(title_page_line_y_mm(57, year), TITLE_YEAR_Y_MM);
+        // The slot grid would have placed it below the paper edge.
+        assert!(PAGE_H - MARGIN_T - BASELINE_OFF - 57.0 * PITCH_MM < 0.0);
+    }
+
+    #[test]
+    fn revised_block_is_bottom_anchored_and_ordered() {
+        let set = RevisionSet {
+            color: RevisionColor::Blue,
+            name: "Blue Revision".into(),
+            started: "21.10.2026 16:03".into(),
+            pages: 342,
+            baseline: vec![],
+        };
+        let lines = layout_title_page_with_latest(&sample_meta(), Some(&set));
+        let y = |i: usize| title_page_line_y_mm(i, &lines[i]);
+        assert_eq!(lines[60].text, "REVISED");
+        assert_eq!(lines[61].text, "Blue Revision");
+        assert_eq!(lines[62].text, "21.10.2026");
+        assert!(
+            y(60) > y(61) && y(61) > y(62),
+            "REVISED, name, date stack down"
+        );
+        assert!(y(62) > 0.0, "date stays on the page");
+        assert!(y(60) > y(57), "REVISED sits above the draft date");
     }
 
     #[test]
