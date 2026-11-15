@@ -28,6 +28,15 @@ pub struct WrappedLine {
     pub start: usize,
     /// Char offset one past the last source char covered by this line.
     pub end: usize,
+    /// Source char offset for every display boundary, `text.chars().count() + 1`
+    /// entries.
+    ///
+    /// The display collapses runs of whitespace to one space, so display
+    /// columns are **not** `ch - start`. Hit-testing, the caret and selection
+    /// painting all go through this map; `cols[col]` is the source offset of
+    /// display column `col`, and the last entry is the offset after the last
+    /// displayed character (before any trailing wrap whitespace).
+    pub cols: Vec<usize>,
 }
 
 /// Wrap one paragraph (no `\n` expected) into display lines.
@@ -39,6 +48,7 @@ pub fn wrap_paragraph(para: &str, chars_per_line: usize) -> Vec<WrappedLine> {
             text: String::new(),
             start: 0,
             end: total,
+            cols: vec![0],
         }];
     }
     let mut out: Vec<WrappedLine> = Vec::new();
@@ -55,8 +65,47 @@ pub fn wrap_paragraph(para: &str, chars_per_line: usize) -> Vec<WrappedLine> {
         text: line,
         start,
         end: total,
+        cols: Vec::new(),
     });
+    for line in &mut out {
+        line.cols = line_cols(para, line.start, line.end, &line.text);
+    }
     out
+}
+
+/// Align a display line with its source span: one source offset per display
+/// boundary. Whitespace runs collapse to a single display space, and a
+/// line-break gap is not displayed at all, so this is the only reliable
+/// column map for clicks, carets and selection.
+fn line_cols(para: &str, start: usize, end: usize, display: &str) -> Vec<usize> {
+    let src: Vec<char> = para.chars().skip(start).take(end - start).collect();
+    let mut cols = Vec::with_capacity(display.chars().count() + 1);
+    cols.push(start);
+    let mut i = 0usize;
+    for dc in display.chars() {
+        if dc == ' ' {
+            // One display space stands for a whole source whitespace run; the
+            // boundary after it is the first char of the next word.
+            while src.get(i).is_some_and(|c| c.is_whitespace()) {
+                i += 1;
+            }
+        } else {
+            // Only a line's first displayed char can have whitespace before
+            // it (indentation); words themselves are contiguous in the source.
+            while src.get(i).is_some_and(|c| c.is_whitespace()) {
+                i += 1;
+            }
+            if src.get(i) == Some(&dc) {
+                i += 1;
+            } else {
+                // Defensive: never run past the span if the display and source
+                // ever disagree (they are built from the same words).
+                i = (i + 1).min(src.len());
+            }
+        }
+        cols.push(start + i);
+    }
+    cols
 }
 
 /// How many grid rows a text (paragraphs split on `\n`) needs in a column of
@@ -188,6 +237,7 @@ fn push_word(
                         text: std::mem::take(line),
                         start: *start,
                         end: *end,
+                        cols: Vec::new(),
                     });
                     *start = off;
                 }
@@ -205,6 +255,7 @@ fn push_word(
             text: std::mem::take(line),
             start: *start,
             end: *end,
+            cols: Vec::new(),
         });
         *start = w_start;
         *len = 0;
@@ -267,6 +318,37 @@ mod tests {
         }
         for l in &lines {
             assert_eq!(l.text, joined_source(para, l.start, l.end), "para {para:?}");
+            // Column map: one entry per display boundary, monotonic, inside the
+            // span, and each display char maps back to its source char (with
+            // whitespace runs collapsed into the single space).
+            let src: Vec<char> = para.chars().collect();
+            let disp: Vec<char> = l.text.chars().collect();
+            assert_eq!(l.cols.len(), disp.len() + 1, "para {para:?} line {l:?}");
+            assert_eq!(l.cols[0], l.start, "para {para:?} line {l:?}");
+            assert!(
+                l.cols.windows(2).all(|w| w[0] <= w[1]),
+                "para {para:?} line {l:?}"
+            );
+            assert!(*l.cols.last().unwrap() <= l.end, "para {para:?} line {l:?}");
+            for (k, dc) in disp.iter().enumerate() {
+                let (a, b) = (l.cols[k], l.cols[k + 1]);
+                if *dc == ' ' {
+                    assert!(
+                        src[a..b].iter().all(|c| c.is_whitespace()),
+                        "space must cover a source whitespace run in {para:?}: {l:?}"
+                    );
+                } else {
+                    assert_eq!(
+                        src[b - 1],
+                        *dc,
+                        "char must map to itself in {para:?}: {l:?}"
+                    );
+                    assert!(
+                        src[a..b - 1].iter().all(|c| c.is_whitespace()),
+                        "only indentation may precede the first char in {para:?}: {l:?}"
+                    );
+                }
+            }
         }
     }
 
@@ -295,6 +377,29 @@ mod tests {
             text(wrap_paragraph("aaaaaaaa 10-литрови", 10)),
             vec!["aaaaaaaa", "10-литрови"]
         );
+    }
+
+    #[test]
+    fn cols_map_display_columns_across_collapsed_whitespace() {
+        // Two source spaces render as one cell; a click on "cd" must still map
+        // to the source chars, not to `start + display_column`.
+        let lines = wrap_paragraph("ab  cd", 10);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].text, "ab cd");
+        assert_eq!(lines[0].cols, vec![0, 1, 2, 4, 5, 6]);
+
+        // Leading indentation is dropped from the display and the map.
+        let lines = wrap_paragraph("   abc", 10);
+        assert_eq!(lines[0].text, "abc");
+        assert_eq!(lines[0].cols, vec![0, 4, 5, 6]);
+
+        // The wrap gap belongs to the previous span but its caret maps to the
+        // end of the displayed text, never into the invisible gap.
+        let lines = wrap_paragraph("aaa bbb", 3);
+        assert_eq!(lines[0].text, "aaa");
+        assert_eq!(lines[0].cols, vec![0, 1, 2, 3]);
+        assert_eq!(lines[1].text, "bbb");
+        assert_eq!(lines[1].cols, vec![4, 5, 6, 7]);
     }
 
     #[test]

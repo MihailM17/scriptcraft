@@ -38,6 +38,8 @@ pub struct DualLine {
     /// Horizontal anchor in document millimetres from the text-column edge.
     pub x_mm: f32,
     pub span: Option<SourceSpan>,
+    /// Source offset per display boundary (see `wrap::WrappedLine::cols`).
+    pub cols: Vec<usize>,
     pub bold: bool,
     pub italic: bool,
 }
@@ -120,6 +122,7 @@ fn column_lines(
                         start: line.start,
                         end: line.end,
                     }),
+                    cols: line.cols,
                     bold,
                     italic,
                 });

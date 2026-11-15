@@ -96,6 +96,9 @@ pub struct PlacedLine {
     pub right_aligned: bool,
     /// `None` for synthetic rows ((MORE), (CONT'D), scene numbers, OMITTED).
     pub span: Option<SourceSpan>,
+    /// Source offset per display boundary (`text.chars().count() + 1` entries),
+    /// copied from the wrapped line. Empty for synthetic rows.
+    pub cols: Vec<usize>,
     /// Original block whose revision colour paints this row. Real body rows
     /// carry their own index; an `OMITTED` row carries its scene heading's.
     pub source_bi: Option<usize>,
@@ -406,6 +409,7 @@ fn layout_page(
                             italic: false,
                             right_aligned: false,
                             span: None,
+                            cols: Vec::new(),
                             source_bi: revision_bi,
                         });
                     }
@@ -433,6 +437,7 @@ fn layout_page(
                         italic: cell.italic,
                         right_aligned: false,
                         span,
+                        cols: cell.cols.clone(),
                         source_bi: revision_bi,
                     });
                 }
@@ -450,6 +455,7 @@ fn layout_page(
                         italic: false,
                         right_aligned: true,
                         span: None,
+                        cols: Vec::new(),
                         source_bi: revision_source(view, cue_bi),
                     });
                 }
@@ -464,6 +470,7 @@ fn layout_page(
                         italic: false,
                         right_aligned: true,
                         span: None,
+                        cols: Vec::new(),
                         source_bi: revision_source(view, cue_bi),
                     });
                 }
@@ -497,6 +504,7 @@ fn layout_page(
                     italic: false,
                     right_aligned: false,
                     span: None,
+                    cols: Vec::new(),
                     source_bi: revision_bi,
                 });
             }
@@ -533,6 +541,7 @@ fn layout_page(
                             end: wl.end,
                         })
                     },
+                    cols: wl.cols,
                     source_bi: revision_bi,
                 });
                 row += 1;
@@ -548,6 +557,7 @@ fn layout_page(
                 italic: false,
                 right_aligned: true,
                 span: None,
+                cols: Vec::new(),
                 source_bi: revision_bi,
             });
             row += 1;
@@ -564,6 +574,7 @@ fn layout_page(
                         italic: false,
                         right_aligned: true,
                         span: None,
+                        cols: Vec::new(),
                         source_bi: revision_bi,
                     });
                 }

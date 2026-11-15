@@ -148,6 +148,11 @@ pub struct EditState {
     pub spell_menu: Option<SpellMenu>,
     /// Caret screen rect from the last painted frame (popup anchor, IME).
     pub caret_rect: Option<egui::Rect>,
+    /// Screen position where the primary button went down over the page. A
+    /// click is delivered on release, when egui has already forgotten the
+    /// press origin, so the widget remembers it to place the caret exactly
+    /// where the user pressed (and not where the pointer drifted to).
+    pub press_pos: Option<egui::Pos2>,
     /// Zoom and scroll state of the previous frame, used to keep the
     /// document point under the pointer (or the viewport center) fixed
     /// while zooming.
@@ -351,26 +356,54 @@ pub fn script_view(
         } else {
             Vec::new()
         };
+        // Remember where a press landed: `clicked()` arrives on release, when
+        // egui has cleared `press_origin()`, and a drag only reports the point
+        // after the threshold has been crossed.
+        if ui.input(|i| i.pointer.primary_pressed()) && resp.hovered() {
+            state.press_pos = ui.input(|i| i.pointer.interact_pos());
+        }
+
         let pointer_work = resp.clicked() || resp.drag_started() || resp.dragged();
         let mut text_edited = false;
         let mut caret_moved = false;
         if pointer_work || !events.is_empty() {
             let mut ed = Editor::with_options(blocks, state.selection, options);
+            let triple = resp.triple_clicked();
+            let double = resp.double_clicked();
             if resp.clicked() {
                 resp.request_focus();
                 caret_moved = true;
-                if let Some(p) = resp.interact_pointer_pos() {
+                let anchor = state.press_pos.or_else(|| resp.interact_pointer_pos());
+                if let Some(p) = anchor {
                     if let Some(at) = hit_test(doc, &page_rects, scale, row_h, cell_w, p) {
-                        ed.set_caret(at);
+                        if triple {
+                            // Whole paragraph, like every text editor.
+                            let len = paragraph_len(ed.blocks(), at.bi, at.para);
+                            ed.set_selection(Pos { ch: 0, ..at }, Pos { ch: len, ..at });
+                        } else if double {
+                            // The word under the pointer; a click on its last
+                            // half lands just past the word, so look one char
+                            // back before giving up.
+                            match word_bounds_at(ed.blocks(), at) {
+                                Some((start, end)) => {
+                                    ed.set_selection(Pos { ch: start, ..at }, Pos { ch: end, ..at })
+                                }
+                                None => ed.set_caret(at),
+                            }
+                        } else {
+                            ed.set_caret(at);
+                        }
                     }
                 }
+                state.press_pos = None;
             }
             if resp.drag_started() {
                 resp.request_focus();
                 caret_moved = true;
-                let origin = resp
-                    .interact_pointer_pos()
-                    .or_else(|| ui.input(|i| i.pointer.press_origin()));
+                let origin = state
+                    .press_pos
+                    .or_else(|| ui.input(|i| i.pointer.press_origin()))
+                    .or_else(|| resp.interact_pointer_pos());
                 if let Some(p) = origin {
                     if let Some(at) = hit_test(doc, &page_rects, scale, row_h, cell_w, p) {
                         ed.set_selection(at, at);
@@ -911,15 +944,16 @@ impl Editor {
         (a != f).then_some((a, f))
     }
 
-    /// Apply commands to the working copy, keeping only the ones that were
-    /// valid; the same list is what the app records as one user step.
-    fn press(&mut self, cmds: Vec<EditCommand>) {
+    /// Apply commands to the widget's copy, recording only the ones that took.
+    /// Returns whether every command applied.
+    fn press(&mut self, cmds: Vec<EditCommand>) -> bool {
         for cmd in cmds {
             match cmd.clone().apply(&mut self.work) {
                 Ok(_) => self.cmds.push(cmd),
-                Err(_) => break,
+                Err(_) => return false,
             }
         }
+        true
     }
 
     /// Delete the selection (if any), returning the collapsed caret position.
@@ -984,17 +1018,23 @@ impl Editor {
         }
         if rewritten {
             let caret = pos_at_char(&new_text, at.bi, caret_abs);
-            self.press(vec![EditCommand::SetText {
+            if self.press(vec![EditCommand::SetText {
                 bi: at.bi,
                 text: new_text,
-            }]);
-            self.sel = Some(Selection::caret(caret));
-        } else {
-            self.press(vec![EditCommand::InsertText {
-                at,
-                text: typed.clone(),
-            }]);
+            }]) {
+                self.sel = Some(Selection::caret(caret));
+            } else {
+                self.sel = Some(Selection::caret(at));
+            }
+        } else if self.press(vec![EditCommand::InsertText {
+            at,
+            text: typed.clone(),
+        }]) {
             self.sel = Some(Selection::caret(advance_pos(at, &typed)));
+        } else {
+            // The command was rejected: leave the caret where it was instead
+            // of letting it slide forward with no text behind it.
+            self.sel = Some(Selection::caret(at));
         }
         self.scroll = true;
     }
@@ -1239,10 +1279,9 @@ fn key_action(
                 } else {
                     (idx + 1 < lines.len()).then_some(idx + 1)
                 }?;
-                let from = lines[idx].span?;
                 let span = lines[to].span?;
-                let col = caret.ch.saturating_sub(from.start);
-                let ch = span.start + col.min(span.end - span.start);
+                let col = display_col(lines[idx], caret.ch);
+                let ch = source_at_col(lines[to], col)?;
                 Some(Pos {
                     bi: span.bi,
                     para: span.para,
@@ -1268,14 +1307,15 @@ fn key_action(
         Key::Home | Key::End => {
             let lines = body_lines(doc);
             let target = caret_line_index(&lines, caret).and_then(|idx| {
-                let span = lines[idx].span?;
+                let line = lines[idx];
+                let span = line.span?;
                 Some(Pos {
                     bi: span.bi,
                     para: span.para,
                     ch: if key == Key::Home {
                         span.start
                     } else {
-                        span.end
+                        line_end_ch(line)?
                     },
                 })
             });
@@ -1533,19 +1573,19 @@ fn line_boundary(doc: &DocLayout, blocks: &[ScriptBlock], caret: Pos, to_end: bo
             ..caret
         };
     };
-    let span = lines[idx].span.expect("body lines always carry a span");
+    let line = lines[idx];
+    let span = line.span.expect("body lines always carry a span");
     if to_end {
-        if caret.ch < span.end || idx + 1 >= lines.len() {
-            Pos {
-                ch: span.end,
-                ..caret
-            }
+        let end = line_end_ch(line).expect("body lines always carry a span");
+        if caret.ch < end || idx + 1 >= lines.len() {
+            Pos { ch: end, ..caret }
         } else {
-            let next = lines[idx + 1].span.expect("body lines always carry a span");
+            let next = lines[idx + 1];
+            let next_span = next.span.expect("body lines always carry a span");
             Pos {
-                bi: next.bi,
-                para: next.para,
-                ch: next.end,
+                bi: next_span.bi,
+                para: next_span.para,
+                ch: line_end_ch(next).expect("body lines always carry a span"),
             }
         }
     } else if caret.ch > span.start || idx == 0 {
@@ -1978,6 +2018,45 @@ fn body_lines(doc: &DocLayout) -> Vec<&PlacedLine> {
         .collect()
 }
 
+/// Display cells in a placed line. Whitespace runs are collapsed on screen,
+/// so this is usually shorter than `span.end - span.start`.
+fn display_len(line: &PlacedLine) -> usize {
+    line.text.chars().count()
+}
+
+/// Display column (`0..=display_len`) for a source char offset on `line`.
+///
+/// Positions inside a collapsed whitespace run map to the display space that
+/// represents the run; positions in the invisible wrap gap map to the line's
+/// end, so a caret never jumps into characters it cannot see.
+fn display_col(line: &PlacedLine, ch: usize) -> usize {
+    let Some(span) = line.span else { return 0 };
+    let len = display_len(line);
+    if line.cols.len() != len + 1 {
+        return ch.saturating_sub(span.start).min(len);
+    }
+    let n = line.cols.partition_point(|&c| c <= ch);
+    n.saturating_sub(1).min(len)
+}
+
+/// Source char offset for a display column boundary on `line`.
+fn source_at_col(line: &PlacedLine, col: usize) -> Option<usize> {
+    let span = line.span?;
+    let len = display_len(line);
+    if line.cols.len() == len + 1 {
+        Some(line.cols[col.min(len)])
+    } else {
+        Some(span.start + col.min(len))
+    }
+}
+
+/// Source offset just past the last displayed character on `line` (before any
+/// trailing wrap whitespace). `End` and the caret's right edge use this.
+fn line_end_ch(line: &PlacedLine) -> Option<usize> {
+    let span = line.span?;
+    Some(line.cols.last().copied().unwrap_or(span.end))
+}
+
 /// Index into [`body_lines`] of the display line holding `caret`.
 fn caret_line_index(lines: &[&PlacedLine], caret: Pos) -> Option<usize> {
     let mut best: Option<(usize, usize)> = None;
@@ -2008,7 +2087,7 @@ fn caret_line_index(lines: &[&PlacedLine], caret: Pos) -> Option<usize> {
 fn line_origin_x(prect: egui::Rect, line: &PlacedLine, scale: f32, cell_w: f32) -> f32 {
     let anchor = prect.left() + PAD_L_MM * scale + line.x_mm * scale;
     if line.right_aligned {
-        let len = line.span.map(|s| s.end - s.start).unwrap_or(0);
+        let len = display_len(line);
         anchor - len as f32 * cell_w
     } else {
         anchor
@@ -2034,7 +2113,37 @@ pub fn char_point(
             if span.bi == at.bi && span.para == at.para && span.start <= at.ch && at.ch < span.end {
                 let prect = *page_rects.get(pi)?;
                 let origin = line_origin_x(prect, line, scale, cell_w);
-                let x = origin + (at.ch - span.start) as f32 * cell_w + cell_w * 0.5;
+                let x = origin + display_col(line, at.ch) as f32 * cell_w + cell_w * 0.5;
+                let y = prect.top() + PAD_T_MM * scale + line.row as f32 * row_h + row_h * 0.5;
+                return Some(egui::pos2(x, y));
+            }
+        }
+    }
+    None
+}
+
+/// Screen point at the middle of display cell `col` of the body line for
+/// `(bi, para)`. Interaction tests use this to point where the *user* sees a
+/// character, including text after a collapsed whitespace run.
+#[doc(hidden)]
+#[allow(clippy::too_many_arguments)]
+pub fn display_point(
+    doc: &DocLayout,
+    page_rects: &[egui::Rect],
+    scale: f32,
+    row_h: f32,
+    cell_w: f32,
+    bi: usize,
+    para: usize,
+    col: usize,
+) -> Option<egui::Pos2> {
+    for (pi, page) in doc.pages.iter().enumerate() {
+        for line in &page.lines {
+            let Some(span) = line.span else { continue };
+            if span.bi == bi && span.para == para && col < display_len(line) {
+                let prect = *page_rects.get(pi)?;
+                let origin = line_origin_x(prect, line, scale, cell_w);
+                let x = origin + col as f32 * cell_w + cell_w * 0.5;
                 let y = prect.top() + PAD_T_MM * scale + line.row as f32 * row_h + row_h * 0.5;
                 return Some(egui::pos2(x, y));
             }
@@ -2061,17 +2170,26 @@ fn selection_columns(line: &PlacedLine, a: Pos, f: Pos) -> Option<(usize, usize)
     }
     let same_a = a.bi == s.bi && a.para == s.para;
     let same_f = f.bi == s.bi && f.para == s.para;
-    let c0 = if same_a {
-        a.ch.saturating_sub(s.start)
-    } else {
-        0
-    };
+    let c0 = if same_a { display_col(line, a.ch) } else { 0 };
     let c1 = if same_f {
-        f.ch.min(s.end).saturating_sub(s.start)
+        display_col(line, f.ch.min(s.end))
     } else {
-        s.end - s.start
+        display_len(line)
     };
     (c1 > c0).then_some((c0, c1))
+}
+
+/// Word (token) boundaries around `at` for double-click selection. A click on
+/// the right half of a word's last character lands one past it, so fall back to
+/// the character before the caret.
+fn word_bounds_at(blocks: &[ScriptBlock], at: Pos) -> Option<(usize, usize)> {
+    let para = blocks.get(at.bi)?.text.split('\n').nth(at.para)?;
+    let token = crate::spell::word_at(para, at.ch).or_else(|| {
+        at.ch
+            .checked_sub(1)
+            .and_then(|c| crate::spell::word_at(para, c))
+    })?;
+    Some((token.start, token.end))
 }
 
 /// Map a pointer position to a caret position (nearest body line and cell).
@@ -2153,13 +2271,13 @@ fn position_in_line(
     x: f32,
 ) -> Option<Pos> {
     let span = line.span?;
-    let len = span.end - span.start;
+    let len = display_len(line);
     let origin = line_origin_x(prect, line, scale, cell_w);
     let col = ((x - origin) / cell_w).round().clamp(0.0, len as f32) as usize;
     Some(Pos {
         bi: span.bi,
         para: span.para,
-        ch: span.start + col,
+        ch: source_at_col(line, col)?,
     })
 }
 
@@ -2184,8 +2302,7 @@ fn caret_geometry(
     }
     let (pi, line) = found?;
     let prect = *page_rects.get(pi)?;
-    let span = line.span?;
-    let col = at.ch.clamp(span.start, span.end) - span.start;
+    let col = display_col(line, at.ch);
     let x = line_origin_x(prect, line, scale, cell_w) + col as f32 * cell_w;
     let y = prect.top() + PAD_T_MM * scale + line.row as f32 * row_h;
     let caret = egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(2.0, row_h));
@@ -2310,8 +2427,8 @@ fn paint_spelling(
         if c1 > c0 {
             paint_squiggle(
                 painter,
-                origin + (c0 - span.start) as f32 * cell_w,
-                origin + (c1 - span.start) as f32 * cell_w,
+                origin + display_col(line, c0) as f32 * cell_w,
+                origin + display_col(line, c1) as f32 * cell_w,
                 underline_y,
                 color,
                 paint.row_h,
@@ -2872,6 +2989,71 @@ mod tests {
         assert_eq!(at.bi, span.bi);
         assert_eq!(at.para, span.para);
         assert_eq!(at.ch, span.start + 3);
+    }
+
+    #[test]
+    fn hit_test_maps_through_collapsed_whitespace() {
+        // Four source spaces render as one screen cell. Clicks on the visible
+        // word must land on its characters, not `start + display_column`.
+        let blocks = vec![ScriptBlock::new(
+            ElementType::Action,
+            "alpha    beta gamma".into(),
+        )];
+        let labels: Vec<String> = Vec::new();
+        let doc = document_layout(&blocks, &RUSSIAN, &labels);
+        let scale = PT_PER_MM;
+        let row_h = ROW_MM * scale;
+        let cell_w = MM_PER_CELL * scale;
+        let rects: Vec<egui::Rect> = vec![egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            page_size_pt(1.0),
+        )];
+        let line = body_lines(&doc)[0];
+        assert_eq!(line.text, "alpha beta gamma");
+        let origin = line_origin_x(rects[0], line, scale, cell_w);
+        let y = rects[0].top() + PAD_T_MM * scale + line.row as f32 * row_h + row_h * 0.5;
+        let click = |col: f32| {
+            hit_test(
+                &doc,
+                &rects,
+                scale,
+                row_h,
+                cell_w,
+                egui::pos2(origin + col * cell_w, y),
+            )
+            .expect("click hits the line")
+        };
+
+        // Display column 6 is 'b'; the source offset is 9.
+        assert_eq!(click(6.1).ch, 9);
+        // Display column 7 is 'e'; the source offset is 10.
+        assert_eq!(click(7.1).ch, 10);
+        // Display column 11 is 'g'; the source offset is 14.
+        assert_eq!(click(11.1).ch, 14);
+
+        // Carets inside the collapsed run sit on its single display space;
+        // the wrap gap maps to the line end, never into invisible chars.
+        assert_eq!(display_col(line, 7), 5);
+        assert_eq!(display_col(line, 13), 10);
+        assert_eq!(line_end_ch(line), Some(19));
+
+        // Selection painting uses the same map.
+        assert_eq!(
+            selection_columns(
+                line,
+                Pos {
+                    bi: 0,
+                    para: 0,
+                    ch: 9
+                },
+                Pos {
+                    bi: 0,
+                    para: 0,
+                    ch: 13
+                },
+            ),
+            Some((6, 10))
+        );
     }
 
     #[test]

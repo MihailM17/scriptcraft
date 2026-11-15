@@ -1247,6 +1247,24 @@ impl ScriptCraftApp {
         )
     }
 
+    /// Screen point at the middle of display cell `col` of a block's body line
+    /// (interaction tests point at what the user sees, not at source offsets).
+    #[doc(hidden)]
+    pub fn editor2_display_point(&self, at: (usize, usize, usize)) -> Option<egui::Pos2> {
+        let zoom = self.last_render_zoom;
+        let scale = crate::script_view::PT_PER_MM * zoom;
+        crate::script_view::display_point(
+            self.doc.as_ref()?,
+            &self.editor2.debug_pages,
+            scale,
+            scriptcraft_layout::place::ROW_MM * scale,
+            scriptcraft_layout::place::MM_PER_CELL * scale,
+            at.0,
+            at.1,
+            at.2,
+        )
+    }
+
     /// Open the read-only compare workspace with the latest revision as the
     /// base and the live draft as the target.
     #[doc(hidden)]
@@ -2028,20 +2046,24 @@ impl ScriptCraftApp {
             Self::relayout_hint(&out.commands)
         };
         let mut changed = false;
+        let mut apply_error: Option<String> = None;
         if out.undo {
             changed |= self.editor2.history.undo(&mut p.blocks).unwrap_or(false);
         }
         if out.redo {
             changed |= self.editor2.history.redo(&mut p.blocks).unwrap_or(false);
         }
-        if !out.commands.is_empty()
-            && self
-                .editor2
-                .history
-                .apply_seq(&mut p.blocks, out.commands)
-                .is_ok()
-        {
-            changed = true;
+        if !out.commands.is_empty() {
+            match self.editor2.history.apply_seq(&mut p.blocks, out.commands) {
+                Ok(()) => changed = true,
+                Err(err) => {
+                    // `apply_seq` is not atomic: earlier commands may have
+                    // landed. Refresh against whatever is really in the
+                    // document and say so instead of silently dropping input.
+                    changed = true;
+                    apply_error = Some(format!("Edit could not be applied: {err}"));
+                }
+            }
         }
         if !changed {
             self.doc_hint = None;
@@ -2089,6 +2111,9 @@ impl ScriptCraftApp {
             "Edited."
         };
         self.after_history_jump(what);
+        if let Some(message) = apply_error {
+            self.status = message;
+        }
     }
 
     fn do_undo(&mut self) {

@@ -1950,3 +1950,51 @@ When a user prompt arrives:
     and SHA-256 verified.
   - Deferred (unchanged): Developer ID/notarisation, Windows code signing,
     auto-update.
+
+### 2026-11-15 — Editor input: clicks, double-click, drag anchor, lost spaces
+
+Reported: a space typed after clicking sometimes moved the caret without
+inserting visible text; double-click did not select a word; click-drag
+selections started a few pixels after the press.
+
+- Root cause of the misplaced caret: `wrap::WrappedLine` renders runs of
+  whitespace as **one** cell, but hit-testing, the caret, selection painting
+  and spelling underlines all assumed `ch - span.start`. On a line with a
+  double space (common after a period) every position after the run was off by
+  the number of collapsed spaces, so a click on a visible word could land in
+  the invisible run; typing a space there added another collapsed space, moved
+  the caret (or to the next line at a wrap boundary) and changed nothing on
+  screen.
+- `scriptcraft-layout/src/wrap.rs`: `WrappedLine` gained `cols`, one source
+  offset per display boundary (`text.chars().count() + 1` entries), built by
+  aligning the display text with the source span. `DualLine`/`PlacedLine` carry
+  it through (`cols: Vec::new()` for synthetic rows).
+- `script_view.rs`: `display_col`/`source_at_col`/`line_end_ch` are the only
+  column arithmetic now. Hit-testing (`position_in_line`), the caret
+  (`caret_geometry`, `char_point`, `display_point`), selection
+  (`selection_columns`), spelling underlines, Up/Down, Home/End and
+  `line_boundary` all use the map. End lands on the last *visible* character,
+  not in the invisible wrap gap. Right-aligned lines measure their display
+  width, not their source span.
+- Input: `EditState::press_pos` remembers where the primary button went down
+  (egui clears `press_origin()` before `clicked()` arrives), so a click places
+  the caret at the press point, and a drag anchors there instead of at the
+  post-threshold point. Double-click selects the word under the pointer
+  (`spell::word_at`, with a one-char fallback for a click on the word's last
+  half); triple-click selects the paragraph.
+- `Editor::press` reports success; `insert` no longer advances the caret when
+  the command was rejected. `apply_editor2_output` no longer silently drops a
+  failed `apply_seq`: it refreshes against the document and shows the error in
+  the status bar.
+- Tests: layout `cols_map_display_columns_across_collapsed_whitespace` plus
+  extended `spans_tile_tricky_paragraphs` invariants; app
+  `hit_test_maps_through_collapsed_whitespace`; interaction
+  `double_click_selects_the_word_under_the_pointer`,
+  `triple_click_selects_the_whole_paragraph`,
+  `drag_selection_starts_at_the_press_not_after_the_threshold` and
+  `space_after_a_click_lands_on_the_clicked_character`. No snapshot changed
+  (no intentional visual change); the temporary scratch test was removed.
+- Gate: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets
+  -- -D warnings`, `cargo test --workspace` (app 51 lib + 61 interaction + 24
+  snapshots; core 100 lib + 50 integration; layout 27 unit + 25 integration),
+  `cargo deny check`, `git diff --check` — all green.

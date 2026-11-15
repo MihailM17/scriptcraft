@@ -4,9 +4,11 @@ use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
 use scriptcraft_app::app::{self, ResearchPane, ScriptCraftApp, SideTab};
 
-fn harness(tab: SideTab) -> Harness<'static, ScriptCraftApp> {
+fn harness_with_dt(tab: SideTab, step_dt: f32) -> Harness<'static, ScriptCraftApp> {
     Harness::builder()
         .with_size(egui::Vec2::new(1360.0, 880.0))
+        .with_step_dt(step_dt)
+        .with_max_steps(200)
         .build_eframe(move |cc| {
             app::apply_theme(&cc.egui_ctx);
             app::install_fonts(&cc.egui_ctx);
@@ -15,6 +17,10 @@ fn harness(tab: SideTab) -> Harness<'static, ScriptCraftApp> {
             a.goto_tab(tab);
             a
         })
+}
+
+fn harness(tab: SideTab) -> Harness<'static, ScriptCraftApp> {
+    harness_with_dt(tab, 1.0 / 4.0)
 }
 
 /// Show Research ▸ Versions, where KIT-style revisions now live.
@@ -49,7 +55,11 @@ fn click_editor2_page(h: &mut Harness<'static, ScriptCraftApp>) {
 
 /// A harness with the editor focused (caret on the first page).
 fn focused_harness() -> Harness<'static, ScriptCraftApp> {
-    let mut h = harness(SideTab::Script);
+    focused_harness_with_dt(1.0 / 4.0)
+}
+
+fn focused_harness_with_dt(step_dt: f32) -> Harness<'static, ScriptCraftApp> {
+    let mut h = harness_with_dt(SideTab::Script, step_dt);
     h.run();
     click_editor2_page(&mut h);
     h
@@ -2692,5 +2702,157 @@ fn spellcheck_menu_replaces_a_misspelled_word() {
     assert!(
         text.contains(&first) && !text.contains("reciever"),
         "picking '{first}' should replace the word: {text:?}"
+    );
+}
+
+/// One press/release at `pos` (mouse moved there first).
+fn click_at(h: &mut Harness<'static, ScriptCraftApp>, pos: egui::Pos2) {
+    h.input_mut().events.push(egui::Event::PointerMoved(pos));
+    h.input_mut().events.push(egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: egui::Modifiers::NONE,
+    });
+    h.run();
+    h.input_mut().events.push(egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: egui::Modifiers::NONE,
+    });
+    h.run();
+}
+
+/// Put a known action paragraph on screen and return its block index.
+fn action_paragraph(h: &mut Harness<'static, ScriptCraftApp>, text: &str) -> usize {
+    let bi = h.state().find_first_heading_block().expect("heading") + 1;
+    h.state_mut().set_block_text_for_test(bi, text);
+    h.state_mut().scroll_to_block(bi);
+    h.run_steps(2);
+    bi
+}
+
+#[test]
+fn double_click_selects_the_word_under_the_pointer() {
+    // Multi-click is time-based; run at 60 fps so the clicks stay inside
+    // egui's double-click window.
+    let mut h = focused_harness_with_dt(1.0 / 60.0);
+    let bi = action_paragraph(&mut h, "alpha beta gamma");
+    // Clear the click chain left by focusing the page, or the second click
+    // would be classified as a triple-click.
+    h.run_steps(45);
+    // Display column 7 is the 'e' of "beta".
+    let point = h
+        .state()
+        .editor2_display_point((bi, 0, 7))
+        .expect("beta must be on the visible page");
+
+    click_at(&mut h, point);
+    click_at(&mut h, point);
+
+    let (anchor, focus) = h
+        .state()
+        .editor2_selection()
+        .expect("double-click must leave a selection");
+    assert_eq!(
+        ((anchor.0, anchor.1, anchor.2), (focus.0, focus.1, focus.2)),
+        ((bi, 0, 6), (bi, 0, 10)),
+        "double-click must select the whole word and nothing else"
+    );
+}
+
+#[test]
+fn triple_click_selects_the_whole_paragraph() {
+    let mut h = focused_harness_with_dt(1.0 / 60.0);
+    let bi = action_paragraph(&mut h, "alpha beta gamma");
+    h.run_steps(45);
+    let point = h
+        .state()
+        .editor2_display_point((bi, 0, 7))
+        .expect("beta must be on the visible page");
+
+    click_at(&mut h, point);
+    click_at(&mut h, point);
+    click_at(&mut h, point);
+
+    let (anchor, focus) = h
+        .state()
+        .editor2_selection()
+        .expect("triple-click must leave a selection");
+    assert_eq!(
+        (anchor.2, focus.2),
+        (0, 16),
+        "triple-click selects the line"
+    );
+}
+
+#[test]
+fn drag_selection_starts_at_the_press_not_after_the_threshold() {
+    let mut h = focused_harness();
+    let bi = action_paragraph(&mut h, "alpha beta gamma");
+    let press = h
+        .state()
+        .editor2_display_point((bi, 0, 6))
+        .expect("beta must be on the visible page");
+
+    // Calibrate the caret this exact press point produces on its own.
+    click_at(&mut h, press);
+    let (_, expected) = h.state().editor2_selection().expect("click places a caret");
+
+    h.input_mut().events.push(egui::Event::PointerMoved(press));
+    h.input_mut().events.push(egui::Event::PointerButton {
+        pos: press,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: egui::Modifiers::NONE,
+    });
+    h.run();
+    // Cross egui's drag threshold; the anchor must stay on the press cell.
+    let moved = egui::pos2(press.x + 40.0, press.y);
+    h.input_mut().events.push(egui::Event::PointerMoved(moved));
+    h.run();
+    h.input_mut().events.push(egui::Event::PointerButton {
+        pos: moved,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: egui::Modifiers::NONE,
+    });
+    h.run();
+
+    let (anchor, focus) = h
+        .state()
+        .editor2_selection()
+        .expect("dragging must leave a selection");
+    assert_eq!(
+        (anchor.0, anchor.1, anchor.2),
+        (expected.0, expected.1, expected.2),
+        "the anchor must be the press point, not the post-threshold point"
+    );
+    assert!(
+        focus.2 > anchor.2,
+        "the focus must follow the pointer: {focus:?}"
+    );
+}
+
+#[test]
+fn space_after_a_click_lands_on_the_clicked_character() {
+    let mut h = focused_harness();
+    // Four source spaces collapse to one screen cell; clicking past them must
+    // still map to the visible word, not into the invisible run.
+    let bi = action_paragraph(&mut h, "alpha    beta gamma");
+    let point = h
+        .state()
+        .editor2_display_point((bi, 0, 7))
+        .expect("beta must be on the visible page");
+
+    click_at(&mut h, point);
+    h.input_mut().events.push(egui::Event::Text(" ".into()));
+    h.run();
+
+    assert_eq!(
+        h.state().block_text(bi).as_deref(),
+        Some("alpha    b eta gamma"),
+        "the space must split the clicked word, not vanish into the gap"
     );
 }
