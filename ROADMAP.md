@@ -23,10 +23,10 @@ Status legend: `[ ]` to do `[-]` in progress `[x]` done `[!]` blocked
 | Repo | `/Users/mihailmihaylov/Documents/Dev_work/scriptcraft` |
 | Branch / commit | `main` at v0.8.4; tags `v0.7.0` at `9ce2e0e`, `v0.7.1` at `d8b17de`, `v0.7.2` at `8b75f9a`, `v0.8.0` at `0052bba`, `v0.8.1` at `0fa598e`, `v0.8.2` at `6bf1983`, `v0.8.3` at `69c0329`, `v0.8.4` at `b178e00`; M8/M9 progress at `a44ace0`, `1fe8c21`, `9d791a7`, `3b61227`; release prep at `d36ae4b`; assets/checksums at `aaad983`; M9 settings/export at `b284a78`; M9 research at `b9f9c21`; editor-input fixes at `6732bd0`. |
 | Rust workspace | `scriptcraft-core`, `scriptcraft-app`, `scriptcraft-layout` (`Cargo.toml`, resolver 2) |
-| App crate version | `scriptcraft-app 0.8.4`; `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
+| App crate version | `scriptcraft-app 0.8.5`; `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
 | Distribution | **v0.8.4 released 2026-11-14** — <https://github.com/MihailM17/scriptcraft/releases/tag/v0.8.4>. Assets: macOS arm64 DMG (ad-hoc signed, not notarised), Windows x64 zip and Linux x86_64 tar.gz from Packages run `43589937336`, each with `.sha256`. No auto-update. |
-| Current one-liner | Free, open-source, revision-first studio: one screenplay engine (Editor 2.0), crash-safe saves + recovery, revision colours/marks/pages, compare/restore, revision summary with scene counts + CSV + printable PDF, omitted scenes, smart screenplay paste, KIT version write/import, changes-only compare with context gaps and template indentation, revision headers/title-page fields, production page locks with A/B page numbers and FDX revision metadata, dual dialogue side by side in editor/PDF with FDX interchange, a title-page editor whose A4 preview is the exporter's own layout, KIT-style editor/navigator settings, macOS standard selection keys, a compact file-focused Menu, OFL fonts, FDX/Fountain import/export; PDF export paginates exactly like the editor; eight contrast-tested themes with revision marks legible on every palette, and live spellchecking in English, Bulgarian and Russian with screenplay-aware ALL-CAPS skipping, right-click suggestions and per-language custom dictionaries. |
-| Next release | **Post-v0.8.4** — Windows signing, optional release-binary/screenshot probe, Developer ID/notarisation and auto-update. |
+| Current one-liner | Free, open-source, revision-first studio: one screenplay engine (Editor 2.0), crash-safe saves + recovery, revision colours/marks/pages, compare/restore, revision summary with scene counts + CSV + printable PDF, omitted scenes, smart screenplay paste, KIT version write/import, changes-only compare with context gaps and template indentation, revision headers/title-page fields, production page locks with A/B page numbers and FDX revision metadata, dual dialogue side by side in editor/PDF with FDX interchange, a title-page editor whose A4 preview is the exporter's own layout, KIT-style editor/navigator settings, macOS standard selection keys, a compact file-focused Menu, OFL fonts, FDX/Fountain import/export; PDF export paginates exactly like the editor; eight contrast-tested themes with revision marks legible on every palette, and live spellchecking in English, Bulgarian and Russian with screenplay-aware ALL-CAPS skipping, right-click suggestions and per-language custom dictionaries; v0.8.5 corrected editor input with whitespace-aware caret mapping, press-point clicks, double-click word selection and press-anchored drag selection. |
+| Next release | **Post-v0.8.5** — Windows signing, optional release-binary/screenshot probe, Developer ID/notarisation and auto-update. |
 
 **Positioning (locked 2026-10-26):** the free, open-source, revision-first
 screenwriting studio. Moat = the production revision workflow (colours, locked
@@ -1998,3 +1998,14 @@ selections started a few pixels after the press.
   -- -D warnings`, `cargo test --workspace` (app 51 lib + 61 interaction + 24
   snapshots; core 100 lib + 50 integration; layout 27 unit + 25 integration),
   `cargo deny check`, `git diff --check` — all green.
+
+### 2026-11-15 — v0.8.5 released (editor input fixes)
+
+- Version bumped to `0.8.5` (`scriptcraft-app/Cargo.toml` + `Cargo.lock`), notes
+  `docs/releases/v0.8.5.md`, README status updated. Patch release for the
+  editor-input work logged above: whitespace-aware click/caret mapping,
+  press-point clicks, press-anchored drag selection, double-click word
+  selection and triple-click paragraph selection.
+- No project, save, import/export, settings or snapshot change. The full gate
+  stayed green at 51 app lib + 61 interaction + 24 snapshots, core 100 lib + 50
+  integration, layout 27 unit + 25 integration.
