@@ -2930,3 +2930,164 @@ fn settings_monochrome_paper_keeps_the_ui_themed() {
         "the checkbox must flip the page to black on white"
     );
 }
+
+/// Tab in an empty character cue opens the story's character list instead of
+/// cycling the element type; Enter commits the highlighted name and the cue
+/// stays a character cue.
+#[test]
+fn tab_in_an_empty_character_cue_opens_the_character_picker() {
+    use scriptcraft_core::edit::EditCommand;
+    use scriptcraft_core::ElementType;
+
+    let mut h = focused_harness();
+    let bi = h
+        .state()
+        .find_first_cue_block()
+        .expect("A95 should contain a character cue");
+    h.state_mut()
+        .apply_editor_commands_for_test(vec![EditCommand::SetText {
+            bi,
+            text: String::new(),
+        }]);
+    h.state_mut().focus_block_at(bi, 0);
+    h.run();
+
+    h.key_press(egui::Key::Tab);
+    h.run();
+
+    let rows: Vec<String> = h
+        .state()
+        .editor2_autocomplete_rows()
+        .into_iter()
+        .map(|(s, _)| s)
+        .collect();
+    assert!(!rows.is_empty(), "Tab must open the character picker");
+    assert_eq!(
+        h.state().block_text(bi).as_deref(),
+        Some(""),
+        "Tab alone must not type anything"
+    );
+    assert_eq!(
+        h.state().block_element_type(bi),
+        Some(ElementType::Character),
+        "Tab must not cycle the type away from the character cue"
+    );
+
+    h.key_press(egui::Key::Enter);
+    h.run();
+    assert_eq!(
+        h.state().block_text(bi),
+        Some(rows[0].clone()),
+        "Enter commits the highlighted character"
+    );
+    assert_eq!(
+        h.state().block_element_type(bi),
+        Some(ElementType::Character)
+    );
+}
+
+/// Down/Up move the picker highlight, and Escape leaves the cue untouched.
+#[test]
+fn character_picker_arrows_move_and_escape_cancels() {
+    use scriptcraft_core::edit::EditCommand;
+    use scriptcraft_core::ElementType;
+
+    let mut h = focused_harness();
+    let bi = h
+        .state()
+        .find_first_cue_block()
+        .expect("A95 should contain a character cue");
+    h.state_mut()
+        .apply_editor_commands_for_test(vec![EditCommand::SetText {
+            bi,
+            text: String::new(),
+        }]);
+    h.state_mut().focus_block_at(bi, 0);
+    h.run();
+
+    h.key_press(egui::Key::Tab);
+    h.run();
+    let rows: Vec<String> = h
+        .state()
+        .editor2_autocomplete_rows()
+        .into_iter()
+        .map(|(s, _)| s)
+        .collect();
+    assert!(rows.len() > 1, "the fixture has several characters");
+
+    h.key_press(egui::Key::Escape);
+    h.run();
+    assert!(
+        h.state().editor2_autocomplete_rows().is_empty(),
+        "Escape closes the picker"
+    );
+    assert_eq!(h.state().block_text(bi).as_deref(), Some(""));
+    assert_eq!(
+        h.state().block_element_type(bi),
+        Some(ElementType::Character)
+    );
+
+    h.key_press(egui::Key::Tab);
+    h.run();
+    h.key_press(egui::Key::ArrowDown);
+    h.run();
+    h.key_press(egui::Key::Enter);
+    h.run();
+    assert_eq!(
+        h.state().block_text(bi),
+        Some(rows[1].clone()),
+        "the arrow key moves the highlight before Enter commits it"
+    );
+}
+
+/// Research recognises entities from the live draft, without an import step:
+/// a character cue and a scene heading typed in the script show up in their
+/// panes as soon as the tab is open.
+#[test]
+fn research_recognises_characters_and_locations_from_the_script() {
+    use scriptcraft_core::edit::EditCommand;
+    use scriptcraft_core::ElementType;
+
+    let mut h = harness(SideTab::Research);
+    h.run();
+    let heading = h
+        .state()
+        .find_first_heading_block()
+        .expect("A95 has scene headings");
+    let action_bi = heading + 1;
+    h.state_mut().apply_editor_commands_for_test(vec![
+        EditCommand::SetText {
+            bi: action_bi,
+            text: "НОВ ГЕРОЙ (V.O.)".into(),
+        },
+        EditCommand::SetType {
+            bi: action_bi,
+            t: ElementType::Character,
+        },
+    ]);
+    h.state_mut().set_research_pane(ResearchPane::Characters);
+    h.run_steps(2);
+    assert!(
+        h.query_by_label_contains("found in the script's character cues")
+            .is_some(),
+        "the Characters pane must report script recognition"
+    );
+    assert!(
+        h.query_by_label_contains("Add НОВ ГЕРОЙ").is_some(),
+        "a cue typed in the script must be listed with its extension folded"
+    );
+
+    h.state_mut().set_research_pane(ResearchPane::Locations);
+    h.run_steps(2);
+    assert!(
+        h.query_by_label_contains("found in the script's scene headings")
+            .is_some(),
+        "the Locations pane must report script recognition"
+    );
+    assert!(
+        h.query_all_by_label_contains("Add ПАРКИНГ")
+            .next()
+            .is_some(),
+        "the fixture's first location must be listed"
+    );
+}

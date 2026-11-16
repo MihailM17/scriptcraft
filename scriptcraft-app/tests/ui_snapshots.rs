@@ -470,3 +470,56 @@ fn snap_26_script_mono_paper() {
     assert!(h.state().paper_mono_for_test());
     h.snapshot("26_script_mono_paper");
 }
+
+/// Tab in an empty character cue opens the picker over the page.
+#[test]
+fn snap_27_character_picker() {
+    use scriptcraft_core::edit::EditCommand;
+
+    let mut h = harness(SideTab::Script, None);
+    h.run();
+    // Focus the editor the way a writer does: click the paper.
+    let page = h.state().editor2_page_rects()[0];
+    let pos = egui::pos2(page.left() + 120.0, page.top() + 80.0);
+    h.input_mut().events.push(egui::Event::PointerMoved(pos));
+    h.input_mut().events.push(egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: egui::Modifiers::NONE,
+    });
+    h.run();
+    h.input_mut().events.push(egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: egui::Modifiers::NONE,
+    });
+    h.run();
+
+    let bi = h.state().find_first_cue_block().expect("A95 has cues");
+    h.state_mut()
+        .apply_editor_commands_for_test(vec![EditCommand::SetText {
+            bi,
+            text: String::new(),
+        }]);
+    h.state_mut().focus_block_at(bi, 0);
+    h.run_steps(2);
+    h.key_press(egui::Key::Tab);
+    h.run();
+    assert!(
+        !h.state().editor2_autocomplete_rows().is_empty(),
+        "the picker must be open for the snapshot"
+    );
+    h.snapshot("27_character_picker");
+}
+
+/// Research ▸ Characters lists the entities the script already contains.
+#[test]
+fn snap_28_research_characters() {
+    let mut h = harness(SideTab::Research, None);
+    h.run();
+    h.state_mut().set_research_pane(ResearchPane::Characters);
+    h.run_steps(2);
+    h.snapshot("28_research_characters");
+}

@@ -1202,6 +1202,15 @@ impl ScriptCraftApp {
         });
     }
 
+    /// Test hook: apply editor commands (type/split) without a frame.
+    #[doc(hidden)]
+    pub fn apply_editor_commands_for_test(&mut self, cmds: Vec<edit::EditCommand>) {
+        self.apply_editor2_output(crate::script_view::ScriptViewOutput {
+            commands: cmds,
+            ..Default::default()
+        });
+    }
+
     /// Page rectangles from the last Editor 2.0 frame (interaction tests).
     #[doc(hidden)]
     pub fn editor2_page_rects(&self) -> Vec<egui::Rect> {
@@ -3027,22 +3036,8 @@ impl ScriptCraftApp {
             self.status = "Save the script first (Save As) — fixture is read-only.".to_string();
             return;
         }
-        let mut names: Vec<String> = Vec::new();
-        for b in &p.blocks {
-            if b.element_type != ElementType::Character {
-                continue;
-            }
-            // Strip parenthetical continuations like "ИВАН (ПРОД.)".
-            let mut name = b.text.trim().to_string();
-            if let Some(i) = name.find(" (") {
-                name.truncate(i);
-            }
-            let name = name.trim().to_string();
-            if name.is_empty() || names.iter().any(|n: &String| n.eq_ignore_ascii_case(&name)) {
-                continue;
-            }
-            names.push(name);
-        }
+        let mut names: Vec<String> = scriptcraft_core::editing::script_characters(&p.blocks);
+        names.retain(|n| !n.is_empty());
         let existing: Vec<String> = self
             .research
             .iter()
@@ -3051,7 +3046,10 @@ impl ScriptCraftApp {
             .collect();
         let mut added = 0;
         for name in names {
-            if existing.iter().any(|k| k == &name.to_lowercase()) {
+            if existing
+                .iter()
+                .any(|k| scriptcraft_core::editing::same_name(k, &name))
+            {
                 continue;
             }
             if kitsp::insert_research(&self.path, kitsp::ResearchKind::Character, &name).is_ok() {
@@ -3082,7 +3080,10 @@ impl ScriptCraftApp {
             .collect();
         let mut added = 0;
         for loc in locs {
-            if existing.iter().any(|k| k == &loc.to_lowercase()) {
+            if existing
+                .iter()
+                .any(|k| scriptcraft_core::editing::same_name(k, &loc))
+            {
                 continue;
             }
             if kitsp::insert_research(&self.path, kitsp::ResearchKind::Location, &loc).is_ok() {
@@ -6120,11 +6121,25 @@ impl ScriptCraftApp {
             .collect();
         let latest = self.revisions.latest().cloned();
         let read_only = self.path.is_empty() || Self::is_fixture_path(&self.path);
+        // Recognition is derived from the live draft, so the pane is never
+        // stale and never depends on the file having been imported first.
+        let script_characters: Vec<String> = self
+            .project
+            .as_ref()
+            .map(|p| scriptcraft_core::editing::script_characters(&p.blocks))
+            .unwrap_or_default();
+        let script_locations: Vec<String> = self
+            .project
+            .as_ref()
+            .map(|p| kitsp::extract_locations(&p.blocks))
+            .unwrap_or_default();
         let actions = {
             let mut view = ResearchView {
                 has_project: self.project.is_some(),
                 read_only,
                 entries: &self.research,
+                script_characters: &script_characters,
+                script_locations: &script_locations,
                 pane: &mut self.research_pane,
                 meta: &mut self.meta,
                 meta_dirty: &mut self.meta_dirty,
@@ -6151,7 +6166,7 @@ impl ScriptCraftApp {
 
     fn apply_research_action(&mut self, action: ResearchAction) {
         match action {
-            ResearchAction::AddEntry(kind, name) => self.add_research_entry(kind, name),
+            ResearchAction::AddEntry(kind, name) => self.add_research_entry(kind, &name),
             ResearchAction::ImportCharacters => self.import_characters_from_script(),
             ResearchAction::ImportLocations => self.import_locations_from_script(),
             ResearchAction::StartRevision => self.start_revision(),
@@ -7029,6 +7044,12 @@ impl ScriptCraftApp {
                 self.last_render_zoom = zoom;
                 self.ensure_revision_marks();
                 let revision_colors = &self.revision_marks.colors;
+                let picker_characters: Vec<String> = self
+                    .research
+                    .iter()
+                    .filter(|e| e.kind == kitsp::ResearchKind::Character)
+                    .map(|e| e.name.clone())
+                    .collect();
                 let out = match (&self.project, &self.doc) {
                     (Some(p), Some(doc)) => crate::script_view::script_view(
                         ui,
@@ -7043,6 +7064,7 @@ impl ScriptCraftApp {
                             omitted_headings: &self.omitted_heading_ids,
                             options: self.settings.editor_options(),
                             paper_mono: self.settings.paper_mono,
+                            picker_characters: &picker_characters,
                         },
                         &mut self.editor2,
                     ),

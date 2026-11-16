@@ -7,6 +7,7 @@
 //! handled by `ScriptCraftApp` after the frame.
 
 use egui::{Context, Ui};
+use scriptcraft_core::editing::same_name;
 use scriptcraft_core::{
     kitsp::{self, Metadata},
     revision::{RevisionHistory, RevisionSet},
@@ -48,6 +49,10 @@ pub(crate) struct ResearchView<'a> {
     /// Read-only fixture or unsaved project: research edits are disabled.
     pub read_only: bool,
     pub entries: &'a [kitsp::ResearchEntry],
+    /// Characters recognised from the script's cues (first-appearance order).
+    pub script_characters: &'a [String],
+    /// Locations recognised from the script's scene headings.
+    pub script_locations: &'a [String],
     pub pane: &'a mut ResearchPane,
     pub meta: &'a mut Metadata,
     pub meta_dirty: &'a mut bool,
@@ -68,7 +73,7 @@ pub(crate) struct ResearchView<'a> {
 
 /// Side effects requested by the Research UI this frame.
 pub(crate) enum ResearchAction {
-    AddEntry(kitsp::ResearchKind, &'static str),
+    AddEntry(kitsp::ResearchKind, String),
     ImportCharacters,
     ImportLocations,
     StartRevision,
@@ -217,6 +222,7 @@ fn tree(ui: &mut Ui, state: &mut ResearchView<'_>, actions: &mut Vec<ResearchAct
         KitIcon::Person,
         "Characters",
         kitsp::ResearchKind::Character,
+        ResearchPane::Characters,
         &mut sel,
     );
     folder(
@@ -227,6 +233,7 @@ fn tree(ui: &mut Ui, state: &mut ResearchView<'_>, actions: &mut Vec<ResearchAct
         KitIcon::House,
         "Locations",
         kitsp::ResearchKind::Location,
+        ResearchPane::Locations,
         &mut sel,
     );
     folder(
@@ -237,6 +244,7 @@ fn tree(ui: &mut Ui, state: &mut ResearchView<'_>, actions: &mut Vec<ResearchAct
         KitIcon::Folder,
         "Documents",
         kitsp::ResearchKind::Other,
+        ResearchPane::Documents,
         &mut sel,
     );
 
@@ -244,6 +252,7 @@ fn tree(ui: &mut Ui, state: &mut ResearchView<'_>, actions: &mut Vec<ResearchAct
     *state.pane = sel;
 }
 
+#[allow(clippy::too_many_arguments)]
 #[allow(clippy::too_many_arguments)]
 fn folder(
     ui: &mut Ui,
@@ -253,13 +262,14 @@ fn folder(
     icon: KitIcon,
     title: &str,
     kind: kitsp::ResearchKind,
+    pane: ResearchPane,
     sel: &mut ResearchPane,
 ) {
     let mut open = ui.data(|d| d.get_temp::<bool>(egui::Id::new(salt)).unwrap_or(true));
     let (row, arrow, plus) = kit_tree_row(
         ui,
         KitTreeRow {
-            sel: false,
+            sel: *sel == pane,
             arrow: Some(open),
             plus: true,
         },
@@ -267,8 +277,15 @@ fn folder(
         title,
         salt,
     );
-    if row.clicked() || arrow {
+    // The arrow opens/closes the branch; the row selects the folder pane, so
+    // the script-recognised Characters/Locations lists are reachable.
+    if arrow {
         open = !open;
+        ui.data_mut(|d| d.insert_temp(egui::Id::new(salt), open));
+    }
+    if row.clicked() {
+        *sel = pane;
+        open = true;
         ui.data_mut(|d| d.insert_temp(egui::Id::new(salt), open));
     }
     if plus {
@@ -279,7 +296,7 @@ fn folder(
                     if ui.button("Add character").clicked() {
                         actions.push(ResearchAction::AddEntry(
                             kitsp::ResearchKind::Character,
-                            "New character",
+                            "New character".to_string(),
                         ));
                         ui.close();
                     }
@@ -292,7 +309,7 @@ fn folder(
                     if ui.button("Add location").clicked() {
                         actions.push(ResearchAction::AddEntry(
                             kitsp::ResearchKind::Location,
-                            "New location",
+                            "New location".to_string(),
                         ));
                         ui.close();
                     }
@@ -305,7 +322,7 @@ fn folder(
                     if ui.button("Add note").clicked() {
                         actions.push(ResearchAction::AddEntry(
                             kitsp::ResearchKind::Other,
-                            "New entry",
+                            "New entry".to_string(),
                         ));
                         ui.close();
                     }
@@ -341,6 +358,136 @@ fn folder(
     }
 }
 
+/// Characters/Locations pane: everything the script mentions, merged with
+/// the research cards the writer has already made.
+///
+/// Recognition is live — the list is rebuilt from the script every frame, so
+/// a cue or scene heading typed in the editor shows up here as soon as the
+/// Research tab is open again. Cards are never deleted: names that only exist
+/// as cards are listed below the script entities.
+fn entities_pane(
+    ui: &mut Ui,
+    state: &mut ResearchView<'_>,
+    actions: &mut Vec<ResearchAction>,
+    kind: kitsp::ResearchKind,
+) {
+    let (script_names, heading, noun, from_label, import) = match kind {
+        kitsp::ResearchKind::Character => (
+            state.script_characters,
+            "Characters",
+            "character",
+            "character cues",
+            ResearchAction::ImportCharacters,
+        ),
+        _ => (
+            state.script_locations,
+            "Locations",
+            "location",
+            "scene headings",
+            ResearchAction::ImportLocations,
+        ),
+    };
+    let cards: Vec<(i64, String)> = state
+        .entries
+        .iter()
+        .filter(|e| e.kind == kind)
+        .map(|e| (e.id, e.name.clone()))
+        .collect();
+    let card_of = |name: &str| {
+        cards
+            .iter()
+            .find(|(_, n)| same_name(n, name))
+            .map(|(id, _)| *id)
+    };
+    let missing: Vec<&String> = script_names
+        .iter()
+        .filter(|n| card_of(n).is_none())
+        .collect();
+    let with_card = script_names.len().saturating_sub(missing.len());
+
+    kit_section(ui, heading);
+    ui.label(
+        egui::RichText::new(format!(
+            "{} found in the script's {from_label} · {with_card} with a research card",
+            script_names.len()
+        ))
+        .size(11.0)
+        .color(egui::Color32::from_gray(0xA1)),
+    );
+    if !missing.is_empty() {
+        ui.add_space(4.0);
+        if kit_button(
+            ui,
+            &format!(
+                "Add {} missing {noun}{} to Research",
+                missing.len(),
+                if missing.len() == 1 { "" } else { "s" }
+            ),
+        )
+        .on_hover_text("Create a card for every script entity that has none yet.")
+        .clicked()
+        {
+            actions.push(import);
+        }
+    }
+    ui.add_space(8.0);
+
+    if script_names.is_empty() {
+        ui.label(
+            egui::RichText::new(format!(
+                "No {noun}s recognised yet. Write a {from_label} in the script and it \
+                 appears here."
+            ))
+            .size(12.0)
+            .color(egui::Color32::from_gray(0xA1)),
+        );
+    }
+    for name in script_names {
+        let card = card_of(name);
+        ui.horizontal(|ui| match card {
+            Some(id) => {
+                let selected = *state.research_sel == Some(id);
+                if ui.selectable_label(selected, name).clicked() {
+                    *state.research_sel = Some(id);
+                    *state.pane = ResearchPane::Entry(id);
+                }
+                ui.label(
+                    egui::RichText::new("card")
+                        .size(10.0)
+                        .color(egui::Color32::from_gray(0x8C)),
+                );
+            }
+            None => {
+                ui.label(name);
+                if kit_button(ui, &format!("Add {name}")).clicked() {
+                    actions.push(ResearchAction::AddEntry(kind, name.clone()));
+                }
+            }
+        });
+    }
+
+    let only_cards: Vec<&(i64, String)> = cards
+        .iter()
+        .filter(|(_, n)| !script_names.iter().any(|s| same_name(s, n)))
+        .collect();
+    if !only_cards.is_empty() {
+        ui.add_space(10.0);
+        kit_section(ui, "Only in Research");
+        ui.label(
+            egui::RichText::new("Not in the script yet — keep planning notes here.")
+                .size(11.0)
+                .color(egui::Color32::from_gray(0xA1)),
+        );
+        for (id, name) in only_cards {
+            let selected = *state.research_sel == Some(*id);
+            if ui.selectable_label(selected, name).clicked() {
+                *state.research_sel = Some(*id);
+                *state.pane = ResearchPane::Entry(*id);
+            }
+        }
+    }
+}
+
 fn pane_view(ui: &mut Ui, state: &mut ResearchView<'_>, actions: &mut Vec<ResearchAction>) {
     match *state.pane {
         ResearchPane::Script => script_pane(ui, state, actions),
@@ -349,8 +496,12 @@ fn pane_view(ui: &mut Ui, state: &mut ResearchView<'_>, actions: &mut Vec<Resear
         ResearchPane::Synopsis => logline_pane(ui, state, true),
         ResearchPane::Versions => versions_pane(ui, state, actions),
         ResearchPane::Entry(id) => entry_pane(ui, state, actions, id),
-        ResearchPane::Characters | ResearchPane::Locations | ResearchPane::Documents => {
-            ui.label("Select an entry to edit it.");
+        ResearchPane::Characters => {
+            entities_pane(ui, state, actions, kitsp::ResearchKind::Character)
+        }
+        ResearchPane::Locations => entities_pane(ui, state, actions, kitsp::ResearchKind::Location),
+        ResearchPane::Documents => {
+            ui.label("Select a note to edit it.");
         }
     }
 }

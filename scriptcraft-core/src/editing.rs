@@ -55,6 +55,44 @@ pub fn base_character_name(cue: &str) -> &str {
     cue.strip_suffix(" (ПРОД.)").unwrap_or(cue)
 }
 
+/// Bare character name from a cue: everything before a parenthetical
+/// extension (`ИВАН (ПРОД.)`, `IVAN (V.O.)`, `МАРА (шепнешком)`).
+pub fn character_name_of(cue: &str) -> &str {
+    let t = cue.trim();
+    match t.find(" (") {
+        Some(i) => t[..i].trim_end(),
+        None => t,
+    }
+}
+
+/// Case-insensitive name equality that also folds Cyrillic.
+///
+/// `eq_ignore_ascii_case` only folds A-Z, so `ИВАН` and `иван` counted as two
+/// different characters. Script entities dedupe through this instead.
+pub fn same_name(a: &str, b: &str) -> bool {
+    a.to_lowercase() == b.to_lowercase()
+}
+
+/// Characters that speak in the script, in order of first appearance.
+///
+/// Parenthetical extensions are folded into the bare name and duplicates are
+/// matched case-insensitively, so the Research pane and the Tab picker show
+/// one row per character. Use this instead of re-parsing cues at call sites.
+pub fn script_characters(blocks: &[ScriptBlock]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for b in blocks
+        .iter()
+        .filter(|b| b.element_type == ElementType::Character)
+    {
+        let name = character_name_of(&b.text);
+        if name.is_empty() || out.iter().any(|n| same_name(n, name)) {
+            continue;
+        }
+        out.push(name.to_string());
+    }
+    out
+}
+
 /// Apply an autocomplete pick: replace the partial token before `caret`
 /// (a char index into `text`) with the full suggestion. Everything after
 /// the caret is preserved.
@@ -678,6 +716,27 @@ mod tests {
         assert_eq!(
             complete_line_at("Intro.\nEXT. P", 13, "EXT. PARK"),
             "Intro.\nEXT. PARK"
+        );
+    }
+
+    #[test]
+    fn script_characters_folds_extensions_and_duplicates() {
+        use ElementType::*;
+        let blocks = vec![
+            ScriptBlock::new(SceneHeading, "INT. КУХНЯ - ДЕН".into()),
+            ScriptBlock::new(Character, "ИВАН".into()),
+            ScriptBlock::new(Dialogue, "Здравей.".into()),
+            ScriptBlock::new(Character, "МАРА (ПРОД.)".into()),
+            ScriptBlock::new(Dialogue, "Пак аз.".into()),
+            ScriptBlock::new(Character, "ИВАН (V.O.)".into()),
+            ScriptBlock::new(Dialogue, "От глас.".into()),
+            ScriptBlock::new(Character, "иван".into()),
+            ScriptBlock::new(Character, "  ".into()),
+        ];
+        assert_eq!(
+            script_characters(&blocks),
+            vec!["ИВАН".to_string(), "МАРА".to_string()],
+            "cue extensions fold to the bare name and repeats collapse"
         );
     }
 

@@ -19,8 +19,8 @@
 use eframe::egui;
 use scriptcraft_core::edit::{char_index, clamp_pos, pos_at_char, EditCommand, History, Pos};
 use scriptcraft_core::editing::{
-    auto_upper, candidates, complete_at, complete_line_at, enter_next, tab_next, tab_prev,
-    TemplateMetrics,
+    auto_upper, candidates, complete_at, complete_line_at, enter_next, same_name,
+    script_characters, tab_next, tab_prev, TemplateMetrics,
 };
 use scriptcraft_core::model::{ElementType, ScriptBlock};
 use scriptcraft_core::revision::RevisionColor;
@@ -115,6 +115,8 @@ pub struct Auto {
     pub items: Vec<String>,
     /// The caret the dropdown completes at (anywhere else it is stale).
     pub caret: Pos,
+    /// Row the keyboard is on; Enter/Tab commit it.
+    pub highlight: usize,
 }
 
 /// An open spellcheck menu: the flagged word a right-click landed on and
@@ -213,6 +215,9 @@ pub struct ScriptViewStyle<'a> {
     pub options: EditorOptions,
     /// White paper and black ink regardless of the theme.
     pub paper_mono: bool,
+    /// Research characters offered by the Tab picker (the script's own cues
+    /// are always included; these are cards planned ahead of the script).
+    pub picker_characters: &'a [String],
 }
 
 /// What the widget wants the app to apply this frame.
@@ -242,6 +247,7 @@ pub fn script_view(
         omitted_headings,
         options,
         paper_mono,
+        picker_characters,
     } = style;
     let page = page_size_pt(zoom);
     let scale = PT_PER_MM * zoom;
@@ -348,7 +354,11 @@ pub fn script_view(
                         tab: true,
                         horizontal_arrows: true,
                         vertical_arrows: true,
-                        escape: false,
+                        // The widget closes its own dropdown on Escape; if
+                        // egui took the key it would also drop focus, and the
+                        // next Tab would leave the editor instead of picking
+                        // another character.
+                        escape: true,
                     },
                 );
             });
@@ -432,6 +442,7 @@ pub fn script_view(
                     state,
                     hidden_blocks,
                     omitted_headings,
+                    picker_characters,
                 );
                 text_edited |= edited;
                 caret_moved |= moved;
@@ -446,7 +457,8 @@ pub fn script_view(
                     state.autocomplete = None;
                 }
                 if text_edited {
-                    state.autocomplete = autocomplete_for(ed.blocks(), state.selection);
+                    state.autocomplete =
+                        autocomplete_for(ed.blocks(), state.selection, picker_characters);
                 }
             }
         }
@@ -687,8 +699,8 @@ pub fn script_view(
                             egui::Frame::popup(ui.style()).show(ui, |ui| {
                                 ui.set_min_width(220.0);
                                 ui.spacing_mut().item_spacing.y = 2.0;
-                                for s in &auto.items {
-                                    let r = ui.selectable_label(false, s);
+                                for (i, s) in auto.items.iter().enumerate() {
+                                    let r = ui.selectable_label(i == auto.highlight, s);
                                     if r.clicked() {
                                         picked = Some(s.clone());
                                     }
@@ -792,6 +804,7 @@ fn apply_completion(
 
 /// Process text/keys/clipboard events in order against the working copy.
 /// Returns `(text_edited, caret_moved)` for autocomplete bookkeeping.
+#[allow(clippy::too_many_arguments)]
 fn handle_events(
     ui: &mut egui::Ui,
     doc: &DocLayout,
@@ -800,6 +813,7 @@ fn handle_events(
     state: &mut EditState,
     hidden_blocks: &[uuid::Uuid],
     omitted_headings: &[uuid::Uuid],
+    picker_characters: &[String],
 ) -> (bool, bool) {
     let mut text_edited = false;
     let mut caret_moved = false;
@@ -835,6 +849,56 @@ fn handle_events(
                     }
                     caret_moved = true;
                     continue;
+                }
+                // Tab in an empty character cue asks which character speaks
+                // instead of cycling the element type: the writer picks a
+                // known name from the story rather than retyping it.
+                if *key == egui::Key::Tab
+                    && !modifiers.shift
+                    && !modifiers.command
+                    && state.autocomplete.is_none()
+                {
+                    if let Some(picker) = character_picker(ed.blocks(), ed.sel, picker_characters) {
+                        state.autocomplete = Some(picker);
+                        continue;
+                    }
+                }
+                // While the dropdown is open it owns Up/Down/Enter/Tab/Escape,
+                // so a pick never also splits the block or moves the caret.
+                if state.autocomplete.is_some() && !modifiers.command && !modifiers.shift {
+                    let (nav, commit, close) = match key {
+                        egui::Key::ArrowDown => (1i32, false, false),
+                        egui::Key::ArrowUp => (-1, false, false),
+                        egui::Key::Enter | egui::Key::Tab => (0, true, false),
+                        egui::Key::Escape => (0, false, true),
+                        _ => (0, false, false),
+                    };
+                    if let Some(auto) = state.autocomplete.as_mut() {
+                        if nav != 0 && !auto.items.is_empty() {
+                            let len = auto.items.len() as i32;
+                            auto.highlight =
+                                (((auto.highlight as i32 + nav) % len + len) % len) as usize;
+                        }
+                    }
+                    if nav != 0 {
+                        continue;
+                    }
+                    if close {
+                        state.autocomplete = None;
+                        continue;
+                    }
+                    if commit {
+                        let pick = state
+                            .autocomplete
+                            .as_ref()
+                            .and_then(|a| a.items.get(a.highlight).cloned().map(|s| (s, a.caret)));
+                        if let Some((pick, caret)) = pick {
+                            let mut cmds = Vec::new();
+                            apply_completion(ed.blocks(), caret, &pick, &mut cmds, state);
+                            ed.cmds.extend(cmds);
+                            continue;
+                        }
+                    }
                 }
                 if let Some(action) = key_action(
                     ed.blocks(),
@@ -891,7 +955,15 @@ fn handle_events(
 
 /// Candidates for the caret's current partial line, if any (opened only on
 /// an actual edit — focusing a block never pops the dropdown).
-fn autocomplete_for(blocks: &[ScriptBlock], sel: Option<Selection>) -> Option<Auto> {
+///
+/// In a character cue, names from Research that the script has not used yet
+/// are offered after the script's own cues, so a planned character is
+/// reachable while typing, not only once written.
+fn autocomplete_for(
+    blocks: &[ScriptBlock],
+    sel: Option<Selection>,
+    extra_characters: &[String],
+) -> Option<Auto> {
     let s = sel?;
     if s.anchor != s.focus {
         return None;
@@ -903,11 +975,65 @@ fn autocomplete_for(blocks: &[ScriptBlock], sel: Option<Selection>) -> Option<Au
     if typed.trim().is_empty() {
         return None;
     }
-    let items = candidates(blocks, b.element_type, &typed);
+    let mut items = candidates(blocks, b.element_type, &typed);
+    if b.element_type == ElementType::Character {
+        const CAP: usize = 8;
+        let up = typed.trim().to_uppercase();
+        for name in extra_characters {
+            let name = name.trim();
+            if name.is_empty()
+                || items.iter().any(|s| same_name(s, name))
+                || !(up.is_empty() || name.to_uppercase().starts_with(&up))
+            {
+                continue;
+            }
+            items.push(name.to_uppercase());
+            if items.len() >= CAP {
+                break;
+            }
+        }
+    }
     if items.is_empty() {
         return None;
     }
-    Some(Auto { items, caret: pos })
+    Some(Auto {
+        items,
+        caret: pos,
+        highlight: 0,
+    })
+}
+
+/// The Tab picker: in an empty character cue, every character the story
+/// already knows (script cues first, then Research cards not yet in the
+/// script). `None` elsewhere, so Tab keeps cycling element types.
+fn character_picker(
+    blocks: &[ScriptBlock],
+    sel: Option<Selection>,
+    extra: &[String],
+) -> Option<Auto> {
+    let s = sel?;
+    if s.anchor != s.focus {
+        return None;
+    }
+    let pos = s.focus;
+    let b = blocks.get(pos.bi)?;
+    if b.element_type != ElementType::Character || !b.text.trim().is_empty() {
+        return None;
+    }
+    let mut items = script_characters(blocks);
+    for name in extra {
+        if !name.trim().is_empty() && !items.iter().any(|n| same_name(n, name)) {
+            items.push(name.clone());
+        }
+    }
+    if items.is_empty() {
+        return None;
+    }
+    Some(Auto {
+        items,
+        caret: pos,
+        highlight: 0,
+    })
 }
 
 /// The widget's working copy for one frame plus the commands it produced.
@@ -3119,6 +3245,61 @@ mod tests {
             ),
             Some((9, 13))
         );
+    }
+
+    #[test]
+    fn typed_cue_dropdown_includes_research_only_characters() {
+        let blocks = vec![
+            ScriptBlock::new(ElementType::Character, "ИВАН".into()),
+            ScriptBlock::new(ElementType::Character, "И".into()),
+        ];
+        let sel = Some(Selection::caret(Pos {
+            bi: 1,
+            para: 0,
+            ch: 1,
+        }));
+        let extras = vec!["ИВАН".to_string(), "ИЛИЯ".to_string(), "МАРА".to_string()];
+        let auto = autocomplete_for(&blocks, sel, &extras).expect("typed cue offers names");
+        assert_eq!(
+            auto.items.iter().filter(|s| s.as_str() == "ИВАН").count(),
+            1,
+            "a Research card must not duplicate a script cue"
+        );
+        assert!(
+            auto.items.iter().any(|s| s == "ИЛИЯ"),
+            "a planned Research character is offered while typing"
+        );
+        assert!(
+            !auto.items.iter().any(|s| s == "МАРА"),
+            "the typed prefix still filters every suggestion"
+        );
+    }
+
+    #[test]
+    fn tab_picker_lists_story_characters_only_in_an_empty_cue() {
+        let blocks = vec![
+            ScriptBlock::new(ElementType::Action, "Чува се шум.".into()),
+            ScriptBlock::new(ElementType::Character, "ИВАН".into()),
+            ScriptBlock::new(ElementType::Dialogue, "Здравей.".into()),
+            ScriptBlock::new(ElementType::Character, "МАРА (ПРОД.)".into()),
+            ScriptBlock::new(ElementType::Dialogue, "Пак аз.".into()),
+            ScriptBlock::new(ElementType::Character, String::new()),
+        ];
+        let extra = vec!["ПЕТЪР".to_string(), "ИВАН".to_string()];
+        let caret = |bi| Some(Selection::caret(Pos { bi, para: 0, ch: 0 }));
+        let picker = character_picker(&blocks, caret(5), &extra).expect("empty cue offers names");
+        assert_eq!(
+            picker.items,
+            vec!["ИВАН".to_string(), "МАРА".to_string(), "ПЕТЪР".to_string()],
+            "script cues come first (extensions folded), then Research-only names"
+        );
+        assert_eq!(picker.highlight, 0);
+        assert_eq!(picker.caret, caret(5).unwrap().focus);
+
+        // A cue that already has text keeps KIT's Tab type cycling.
+        assert!(character_picker(&blocks, caret(1), &extra).is_none());
+        // So does every other element type.
+        assert!(character_picker(&blocks, caret(0), &extra).is_none());
     }
 
     #[test]
