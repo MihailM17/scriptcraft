@@ -2152,3 +2152,45 @@ Omarchy uses, and the monochrome setting moved directly under the theme setting.
 - Gate green: app 57 lib + 68 interaction + 28 snapshots; core 101 lib + 54
   integration; layout 30 lib + 24 integration; clippy, deny and diff checks
   clean. Release notes v0.8.6 and README updated; still unreleased.
+
+### 2026-11-16 — Theme dropdown, system Courier New, update checking
+
+Requested: the theme picker as a dropdown without clutter or uneven rows, a
+Courier Prime/Courier New page face, and a Check for updates button with a
+prompt when a newer release appears.
+
+- **Theme dropdown.** The 28-card swatch grid became one grouped
+  `egui::ComboBox` (`theme`), with **ScriptCraft** and **Omarchy** headings,
+  a fixed 380 px popup and a solid 10 px scrollbar
+  (`spacing.scroll.floating = false`). `theme_grid` was deleted. The grid's
+  first row had been inset differently from later rows; every Application row
+  now starts at the same 16 px inset, asserted by
+  `settings_application_rows_align_to_one_inset`.
+- **Courier New, from the OS.** `ScriptFace::CourierNew` (key `courier-new`,
+  label "Courier New (system font)") is the third choice. Its licence forbids
+  redistribution, so `system_font.rs` reads the installed file at runtime
+  (macOS `/System/Library/Fonts/Supplemental`, Windows `cour*.ttf`, Linux
+  mscorefonts paths), validates the sfnt tag and falls back to Courier Prime
+  when absent. Both are 0.6 em, so pagination is unchanged; Settings warns when
+  the selected face is not installed.
+- **Italic fallback order matters.** Courier New Italic contains Cyrillic, but
+  placing it before Plex in `ItalicMono` silently changed existing Cyrillic
+  italics (snapshot 18). It now sits after Plex unless Courier New is the
+  chosen face. `every_script_face_exports_a_pdf` covers the owned-bytes path.
+- **Update checking.** `update.rs` fetches
+  `api.github.com/repos/MihailM17/scriptcraft/releases/latest` with `curl`
+  (`--max-time 12`, `--proto =https`) on a worker thread, parses it with
+  `serde_json` (the only new dependency), compares semantic versions and
+  reports Idle/Checking/UpToDate/Available/Failed. Settings ▸ Application has
+  the version, status and button; `run()` starts one check on open and the
+  outcome opens a modal with **Download update** (release page) and **Later**.
+  Nothing self-installs: the build is ad-hoc signed. Tests inject state, so the
+  suite stays offline.
+- Tests: dropdown palette switching (light and dark-to-dark), row alignment,
+  rounded palette list, face selection incl. Courier New, PDF per face,
+  Settings button and status rendering, and prompt dismissal.
+- Snapshots: 07 and 16 regenerated for the dropdown/Courier New row; 30
+  (`30_settings_theme_menu`) and 31 (`31_update_prompt`) added; 18 confirmed
+  stable after the italic-order fix. All viewed.
+- Gate green: fmt, clippy, workspace tests, deny, `git diff --check`.
+  README, release notes and this log updated. Nothing tagged or published.

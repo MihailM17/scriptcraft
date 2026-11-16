@@ -34,6 +34,10 @@ pub enum ScriptFace {
     /// Courier Prime: the classic screenplay look. Latin only — Cyrillic is
     /// drawn from IBM Plex Mono.
     CourierPrime,
+    /// Courier New: the Windows/Mac system face. Not bundled (its licence
+    /// does not allow redistribution); read from the OS, and Courier Prime is
+    /// used when the system doesn't have it.
+    CourierNew,
     /// IBM Plex Mono: monospaced, with a matched Latin and Cyrillic design.
     /// The default: it is the only bundled face whose Latin and Cyrillic
     /// share proportions, so mixed-script pages stay level.
@@ -42,11 +46,12 @@ pub enum ScriptFace {
 }
 
 impl ScriptFace {
-    pub const ALL: [Self; 2] = [Self::PlexMono, Self::CourierPrime];
+    pub const ALL: [Self; 3] = [Self::PlexMono, Self::CourierPrime, Self::CourierNew];
 
     pub fn key(self) -> &'static str {
         match self {
             Self::CourierPrime => "courier",
+            Self::CourierNew => "courier-new",
             Self::PlexMono => "plex",
         }
     }
@@ -54,6 +59,7 @@ impl ScriptFace {
     pub fn label(self) -> &'static str {
         match self {
             Self::CourierPrime => "Courier Prime (classic, Latin only)",
+            Self::CourierNew => "Courier New (system font)",
             Self::PlexMono => "IBM Plex Mono (Latin + Cyrillic)",
         }
     }
@@ -61,9 +67,16 @@ impl ScriptFace {
     pub fn from_key(key: &str) -> Option<Self> {
         match key.trim() {
             "courier" | "courier_prime" => Some(Self::CourierPrime),
+            "courier-new" | "courier_new" => Some(Self::CourierNew),
             "plex" | "plex_mono" => Some(Self::PlexMono),
             _ => None,
         }
+    }
+
+    /// True when the chosen face is Courier New but the OS doesn't have it,
+    /// so the page is drawn and exported with Courier Prime instead.
+    pub fn is_fallback(self) -> bool {
+        self == Self::CourierNew && !crate::system_font::courier_new_installed()
     }
 }
 
@@ -229,11 +242,18 @@ impl AppSettings {
 pub struct SettingsOutcome {
     pub changed: bool,
     pub reset: bool,
+    /// The writer pressed "Check for updates".
+    pub check_updates: bool,
 }
 
 /// Draw the Settings module. `changed` means an option was edited; `reset`
 /// means the defaults were restored (also included in `changed`).
-pub fn show(ctx: &Context, settings: &mut AppSettings, page: &mut SettingsPage) -> SettingsOutcome {
+pub fn show(
+    ctx: &Context,
+    settings: &mut AppSettings,
+    page: &mut SettingsPage,
+    update: &crate::update::Check,
+) -> SettingsOutcome {
     let mut outcome = SettingsOutcome::default();
     egui::CentralPanel::default().show(ctx, |ui| {
         ui.add_space(20.0);
@@ -279,12 +299,13 @@ pub fn show(ctx: &Context, settings: &mut AppSettings, page: &mut SettingsPage) 
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         let result = match page {
-                            SettingsPage::Application => settings_application(ui, settings),
+                            SettingsPage::Application => settings_application(ui, settings, update),
                             SettingsPage::ScenarioEditor => settings_editor(ui, settings),
                             SettingsPage::Navigator => settings_navigator(ui, settings),
                         };
                         outcome.changed |= result.0;
                         outcome.reset |= result.1;
+                        outcome.check_updates |= result.2;
                     });
             });
         });
@@ -320,83 +341,16 @@ fn settings_nav_row(ui: &mut Ui, label: &str, selected: bool) -> egui::Response 
     resp
 }
 
-/// One card per theme in `group`: a paper swatch, the accent bar and a text
-/// sample, with the theme name underneath. Selecting a card sets the theme;
-/// `ScriptCraftApp` re-applies the palette on the next frame.
-fn theme_grid(ui: &mut Ui, settings: &mut AppSettings, group: ThemeGroup) -> bool {
-    let mut changed = false;
-    const CELL: egui::Vec2 = egui::vec2(108.0, 56.0);
-    ui.horizontal_wrapped(|ui| {
-        ui.add_space(16.0);
-        ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
-        for theme in group.themes() {
-            let selected = settings.theme == *theme;
-            let (rect, resp) = ui.allocate_exact_size(CELL, egui::Sense::click());
-            if !ui.is_rect_visible(rect) {
-                continue;
-            }
-            let c = *theme.palette();
-            let painter = ui.painter();
-            let bg = if resp.hovered() {
-                c.button_hover
-            } else {
-                c.window
-            };
-            painter.rect_filled(rect, 6.0, bg);
-            let paper = egui::Rect::from_min_max(
-                egui::pos2(rect.left() + 7.0, rect.top() + 7.0),
-                egui::pos2(rect.left() + 47.0, rect.bottom() - 7.0),
-            );
-            painter.rect_filled(paper, 2.0, c.page);
-            painter.rect_stroke(
-                paper,
-                2.0,
-                egui::Stroke::new(1.0_f32, c.page_edge),
-                egui::StrokeKind::Inside,
-            );
-            let bar = egui::Rect::from_min_max(
-                egui::pos2(rect.left() + 55.0, rect.top() + 10.0),
-                egui::pos2(rect.right() - 7.0, rect.top() + 16.0),
-            );
-            painter.rect_filled(bar, 3.0, c.accent);
-            let sample = egui::Rect::from_min_max(
-                egui::pos2(rect.left() + 55.0, rect.top() + 25.0),
-                egui::pos2(rect.right() - 16.0, rect.top() + 29.0),
-            );
-            painter.rect_filled(sample, 2.0, c.text);
-            painter.text(
-                egui::pos2(rect.left() + 7.0, rect.bottom() - 8.0),
-                egui::Align2::LEFT_BOTTOM,
-                theme.label(),
-                egui::FontId::proportional(10.0),
-                c.text,
-            );
-            if selected {
-                painter.rect_stroke(
-                    rect,
-                    6.0,
-                    egui::Stroke::new(2.0_f32, c.accent),
-                    egui::StrokeKind::Inside,
-                );
-            }
-            let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
-            if resp.clicked() {
-                settings.theme = *theme;
-                changed = true;
-            }
-            resp.widget_info(|| {
-                egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, theme.label())
-            });
-        }
-    });
-    changed
-}
-
 /// Application page: theme, autosave, backups and the reset action.
-/// Returns `(changed, reset)`.
-fn settings_application(ui: &mut Ui, settings: &mut AppSettings) -> (bool, bool) {
+/// Returns `(changed, reset, check_updates)`.
+fn settings_application(
+    ui: &mut Ui,
+    settings: &mut AppSettings,
+    update: &crate::update::Check,
+) -> (bool, bool, bool) {
     let mut changed = false;
     let mut reset = false;
+    let mut check_updates = false;
     let mut v = ui.visuals().clone();
     v.extreme_bg_color = kit().field_stroke;
     v.widgets.inactive.weak_bg_fill = kit().field_stroke;
@@ -417,26 +371,39 @@ fn settings_application(ui: &mut Ui, settings: &mut AppSettings) -> (bool, bool)
         ui.add_space(16.0);
         ui.label("Theme:");
         ui.add_space(6.0);
-        ui.label(egui::RichText::new(settings.theme.label()).strong());
+        // A single dropdown, grouped by family. A solid scrollbar (rather
+        // than egui's floating, fade-in bar) makes it obvious that the list
+        // continues below the fold.
+        let popup_style: egui::style::StyleModifier = (|style: &mut egui::Style| {
+            style.spacing.scroll.floating = false;
+            style.spacing.scroll.bar_width = 10.0;
+        })
+        .into();
+        egui::ComboBox::from_id_salt("theme")
+            .selected_text(settings.theme.label())
+            .width(220.0)
+            .height(380.0)
+            .popup_style(popup_style)
+            .show_ui(ui, |ui| {
+                for group in ThemeGroup::ALL {
+                    if group != ThemeGroup::ALL[0] {
+                        ui.add_space(6.0);
+                    }
+                    ui.label(
+                        egui::RichText::new(group.label())
+                            .size(11.0)
+                            .strong()
+                            .color(kit().disabled_text),
+                    );
+                    for theme in group.themes() {
+                        changed |= ui
+                            .selectable_value(&mut settings.theme, *theme, theme.label())
+                            .changed();
+                    }
+                }
+            });
     });
-    ui.add_space(6.0);
-    // A swatch per theme instead of a long dropdown: with 28 palettes every
-    // one is visible at once, and the swatch previews the page, accent and
-    // text colours before the click.
-    for group in ThemeGroup::ALL {
-        ui.horizontal(|ui| {
-            ui.add_space(16.0);
-            ui.label(
-                egui::RichText::new(group.label())
-                    .size(11.0)
-                    .color(kit().disabled_text),
-            );
-        });
-        ui.add_space(3.0);
-        changed |= theme_grid(ui, settings, group);
-        ui.add_space(4.0);
-    }
-    ui.add_space(4.0);
+    ui.add_space(8.0);
     // Right under the theme it modifies: the page can drop to white paper and
     // black ink while the palette above keeps the rest of the app themed.
     ui.horizontal(|ui| {
@@ -504,6 +471,54 @@ fn settings_application(ui: &mut Ui, settings: &mut AppSettings) -> (bool, bool)
             }
         }
     });
+    ui.add_space(20.0);
+    kit_section(ui, "Updates");
+    ui.horizontal(|ui| {
+        ui.add_space(16.0);
+        ui.label(egui::RichText::new(format!("ScriptCraft {}", crate::update::CURRENT)).strong());
+        ui.add_space(8.0);
+        let note = update.note();
+        if !note.is_empty() {
+            let color = match update {
+                crate::update::Check::Failed(_) => kit().spell_error,
+                crate::update::Check::Available(_) => kit().accent_text,
+                _ => kit().disabled_text,
+            };
+            ui.label(egui::RichText::new(note).color(color))
+                .on_hover_text(update.detail());
+        }
+    });
+    ui.add_space(8.0);
+    ui.horizontal(|ui| {
+        ui.add_space(16.0);
+        let checking = update.is_checking();
+        let label = if checking {
+            "Checking…"
+        } else {
+            "Check for updates"
+        };
+        let button = egui::Button::new(egui::RichText::new(label).size(12.5))
+            .min_size(egui::vec2(150.0, 26.0));
+        if ui
+            .add_enabled(!checking, button)
+            .on_hover_text(update.detail())
+            .clicked()
+        {
+            check_updates = true;
+        }
+    });
+    ui.add_space(4.0);
+    ui.horizontal_wrapped(|ui| {
+        ui.add_space(16.0);
+        ui.label(
+            egui::RichText::new(
+                "Asks GitHub for the latest release. ScriptCraft also checks when it opens, \
+                 and offers a newer version in a prompt.",
+            )
+            .size(11.0)
+            .color(kit().disabled_text),
+        );
+    });
     ui.add_space(24.0);
     if start_button(ui, None, "Reset Settings") {
         *settings = AppSettings::default();
@@ -511,11 +526,11 @@ fn settings_application(ui: &mut Ui, settings: &mut AppSettings) -> (bool, bool)
         changed = true;
     }
     ui.add_space(24.0);
-    (changed, reset)
+    (changed, reset, check_updates)
 }
 
 /// Scenario Editor page: KIT's view toggles and automatic corrections.
-fn settings_editor(ui: &mut Ui, settings: &mut AppSettings) -> (bool, bool) {
+fn settings_editor(ui: &mut Ui, settings: &mut AppSettings) -> (bool, bool, bool) {
     let mut changed = false;
     kit_section(ui, "Page");
     ui.horizontal(|ui| {
@@ -552,14 +567,29 @@ fn settings_editor(ui: &mut Ui, settings: &mut AppSettings) -> (bool, bool) {
         ui.label(
             egui::RichText::new(
                 "IBM Plex Mono draws Latin and Cyrillic with the same proportions and \
-                 baseline. Courier Prime is the classic screenplay face but has no \
-                 Cyrillic, so Cyrillic falls back to Plex. The page grid does not \
-                 change, so pagination is identical with either face.",
+                 baseline. Courier Prime and Courier New are the classic screenplay \
+                 faces; neither has Cyrillic, so Cyrillic falls back to Plex. All three \
+                 share 0.6 em advances, so pagination is identical whichever face you \
+                 pick.",
             )
             .size(11.0)
             .color(kit().disabled_text),
         );
     });
+    if settings.script_face.is_fallback() {
+        ui.add_space(4.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.add_space(16.0);
+            ui.label(
+                egui::RichText::new(
+                    "Courier New is not installed on this computer, so pages use Courier \
+                     Prime until it is.",
+                )
+                .size(11.0)
+                .color(kit().spell_error),
+            );
+        });
+    }
     ui.add_space(20.0);
     kit_section(ui, "View");
     ui.horizontal(|ui| {
@@ -679,11 +709,11 @@ fn settings_editor(ui: &mut Ui, settings: &mut AppSettings) -> (bool, bool) {
         .size(11.0)
         .color(kit().disabled_text),
     );
-    (changed, false)
+    (changed, false, false)
 }
 
 /// Navigator page: what each scene row shows.
-fn settings_navigator(ui: &mut Ui, settings: &mut AppSettings) -> (bool, bool) {
+fn settings_navigator(ui: &mut Ui, settings: &mut AppSettings) -> (bool, bool, bool) {
     let mut changed = false;
     kit_section(ui, "Scene list");
     ui.horizontal(|ui| {
@@ -707,5 +737,5 @@ fn settings_navigator(ui: &mut Ui, settings: &mut AppSettings) -> (bool, bool) {
             .size(11.0)
             .color(kit().disabled_text),
     );
-    (changed, false)
+    (changed, false, false)
 }

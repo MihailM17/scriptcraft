@@ -545,3 +545,34 @@ fn snap_29_script_kit_scenarist() {
     h.run();
     h.snapshot("29_script_kit_scenarist");
 }
+
+/// Settings ▸ Theme: one dropdown, two family headings, a solid scrollbar.
+#[test]
+fn snap_30_settings_theme_menu() {
+    use egui_kittest::kittest::{NodeT, Queryable};
+
+    let mut h = harness(SideTab::Settings, None);
+    h.run();
+    h.get_all_by_role(egui::accesskit::Role::ComboBox)
+        .find(|n| !n.accesskit_node().is_disabled())
+        .expect("theme chooser should be an enabled combo box")
+        .click();
+    h.run();
+    h.snapshot("30_settings_theme_menu");
+}
+
+/// The on-open update prompt, with the injected version (no network).
+#[test]
+fn snap_31_update_prompt() {
+    use scriptcraft_app::update::{Check, Release};
+
+    let mut h = harness(SideTab::Script, None);
+    h.run();
+    h.state_mut()
+        .set_update_check_for_test(Check::Available(Release {
+            version: "0.8.7".to_string(),
+            url: "https://github.com/MihailM17/scriptcraft/releases/tag/v0.8.7".to_string(),
+        }));
+    h.run_steps(2);
+    h.snapshot("31_update_prompt");
+}

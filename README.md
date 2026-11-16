@@ -15,10 +15,11 @@ macOS, Windows and Linux.
 > `.kitsp` saves preserve unknown sidecar rows, and CI runs runtime interaction
 > smoke on macOS/Linux/Windows. v0.8.6 keeps every typed space on the page,
 > makes IBM Plex Mono the default face so Latin and Cyrillic share one design
-> (Courier Prime stays as a Latin-only option), adds a monochrome-paper theme
-> option directly under the theme picker, 28 theme palettes shown as swatches
-> (KIT Scenarist plus every base Omarchy theme), a Tab character picker and
-> live script recognition in Research.
+> (Courier Prime and the system's Courier New stay as Latin-only options), adds
+> a monochrome-paper option directly under the theme picker, 28 theme palettes
+> in a grouped dropdown (KIT Scenarist plus every base Omarchy theme), a Tab
+> character picker, live script recognition in Research, and a release check
+> that offers a newer version when the app opens.
 > v0.8.5 corrected editor input: clicks and carets map through whitespace,
 > double-click selects a word, triple-click the paragraph, and drag selections
 > start at the press. v0.8.4 added live
@@ -79,8 +80,9 @@ app on day one.
 
 ## The editor
 
-- Fixed A4 page editor with IBM Plex Mono (Courier Prime optional) for one
-  type design across Latin and Cyrillic, page-accurate pagination, scene
+- Fixed A4 page editor with IBM Plex Mono (Courier Prime and the system's
+  Courier New optional) for one type design across Latin and Cyrillic,
+  page-accurate pagination, scene
   numbers, `(MORE)` / `(CONT'D)` markers, and zoom that scales pages without
   reflowing text. Every space you type keeps its own cell, on screen and in the
   PDF.
@@ -100,8 +102,9 @@ app on day one.
   word for suggestions, **Add to dictionary** (saved per language) or
   **Ignore**; scene headings, cues and sound effects in ALL CAPS are skipped so
   screenplay formatting is not flagged as prose.
-- 28 theme palettes in Settings ▸ Theme, shown as swatches with a page,
-  accent and text preview. ScriptCraft's own are Midnight, Light, Sepia, High
+- 28 theme palettes in one grouped Settings ▸ Theme dropdown, with the
+  ScriptCraft and Omarchy families as headings and a solid scrollbar so the
+  long list is obvious. ScriptCraft's own are Midnight, Light, Sepia, High
   Contrast and **KIT Scenarist** — a light imitation of KIT's warm-grey chrome
   and orange mark. The rest are the base themes Omarchy ships, imported from
   its palettes: Catppuccin, Catppuccin Latte, Ethereal, Everforest, Flexoki
@@ -110,6 +113,10 @@ app on day one.
   Starship, Tokyo Night, Vantablack and White. Every palette is contrast-tested,
   and revision colours stay industry-standard on all of them (pale marks get an
   edge so they remain locatable on white and cream pages).
+- **Check for updates.** Settings ▸ Application shows the build version and a
+  Check for updates button; the app also asks GitHub once at launch. When a
+  newer release exists it offers a download link instead of updating silently —
+  builds are ad-hoc signed, so there is no self-installer.
 - Monochrome paper, directly under the theme picker, turns the page
   white-with-black-ink while the app keeps its theme; revision marks stay
   coloured.

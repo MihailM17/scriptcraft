@@ -69,6 +69,7 @@ pub fn run() -> eframe::Result<()> {
             install_fonts(&cc.egui_ctx);
             let mut app = ScriptCraftApp::default();
             app.load_persistent();
+            app.start_update_check_on_open();
             crate::quit_guard::install(&cc.egui_ctx);
             #[cfg(target_os = "macos")]
             {
@@ -106,8 +107,8 @@ pub fn install_script_fonts(ctx: &egui::Context, face: crate::settings::ScriptFa
         "ui_bold".to_owned(),
         egui::FontData::from_static(include_bytes!("../assets/fonts/PT_Sans-Web-Bold.ttf")).into(),
     );
-    // Script face: Courier Prime (OFL, screenplay metrics), IBM Plex Mono
-    // behind it as a safety net (same 0.6em advance, alignment preserved).
+    // Bundled script faces: Courier Prime (OFL, screenplay metrics) and IBM
+    // Plex Mono (the only one with Cyrillic).
     fonts.font_data.insert(
         "courier_prime".to_owned(),
         egui::FontData::from_static(include_bytes!("../assets/fonts/CourierPrime-Regular.ttf"))
@@ -131,39 +132,109 @@ pub fn install_script_fonts(ctx: &egui::Context, face: crate::settings::ScriptFa
         "plex_mono_bold".to_owned(),
         egui::FontData::from_static(include_bytes!("../assets/fonts/IBMPlexMono-Bold.ttf")).into(),
     );
-    let (script_regular, script_bold) = match face {
-        ScriptFace::CourierPrime => ("courier_prime", "courier_prime_bold"),
-        ScriptFace::PlexMono => ("plex_mono", "plex_mono_bold"),
+    // Courier New ships with macOS and Windows but may not be redistributed,
+    // so it is read from the OS at runtime. Registering it only when present
+    // keeps a missing font a clean fallback instead of an empty family.
+    if let Some(system) = crate::system_font::courier_new() {
+        fonts.font_data.insert(
+            "courier_new".to_owned(),
+            egui::FontData::from_owned(system.regular.clone()).into(),
+        );
+        if let Some(bold) = &system.bold {
+            fonts.font_data.insert(
+                "courier_new_bold".to_owned(),
+                egui::FontData::from_owned(bold.clone()).into(),
+            );
+        }
+        if let Some(italic) = &system.italic {
+            fonts.font_data.insert(
+                "courier_new_italic".to_owned(),
+                egui::FontData::from_owned(italic.clone()).into(),
+            );
+        }
+    }
+    let has_new = fonts.font_data.contains_key("courier_new");
+    let has_new_bold = fonts.font_data.contains_key("courier_new_bold");
+    let has_new_italic = fonts.font_data.contains_key("courier_new_italic");
+    let (script_regular, script_bold, script_italic) = match face {
+        ScriptFace::PlexMono => ("plex_mono", "plex_mono_bold", "courier_prime_italic"),
+        ScriptFace::CourierPrime => (
+            "courier_prime",
+            "courier_prime_bold",
+            "courier_prime_italic",
+        ),
+        // Without the system files the page uses Courier Prime; the Settings
+        // page says so, and the metrics are identical.
+        ScriptFace::CourierNew if has_new => (
+            "courier_new",
+            if has_new_bold {
+                "courier_new_bold"
+            } else {
+                "courier_new"
+            },
+            if has_new_italic {
+                "courier_new_italic"
+            } else {
+                "courier_prime_italic"
+            },
+        ),
+        ScriptFace::CourierNew => (
+            "courier_prime",
+            "courier_prime_bold",
+            "courier_prime_italic",
+        ),
     };
     if let Some(prop) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
         prop.insert(0, "ui_regular".to_owned());
     }
+    // The chosen face first; the others stay behind it so a glyph it lacks
+    // (Cyrillic in Courier New/Prime) still renders with the same 0.6em
+    // advance. Duplicates are removed, and fonts not registered are skipped.
     let mut mono = vec![script_regular.to_owned()];
-    for extra in ["courier_prime", "plex_mono", "courier_prime_italic"] {
-        if extra != script_regular {
+    for extra in [
+        "courier_prime",
+        "plex_mono",
+        "courier_prime_italic",
+        "courier_new",
+    ] {
+        if extra != script_regular && fonts.font_data.contains_key(extra) {
             mono.push(extra.to_owned());
         }
     }
     mono.extend(fonts.families[&egui::FontFamily::Monospace].iter().cloned());
     fonts.families.insert(egui::FontFamily::Monospace, mono);
-    fonts.families.insert(
-        bold_mono(),
-        vec![
-            script_bold.to_owned(),
-            "plex_mono_bold".to_owned(),
-            "courier_prime_bold".to_owned(),
-            "plex_mono".to_owned(),
-            "courier_prime".to_owned(),
-        ],
-    );
-    fonts.families.insert(
-        italic_mono(),
-        vec![
-            "courier_prime_italic".to_owned(),
-            "courier_prime".to_owned(),
-            "plex_mono".to_owned(),
-        ],
-    );
+
+    let mut bold = vec![script_bold.to_owned()];
+    for extra in [
+        "courier_prime_bold",
+        "plex_mono_bold",
+        "courier_new_bold",
+        "courier_prime",
+        "plex_mono",
+        "courier_new",
+    ] {
+        if !bold.iter().any(|f| f == extra) && fonts.font_data.contains_key(extra) {
+            bold.push(extra.to_owned());
+        }
+    }
+    fonts.families.insert(bold_mono(), bold);
+
+    let mut italic = vec![script_italic.to_owned()];
+    // Courier New Italic has Cyrillic, but it stays behind Plex unless it is
+    // the chosen face: otherwise adding the system font would silently change
+    // how existing Cyrillic italics look.
+    for extra in [
+        "courier_prime_italic",
+        "courier_prime",
+        "plex_mono",
+        "courier_new_italic",
+        "courier_new",
+    ] {
+        if !italic.iter().any(|f| f == extra) && fonts.font_data.contains_key(extra) {
+            italic.push(extra.to_owned());
+        }
+    }
+    fonts.families.insert(italic_mono(), italic);
     ctx.set_fonts(fonts);
 }
 
@@ -451,6 +522,8 @@ pub struct ScriptCraftApp {
     recent: Vec<(String, String)>,
     settings: AppSettings,
     settings_page: SettingsPage,
+    /// Latest-release check, run on open and from Settings ▸ Application.
+    update: crate::update::UpdateState,
     /// Script face currently installed in the egui context.
     rendered_script_face: Option<crate::settings::ScriptFace>,
     /// Disk persistence armed (real app only; tests never touch the disk).
@@ -558,6 +631,7 @@ impl Default for ScriptCraftApp {
             recent: Vec::new(),
             settings: AppSettings::default(),
             settings_page: SettingsPage::Application,
+            update: crate::update::UpdateState::default(),
             rendered_script_face: None,
             persist: false,
             last_autosave: std::time::Instant::now(),
@@ -825,6 +899,101 @@ impl ScriptCraftApp {
         }
     }
 
+    /// One prompt per detected release. The build is ad-hoc signed and has no
+    /// updater, so the action opens the release page in the browser; the
+    /// writer replaces the app the same way they installed it.
+    fn update_prompt(&mut self, ctx: &egui::Context) {
+        let Some(release) = self.update.prompt.clone() else {
+            return;
+        };
+        let mut dismiss = false;
+        let mut download = false;
+        let modal = egui::Modal::new(egui::Id::new("update_available")).show(ctx, |ui| {
+            ui.set_width(430.0);
+            ui.label(egui::RichText::new("Update available").size(17.0).strong());
+            ui.add_space(6.0);
+            ui.label(format!(
+                "ScriptCraft {} is available. You're on {}.",
+                release.version,
+                crate::update::CURRENT
+            ));
+            ui.add_space(4.0);
+            ui.label(
+                egui::RichText::new(
+                    "Download the new build, then drag it to Applications. Your projects and settings stay where they are.",
+                )
+                .size(12.0)
+                .color(kit().disabled_text),
+            );
+            ui.add_space(14.0);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let get = ui.add(
+                    egui::Button::new(
+                        egui::RichText::new("Download update")
+                            .strong()
+                            .color(egui::Color32::WHITE),
+                    )
+                    .fill(kit().accent),
+                );
+                if get.clicked() {
+                    download = true;
+                }
+                if ui.button("Later").clicked() {
+                    dismiss = true;
+                }
+            });
+        });
+        if modal.should_close() {
+            dismiss = true;
+        }
+        if download {
+            match crate::update::open_release(&release.url) {
+                Ok(()) => self.status = format!("Opened the {} release page.", release.version),
+                Err(e) => self.status = e,
+            }
+            dismiss = true;
+        }
+        if dismiss {
+            self.update.prompt = None;
+        }
+    }
+
+    /// Start the once-per-launch release check. Only the real app entry point
+    /// calls this; tests and embedded runs never touch the network.
+    pub fn start_update_check_on_open(&mut self) {
+        self.update.start_on_open();
+    }
+
+    /// Test hook: inject an update result without a network request.
+    #[doc(hidden)]
+    pub fn set_update_check_for_test(&mut self, check: crate::update::Check) {
+        self.update.set_for_test(check);
+    }
+
+    /// Test hook: the update status rendered by Settings.
+    #[doc(hidden)]
+    pub fn update_check_for_test(&self) -> &crate::update::Check {
+        &self.update.check
+    }
+
+    /// Test hook: is the "update available" prompt on screen?
+    #[doc(hidden)]
+    pub fn update_prompt_open_for_test(&self) -> bool {
+        self.update.prompt.is_some()
+    }
+
+    /// Test hook: is a background request in flight?
+    #[doc(hidden)]
+    pub fn update_check_running_for_test(&self) -> bool {
+        self.update.is_running()
+    }
+
+    /// Test hook: let the Settings button move to "Checking" without curl.
+    #[doc(hidden)]
+    pub fn set_offline_update_check_for_test(&mut self) {
+        self.update.set_offline_for_test();
+    }
+
     /// Arm disk persistence and load settings + recent projects.
     /// Called by the real app only — tests stay disk-free.
     pub fn load_persistent(&mut self) {
@@ -910,6 +1079,12 @@ impl ScriptCraftApp {
     #[doc(hidden)]
     pub fn paper_mono_for_test(&self) -> bool {
         self.settings.paper_mono
+    }
+
+    /// Test hook: choose the page face.
+    #[doc(hidden)]
+    pub fn set_script_face_for_test(&mut self, face: crate::settings::ScriptFace) {
+        self.settings.script_face = face;
     }
 
     /// Test hook: the chosen script face and the one currently installed in
@@ -1757,6 +1932,12 @@ impl ScriptCraftApp {
     #[doc(hidden)]
     pub fn summary_pdf_for_test(&mut self) -> Option<Vec<u8>> {
         self.summary_pdf_bytes()
+    }
+
+    /// Test hook: render the screenplay PDF with the current face.
+    #[doc(hidden)]
+    pub fn pdf_for_test(&mut self) -> Option<Vec<u8>> {
+        self.pdf_bytes()
     }
 
     /// Write the summary CSV through the same path the Save dialog uses.
@@ -2811,20 +2992,33 @@ impl ScriptCraftApp {
             None
         };
         let marks = self.revisions.latest_marks(&p.blocks).colors;
-        let (regular, bold, fallback_regular, fallback_bold) = match self.settings.script_face {
-            crate::settings::ScriptFace::PlexMono => (
-                &include_bytes!("../assets/fonts/IBMPlexMono-Regular.ttf")[..],
-                &include_bytes!("../assets/fonts/IBMPlexMono-Bold.ttf")[..],
-                &include_bytes!("../assets/fonts/CourierPrime-Regular.ttf")[..],
-                &include_bytes!("../assets/fonts/CourierPrime-Bold.ttf")[..],
-            ),
-            crate::settings::ScriptFace::CourierPrime => (
-                &include_bytes!("../assets/fonts/CourierPrime-Regular.ttf")[..],
-                &include_bytes!("../assets/fonts/CourierPrime-Bold.ttf")[..],
-                &include_bytes!("../assets/fonts/IBMPlexMono-Regular.ttf")[..],
-                &include_bytes!("../assets/fonts/IBMPlexMono-Bold.ttf")[..],
-            ),
+        const PLEX_REGULAR: &[u8] = include_bytes!("../assets/fonts/IBMPlexMono-Regular.ttf");
+        const PLEX_BOLD: &[u8] = include_bytes!("../assets/fonts/IBMPlexMono-Bold.ttf");
+        const COURIER_REGULAR: &[u8] = include_bytes!("../assets/fonts/CourierPrime-Regular.ttf");
+        const COURIER_BOLD: &[u8] = include_bytes!("../assets/fonts/CourierPrime-Bold.ttf");
+        let face = self.settings.script_face;
+        // Courier New comes from the OS. When it isn't installed the PDF uses
+        // Courier Prime, exactly like the editor does; the two share their
+        // 0.6 em advance, so the exported line breaks match what was on screen.
+        let (regular, bold): (&[u8], &[u8]) = match face {
+            crate::settings::ScriptFace::PlexMono => (PLEX_REGULAR, PLEX_BOLD),
+            crate::settings::ScriptFace::CourierPrime => (COURIER_REGULAR, COURIER_BOLD),
+            crate::settings::ScriptFace::CourierNew => match crate::system_font::courier_new() {
+                Some(system) => (
+                    system.regular.as_slice(),
+                    system.bold.as_deref().unwrap_or(system.regular.as_slice()),
+                ),
+                None => (COURIER_REGULAR, COURIER_BOLD),
+            },
         };
+        // Plex is the only face with Cyrillic, so it shadows the chosen face
+        // whenever a glyph is missing.
+        let (fallback_regular, fallback_bold): (&[u8], &[u8]) =
+            if face == crate::settings::ScriptFace::PlexMono {
+                (COURIER_REGULAR, COURIER_BOLD)
+            } else {
+                (PLEX_REGULAR, PLEX_BOLD)
+            };
         let fonts = scriptcraft_layout::pdf::ExportFonts {
             regular,
             bold,
@@ -4751,9 +4945,19 @@ impl eframe::App for ScriptCraftApp {
                 SideTab::Settings => self.settings_view(ctx),
             }
         }
+        // The release check runs on a worker thread; drain its result and
+        // keep repainting while it is in flight so the answer is not stuck
+        // behind an idle event loop.
+        if self.update.poll() {
+            ctx.request_repaint();
+        }
+        if self.update.check.is_checking() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(250));
+        }
         // Above every module so it can block the app while open.
         self.save_prompt(ctx);
         self.version_dialog(ctx);
+        self.update_prompt(ctx);
     }
 }
 
@@ -6993,7 +7197,16 @@ impl ScriptCraftApp {
     /// Settings module: page list on the left, Common/Modules options right —
     /// KIT's Preferences dialog rendered as a full module.
     fn settings_view(&mut self, ctx: &egui::Context) {
-        let outcome = crate::settings::show(ctx, &mut self.settings, &mut self.settings_page);
+        let outcome = crate::settings::show(
+            ctx,
+            &mut self.settings,
+            &mut self.settings_page,
+            &self.update.check,
+        );
+        if outcome.check_updates {
+            self.update.start();
+            ctx.request_repaint();
+        }
         if outcome.reset {
             self.status = "Settings reset to defaults.".to_string();
         }

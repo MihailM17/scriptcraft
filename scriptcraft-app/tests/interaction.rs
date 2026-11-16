@@ -330,6 +330,53 @@ fn settings_script_font_switches_the_page_face() {
         (ScriptFace::CourierPrime, Some(ScriptFace::CourierPrime)),
         "choosing Courier Prime must apply and install it"
     );
+
+    // Courier New is the third option, next to the two bundled faces.
+    h.get_all_by_role(egui::accesskit::Role::ComboBox)
+        .find(|n| !n.accesskit_node().is_disabled())
+        .expect("script font chooser should still be enabled")
+        .click();
+    h.run();
+    h.get_by_label("Courier New (system font)").click();
+    h.run();
+    assert_eq!(
+        h.state().script_face_for_test().0,
+        ScriptFace::CourierNew,
+        "choosing Courier New must apply it"
+    );
+    assert_eq!(
+        h.state().script_face_for_test().1,
+        Some(ScriptFace::CourierNew),
+        "the requested face must be the one installed, even when the OS lacks \
+         the file; the drawing family falls back inside the font list"
+    );
+}
+
+/// Every script face exports a real PDF. Courier New is read from the OS at
+/// runtime (and falls back to Courier Prime when absent), so this exercises
+/// the owned-bytes path that the bundled faces never take.
+#[test]
+fn every_script_face_exports_a_pdf() {
+    use scriptcraft_app::settings::ScriptFace;
+
+    for face in ScriptFace::ALL {
+        let mut h = harness(SideTab::Script);
+        h.run();
+        h.state_mut().set_script_face_for_test(face);
+        let bytes = h
+            .state_mut()
+            .pdf_for_test()
+            .unwrap_or_else(|| panic!("{face:?} must export a PDF"));
+        assert!(
+            bytes.starts_with(b"%PDF-"),
+            "{face:?} did not produce a PDF: {:?}",
+            &bytes[..8.min(bytes.len())]
+        );
+        assert!(
+            bytes.len() > 2_000,
+            "{face:?} produced a suspiciously small PDF"
+        );
+    }
 }
 
 /// Settings pages apply their choices to the editor and navigator.
@@ -391,6 +438,16 @@ fn settings_pages_apply_navigator_and_typography_options() {
     );
 }
 
+/// Open the grouped theme dropdown. It is the only enabled combo box on
+/// Settings ▸ Application.
+fn open_theme_menu(h: &mut Harness<'static, ScriptCraftApp>) {
+    h.get_all_by_role(egui::accesskit::Role::ComboBox)
+        .find(|n| !n.accesskit_node().is_disabled())
+        .expect("theme chooser should be an enabled combo box")
+        .click();
+    h.run();
+}
+
 /// Settings ▸ Theme switches the whole palette between Midnight and Light.
 #[test]
 fn theme_picker_switches_palette() {
@@ -401,6 +458,7 @@ fn theme_picker_switches_palette() {
         "app starts in the Midnight theme"
     );
 
+    open_theme_menu(&mut h);
     h.get_by_label("Light").click();
     h.run_steps(2);
 
@@ -415,12 +473,36 @@ fn theme_picker_switches_palette() {
         "panel fill must come from the KIT light palette"
     );
 
+    open_theme_menu(&mut h);
     h.get_by_label("Midnight").click();
     h.run_steps(2);
     assert!(
         h.ctx.style().visuals.dark_mode,
         "choosing Midnight should restore the dark palette"
     );
+}
+
+/// Application rows share one left inset. The wrapped swatch grid used to
+/// indent its first row, which is what made the page look uneven.
+#[test]
+fn settings_application_rows_align_to_one_inset() {
+    let mut h = harness(SideTab::Settings);
+    h.run();
+    let language = h.get_by_label("Language:").rect();
+    for label in [
+        "Theme:",
+        "Monochrome paper (white page, black ink)",
+        "Automatically Save Every",
+        "Save Backups",
+    ] {
+        let rect = h.get_by_label(label).rect();
+        assert!(
+            (rect.left() - language.left()).abs() < 0.5,
+            "{label} starts at x={} but Language starts at x={}",
+            rect.left(),
+            language.left()
+        );
+    }
 }
 
 /// Cmd/Ctrl+1…0 retypes every block covered by the editor selection.
@@ -2630,6 +2712,7 @@ fn theme_picker_switches_between_dark_palettes() {
     let mut h = harness(SideTab::Settings);
     h.run();
 
+    open_theme_menu(&mut h);
     h.get_by_label("Catppuccin").click();
     h.run_steps(2);
 
@@ -2645,6 +2728,7 @@ fn theme_picker_switches_between_dark_palettes() {
 
     // Same brightness class as Midnight: a dark_mode-only check would leave
     // the previous palette painted, so this is the regression to catch.
+    open_theme_menu(&mut h);
     h.get_by_label("Midnight").click();
     h.run_steps(2);
 
@@ -2922,9 +3006,12 @@ fn theme_picker_lists_kit_scenarist_and_omarchy_themes() {
     let mut h = harness(SideTab::Settings);
     h.run();
 
-    // The swatch grid lists every palette at once, so each label is clickable
-    // without opening a popup or scrolling a menu.
+    open_theme_menu(&mut h);
+    // Both family headings and the palettes below them are in the menu; the
+    // long list is grouped so 28 entries stay navigable.
     for label in [
+        "ScriptCraft",
+        "Omarchy",
         "KIT Scenarist",
         "Catppuccin",
         "Catppuccin Latte",
@@ -2936,7 +3023,7 @@ fn theme_picker_lists_kit_scenarist_and_omarchy_themes() {
     ] {
         assert!(
             h.query_by_label(label).is_some(),
-            "{label} must be offered by the theme grid"
+            "{label} must be offered by the theme menu"
         );
     }
 
@@ -3109,5 +3196,107 @@ fn research_recognises_characters_and_locations_from_the_script() {
             .next()
             .is_some(),
         "the fixture's first location must be listed"
+    );
+}
+
+/// Settings ▸ Application offers "Check for updates" and reports progress.
+/// The click is wired to the worker; this test pins the wiring offline.
+#[test]
+fn settings_check_for_updates_button_starts_a_check() {
+    use scriptcraft_app::update::Check;
+
+    let mut h = harness(SideTab::Settings);
+    h.run();
+    h.state_mut().set_offline_update_check_for_test();
+    assert_eq!(
+        h.state().update_check_for_test(),
+        &Check::Idle,
+        "nothing has been checked on this launch yet"
+    );
+
+    h.get_by_label("Check for updates").click();
+    h.run_steps(2);
+
+    assert!(
+        matches!(h.state().update_check_for_test(), Check::Checking),
+        "clicking the button must start a check"
+    );
+    assert!(
+        !h.state().update_check_running_for_test(),
+        "the test harness must never spawn curl"
+    );
+    assert!(
+        h.query_by_label("Checking…").is_some(),
+        "the row must say the check is in progress"
+    );
+}
+
+/// Settings renders the last result, so the status line is real UI and not
+/// only an internal enum.
+#[test]
+fn settings_shows_the_last_update_result() {
+    use scriptcraft_app::update::Check;
+
+    let mut h = harness(SideTab::Settings);
+    h.run();
+    h.state_mut().set_update_check_for_test(Check::UpToDate);
+    h.run();
+    assert!(
+        h.query_by_label("You're up to date.").is_some(),
+        "the up-to-date result must be visible in Settings"
+    );
+
+    h.state_mut()
+        .set_update_check_for_test(Check::Failed("curl: no network".to_string()));
+    h.run();
+    assert!(
+        h.query_by_label("Couldn't check for updates.").is_some(),
+        "a failed check must say so without printing the raw error"
+    );
+}
+
+/// A detected release opens a prompt; "Later" dismisses it for this launch.
+/// Tests start with no prompt and no request, which is what keeps the suite
+/// offline.
+#[test]
+fn update_prompt_offers_download_and_later() {
+    use scriptcraft_app::update::{Check, Release};
+
+    let mut h = harness(SideTab::Script);
+    h.run();
+    assert!(
+        !h.state().update_prompt_open_for_test(),
+        "no prompt before a check has run"
+    );
+    assert!(
+        !h.state().update_check_running_for_test(),
+        "tests must not start the on-open check"
+    );
+
+    h.state_mut()
+        .set_update_check_for_test(Check::Available(Release {
+            version: "0.8.7".to_string(),
+            url: "https://github.com/MihailM17/scriptcraft/releases/tag/v0.8.7".to_string(),
+        }));
+    h.run_steps(2);
+
+    assert!(
+        h.state().update_prompt_open_for_test(),
+        "a newer release must open the prompt"
+    );
+    assert!(
+        h.query_by_label("Update available").is_some(),
+        "the prompt needs a title"
+    );
+    assert!(
+        h.query_by_label("Download update").is_some(),
+        "the prompt needs a download action"
+    );
+
+    h.get_by_label("Later").click();
+    h.run_steps(2);
+    assert!(
+        !h.state().update_prompt_open_for_test(),
+        "Later must dismiss the prompt"
     );
 }

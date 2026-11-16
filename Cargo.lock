@@ -4066,6 +4066,7 @@ dependencies = [
  "scriptcraft-core",
  "scriptcraft-layout",
  "serde",
+ "serde_json",
  "spellbook",
  "uuid",
 ]
