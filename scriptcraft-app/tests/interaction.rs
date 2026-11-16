@@ -393,7 +393,7 @@ fn settings_pages_apply_navigator_and_typography_options() {
 
 /// Settings ▸ Theme switches the whole palette between Midnight and Light.
 #[test]
-fn theme_dropdown_switches_palette() {
+fn theme_picker_switches_palette() {
     let mut h = harness(SideTab::Settings);
     h.run();
     assert!(
@@ -401,12 +401,6 @@ fn theme_dropdown_switches_palette() {
         "app starts in the Midnight theme"
     );
 
-    let theme_combo = h
-        .get_all_by_role(egui::accesskit::Role::ComboBox)
-        .find(|n| !n.accesskit_node().is_disabled())
-        .expect("theme chooser should be an enabled combo box");
-    theme_combo.click();
-    h.run();
     h.get_by_label("Light").click();
     h.run_steps(2);
 
@@ -421,11 +415,6 @@ fn theme_dropdown_switches_palette() {
         "panel fill must come from the KIT light palette"
     );
 
-    h.get_all_by_role(egui::accesskit::Role::ComboBox)
-        .find(|n| !n.accesskit_node().is_disabled())
-        .expect("theme chooser should still be enabled")
-        .click();
-    h.run();
     h.get_by_label("Midnight").click();
     h.run_steps(2);
     assert!(
@@ -2637,35 +2626,25 @@ fn title_page_form_accepts_typed_text() {
 /// Two dark palettes share `dark_mode`, so switching between them must still
 /// repaint the app. The update loop compares the theme itself, not brightness.
 #[test]
-fn theme_dropdown_switches_between_dark_palettes() {
+fn theme_picker_switches_between_dark_palettes() {
     let mut h = harness(SideTab::Settings);
     h.run();
 
-    h.get_all_by_role(egui::accesskit::Role::ComboBox)
-        .find(|n| !n.accesskit_node().is_disabled())
-        .expect("theme chooser should be an enabled combo box")
-        .click();
-    h.run();
-    h.get_by_label("Tokyo Night").click();
+    h.get_by_label("Catppuccin").click();
     h.run_steps(2);
 
     assert!(
         h.ctx.style().visuals.dark_mode,
-        "Tokyo Night is a dark palette"
+        "Catppuccin is a dark palette"
     );
     assert_eq!(
         h.ctx.style().visuals.panel_fill,
-        egui::Color32::from_rgb(0x1A, 0x1B, 0x26),
-        "panel fill must come from the Tokyo Night palette"
+        egui::Color32::from_rgb(0x1E, 0x1E, 0x2E),
+        "panel fill must come from the Catppuccin palette"
     );
 
     // Same brightness class as Midnight: a dark_mode-only check would leave
     // the previous palette painted, so this is the regression to catch.
-    h.get_all_by_role(egui::accesskit::Role::ComboBox)
-        .find(|n| !n.accesskit_node().is_disabled())
-        .expect("theme chooser should still be enabled")
-        .click();
-    h.run();
     h.get_by_label("Midnight").click();
     h.run_steps(2);
 
@@ -2913,14 +2892,14 @@ fn typing_many_spaces_keeps_every_one() {
     assert_eq!(focus, (bi, 0, 4));
 }
 
-/// Settings ▸ Scenario Editor ▸ Monochrome paper: the page turns white with
+/// Settings ▸ Application: Monochrome paper sits directly under Theme, so it
+/// is reachable without opening Scenario Editor, and the page turns white with
 /// black ink while the panels keep the theme.
 #[test]
-fn settings_monochrome_paper_keeps_the_ui_themed() {
+fn settings_monochrome_paper_sits_under_the_theme() {
     let mut h = harness(SideTab::Settings);
     h.run();
-    h.get_by_label("Scenario Editor").click();
-    h.run();
+    // The Application page is the default; this label only exists there now.
     assert!(!h.state().paper_mono_for_test(), "off by default");
     h.get_by_label("Monochrome paper (white page, black ink)")
         .click();
@@ -2928,6 +2907,47 @@ fn settings_monochrome_paper_keeps_the_ui_themed() {
     assert!(
         h.state().paper_mono_for_test(),
         "the checkbox must flip the page to black on white"
+    );
+    assert!(
+        h.query_by_label("Scenario Editor")
+            .is_some_and(|n| n.accesskit_node().role() == egui::accesskit::Role::Button),
+        "the settings nav stays available next to the moved checkbox"
+    );
+}
+
+/// The theme list carries KIT Scenarist plus every Omarchy palette, and
+/// choosing KIT Scenarist paints the warm light chrome.
+#[test]
+fn theme_picker_lists_kit_scenarist_and_omarchy_themes() {
+    let mut h = harness(SideTab::Settings);
+    h.run();
+
+    // The swatch grid lists every palette at once, so each label is clickable
+    // without opening a popup or scrolling a menu.
+    for label in [
+        "KIT Scenarist",
+        "Catppuccin",
+        "Catppuccin Latte",
+        "Flexoki Light",
+        "Kanagawa",
+        "Ristretto",
+        "Vantablack",
+        "White",
+    ] {
+        assert!(
+            h.query_by_label(label).is_some(),
+            "{label} must be offered by the theme grid"
+        );
+    }
+
+    h.get_by_label("KIT Scenarist").click();
+    h.run_steps(2);
+    let v = &h.ctx.style().visuals;
+    assert!(!v.dark_mode, "KIT Scenarist is a light palette");
+    assert_eq!(
+        v.panel_fill,
+        egui::Color32::from_rgb(0xF3, 0xF1, 0xEE),
+        "panel fill must come from the KIT Scenarist palette"
     );
 }
 

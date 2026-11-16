@@ -133,124 +133,680 @@ pub const KIT_LIGHT: KitColors = KitColors {
 // tuned against the UI snapshots; `every_theme_is_legible` in the tests keeps
 // text, muted text and accents above their contrast floors.
 
-/// Tokyo Night: deep navy surfaces with an electric blue accent.
-pub const KIT_TOKYO_NIGHT: KitColors = KitColors {
-    window: hex(0x1A1B26),
-    desk: hex(0x16161E),
-    page: hex(0x1F2335),
-    page_edge: hex(0x292E42),
-    start_tab_active: hex(0x1A1B26),
-    rail: hex(0x16161E),
-    text: hex(0xC0CAF5),
-    button: hex(0x24283B),
-    button_hover: hex(0x2E3350),
-    base: hex(0x1F2335),
-    faint: hex(0x1B1E2E),
-    accent: hex(0x7AA2F7),
-    disabled_text: hex(0x787C99),
-    stroke: hex(0x292E42),
-    sep: hex(0x24283B),
-    module_bg: hex(0x1F2335),
-    strip: hex(0x1B1E2E),
-    field_stroke: hex(0x3B4261),
-    hover_light: hex(0x24283B),
-    elt_bg: hex(0x1F2335),
-    elt_stroke: hex(0x292E42),
-    heading_text: Color32::WHITE,
-    surface: hex(0x1F2335),
-    accent_soft: Color32::from_rgba_premultiplied(22, 29, 44, 45),
-    accent_text: hex(0xA9C1FF),
+// ---- Omarchy palettes ------------------------------------------------------
+//
+// Exact backgrounds, foregrounds and accents from basecamp/omarchy's
+// `themes/*/colors.toml`. Surface roles (page, panels, borders, muted text)
+// are derived from those three colors with the same rules for every theme,
+// so a theme keeps its identity while every widget stays legible; the
+// contrast floors in `every_theme_is_legible` are checked on each palette.
+
+/// Catppuccin: Omarchy theme.
+pub const KIT_CATPPUCCIN: KitColors = KitColors {
+    window: hex(0x1E1E2E),
+    desk: hex(0x14141E),
+    page: hex(0x28293A),
+    page_edge: hex(0x46485B),
+    start_tab_active: hex(0x1E1E2E),
+    rail: hex(0x171724),
+    text: hex(0xCDD6F4),
+    button: hex(0x2E2F40),
+    button_hover: hex(0x383A4C),
+    base: hex(0x252536),
+    faint: hex(0x252536),
+    accent: hex(0x89B4FA),
+    disabled_text: hex(0x767A91),
+    stroke: hex(0x353648),
+    sep: hex(0x303042),
+    module_bg: hex(0x232434),
+    strip: hex(0x1B1B29),
+    field_stroke: hex(0x44465A),
+    hover_light: hex(0x2B2C3D),
+    elt_bg: hex(0x272738),
+    elt_stroke: hex(0x383A4C),
+    heading_text: hex(0xEBEFFB),
+    surface: hex(0x272738),
+    accent_soft: Color32::from_rgba_premultiplied(30, 40, 55, 56),
+    accent_text: hex(0xC4DAFC),
     spell_error: hex(0xFF6B6B),
 };
-
-/// Nord: arctic blue-grey, low saturation, frost accent.
-pub const KIT_NORD: KitColors = KitColors {
-    window: hex(0x2E3440),
-    desk: hex(0x272C36),
-    page: hex(0x3B4252),
-    page_edge: hex(0x4C566A),
-    start_tab_active: hex(0x2E3440),
-    rail: hex(0x272C36),
-    text: hex(0xECEFF4),
-    button: hex(0x3B4252),
-    button_hover: hex(0x434C5E),
-    base: hex(0x2E3440),
-    faint: hex(0x2B313B),
-    accent: hex(0x88C0D0),
-    disabled_text: hex(0x8A97AC),
-    stroke: hex(0x434C5E),
-    sep: hex(0x3B4252),
-    module_bg: hex(0x343B48),
-    strip: hex(0x2B313B),
-    field_stroke: hex(0x4C566A),
-    hover_light: hex(0x39414F),
-    elt_bg: hex(0x343B48),
-    elt_stroke: hex(0x434C5E),
-    heading_text: Color32::WHITE,
-    surface: hex(0x353C4A),
-    accent_soft: Color32::from_rgba_premultiplied(24, 34, 37, 45),
-    accent_text: hex(0x9FD3DE),
-    spell_error: hex(0xE07A84),
+/// Catppuccin Latte: Omarchy theme.
+pub const KIT_CATPPUCCIN_LATTE: KitColors = KitColors {
+    window: hex(0xEFF1F5),
+    desk: hex(0xDEE0E4),
+    page: hex(0xF9F9FB),
+    page_edge: hex(0xDBDBDD),
+    start_tab_active: hex(0xEFF1F5),
+    rail: hex(0xE7E9EC),
+    text: hex(0x4C4F69),
+    button: hex(0xE0E2E8),
+    button_hover: hex(0xD7D9E0),
+    base: hex(0xFBFCFC),
+    faint: hex(0xFBFCFC),
+    accent: hex(0x1E66F5),
+    disabled_text: hex(0x888A9C),
+    stroke: hex(0xDADCE3),
+    sep: hex(0xDFE1E7),
+    module_bg: hex(0xF7F8FA),
+    strip: hex(0xEAECF0),
+    field_stroke: hex(0xCBCDD6),
+    hover_light: hex(0xE3E5EA),
+    elt_bg: hex(0xE7E9EE),
+    elt_stroke: hex(0xD7D9E0),
+    heading_text: hex(0x2A2B3A),
+    surface: hex(0xE7E9EE),
+    accent_soft: Color32::from_rgba_premultiplied(7, 22, 54, 56),
+    accent_text: hex(0x0F337A),
+    spell_error: hex(0xC62F2F),
 };
-
-/// Gruvbox Dark: warm retro surfaces, golden accent, low glare.
+/// Ethereal: Omarchy theme.
+pub const KIT_ETHEREAL: KitColors = KitColors {
+    window: hex(0x060B1E),
+    desk: hex(0x040714),
+    page: hex(0x151727),
+    page_edge: hex(0x3F383F),
+    start_tab_active: hex(0x060B1E),
+    rail: hex(0x050917),
+    text: hex(0xFFCEAD),
+    button: hex(0x1C1D2B),
+    button_hover: hex(0x2B2833),
+    base: hex(0x101324),
+    faint: hex(0x101324),
+    accent: hex(0x7D82D9),
+    disabled_text: hex(0x826C66),
+    stroke: hex(0x262431),
+    sep: hex(0x1F1E2C),
+    module_bg: hex(0x0D1122),
+    strip: hex(0x050A1B),
+    field_stroke: hex(0x3D363D),
+    hover_light: hex(0x191A29),
+    elt_bg: hex(0x121525),
+    elt_stroke: hex(0x2B2833),
+    heading_text: hex(0xFFEBDE),
+    surface: hex(0x121525),
+    accent_soft: Color32::from_rgba_premultiplied(27, 29, 48, 56),
+    accent_text: hex(0xBEC0EC),
+    spell_error: hex(0xFF6B6B),
+};
+/// Everforest: Omarchy theme.
+pub const KIT_EVERFOREST: KitColors = KitColors {
+    window: hex(0x2D353B),
+    desk: hex(0x1D2226),
+    page: hex(0x373E42),
+    page_edge: hex(0x535655),
+    start_tab_active: hex(0x2D353B),
+    rail: hex(0x23292E),
+    text: hex(0xD3C6AA),
+    button: hex(0x3C4245),
+    button_hover: hex(0x464B4C),
+    base: hex(0x343B3F),
+    faint: hex(0x343B3F),
+    accent: hex(0x7FBBB3),
+    disabled_text: hex(0x807E72),
+    stroke: hex(0x434849),
+    sep: hex(0x3E4446),
+    module_bg: hex(0x32393E),
+    strip: hex(0x283035),
+    field_stroke: hex(0x525553),
+    hover_light: hex(0x394043),
+    elt_bg: hex(0x353C41),
+    elt_stroke: hex(0x464B4C),
+    heading_text: hex(0xEDE8DD),
+    surface: hex(0x353C41),
+    accent_soft: Color32::from_rgba_premultiplied(28, 41, 39, 56),
+    accent_text: hex(0xBFDDD9),
+    spell_error: hex(0xFF6B6B),
+};
+/// Flexoki Light: Omarchy theme.
+pub const KIT_FLEXOKI_LIGHT: KitColors = KitColors {
+    window: hex(0xFFFCF0),
+    desk: hex(0xEDEADF),
+    page: hex(0xFFFEF9),
+    page_edge: hex(0xE0E0DB),
+    start_tab_active: hex(0xFFFCF0),
+    rail: hex(0xF6F3E8),
+    text: hex(0x100F0F),
+    button: hex(0xE9E7DC),
+    button_hover: hex(0xDBD8CE),
+    base: hex(0xFFFEFB),
+    faint: hex(0xFFFEFB),
+    accent: hex(0x205EA6),
+    disabled_text: hex(0x888680),
+    stroke: hex(0xE0DDD3),
+    sep: hex(0xE7E4DA),
+    module_bg: hex(0xFFFEF8),
+    strip: hex(0xFAF7EB),
+    field_stroke: hex(0xCAC8BE),
+    hover_light: hex(0xEDEADF),
+    elt_bg: hex(0xF3F0E5),
+    elt_stroke: hex(0xDBD8CE),
+    heading_text: hex(0x090808),
+    surface: hex(0xF3F0E5),
+    accent_soft: Color32::from_rgba_premultiplied(7, 21, 36, 56),
+    accent_text: hex(0x102F53),
+    spell_error: hex(0xC62F2F),
+};
+/// Gruvbox: Omarchy theme.
 pub const KIT_GRUVBOX: KitColors = KitColors {
     window: hex(0x282828),
-    desk: hex(0x1D2021),
-    page: hex(0x32302F),
-    page_edge: hex(0x3C3836),
+    desk: hex(0x1A1A1A),
+    page: hex(0x32312F),
+    page_edge: hex(0x4F4A42),
     start_tab_active: hex(0x282828),
-    rail: hex(0x1D2021),
-    text: hex(0xEBDBB2),
-    button: hex(0x3C3836),
-    button_hover: hex(0x504945),
-    base: hex(0x2A2827),
-    faint: hex(0x2A2827),
-    accent: hex(0xFABD2F),
-    disabled_text: hex(0xA89984),
-    stroke: hex(0x3C3836),
-    sep: hex(0x3C3836),
-    module_bg: hex(0x32302F),
-    strip: hex(0x2A2827),
-    field_stroke: hex(0x504945),
-    hover_light: hex(0x3A3735),
-    elt_bg: hex(0x32302F),
-    elt_stroke: hex(0x3C3836),
-    heading_text: hex(0xFBF1C7),
-    surface: hex(0x32302F),
-    accent_soft: Color32::from_rgba_premultiplied(37, 28, 7, 38),
-    accent_text: hex(0xFFD866),
-    spell_error: hex(0xFB4934),
+    rail: hex(0x1F1F1F),
+    text: hex(0xD4BE98),
+    button: hex(0x373632),
+    button_hover: hex(0x423E39),
+    base: hex(0x2F2E2C),
+    faint: hex(0x2F2E2C),
+    accent: hex(0x7DAEA3),
+    disabled_text: hex(0x7E7360),
+    stroke: hex(0x3E3C37),
+    sep: hex(0x393733),
+    module_bg: hex(0x2D2C2B),
+    strip: hex(0x242424),
+    field_stroke: hex(0x4E4941),
+    hover_light: hex(0x353330),
+    elt_bg: hex(0x31302E),
+    elt_stroke: hex(0x423E39),
+    heading_text: hex(0xEEE5D6),
+    surface: hex(0x31302E),
+    accent_soft: Color32::from_rgba_premultiplied(27, 38, 36, 56),
+    accent_text: hex(0xBED6D1),
+    spell_error: hex(0xFF6B6B),
 };
-
-/// Rosé Pine: muted plum surfaces, iris accent, soft on long sessions.
+/// Hackerman: Omarchy theme.
+pub const KIT_HACKERMAN: KitColors = KitColors {
+    window: hex(0x0B0C16),
+    desk: hex(0x07080E),
+    page: hex(0x181A24),
+    page_edge: hex(0x3B424B),
+    start_tab_active: hex(0x0B0C16),
+    rail: hex(0x090911),
+    text: hex(0xDDF7FF),
+    button: hex(0x1E212B),
+    button_hover: hex(0x2A2F39),
+    base: hex(0x13151F),
+    faint: hex(0x13151F),
+    accent: hex(0x82FB9C),
+    disabled_text: hex(0x74828A),
+    stroke: hex(0x262B34),
+    sep: hex(0x20242D),
+    module_bg: hex(0x11131D),
+    strip: hex(0x0A0B14),
+    field_stroke: hex(0x394049),
+    hover_light: hex(0x1B1E27),
+    elt_bg: hex(0x161822),
+    elt_stroke: hex(0x2A2F39),
+    heading_text: hex(0xF1FCFF),
+    surface: hex(0x161822),
+    accent_soft: Color32::from_rgba_premultiplied(29, 55, 34, 56),
+    accent_text: hex(0xC0FDCE),
+    spell_error: hex(0xFF6B6B),
+};
+/// Jade Horse: Omarchy theme.
+pub const KIT_JADE_HORSE: KitColors = KitColors {
+    window: hex(0x142620),
+    desk: hex(0x0D1915),
+    page: hex(0x20322C),
+    page_edge: hex(0x42544D),
+    start_tab_active: hex(0x142620),
+    rail: hex(0x101E19),
+    text: hex(0xDFEDE5),
+    button: hex(0x263832),
+    button_hover: hex(0x32443E),
+    base: hex(0x1C2E28),
+    faint: hex(0x1C2E28),
+    accent: hex(0x8BCBB1),
+    disabled_text: hex(0x7A8A82),
+    stroke: hex(0x2E403A),
+    sep: hex(0x283A34),
+    module_bg: hex(0x1A2C26),
+    strip: hex(0x12221D),
+    field_stroke: hex(0x41524B),
+    hover_light: hex(0x23352F),
+    elt_bg: hex(0x1E302A),
+    elt_stroke: hex(0x32443E),
+    heading_text: hex(0xF2F8F5),
+    surface: hex(0x1E302A),
+    accent_soft: Color32::from_rgba_premultiplied(31, 45, 39, 56),
+    accent_text: hex(0xC5E5D8),
+    spell_error: hex(0xFF6B6B),
+};
+/// Kanagawa: Omarchy theme.
+pub const KIT_KANAGAWA: KitColors = KitColors {
+    window: hex(0x1F1F28),
+    desk: hex(0x14141A),
+    page: hex(0x2A2A31),
+    page_edge: hex(0x4A494A),
+    start_tab_active: hex(0x1F1F28),
+    rail: hex(0x18181F),
+    text: hex(0xDCD7BA),
+    button: hex(0x303035),
+    button_hover: hex(0x3B3B3E),
+    base: hex(0x27262E),
+    faint: hex(0x27262E),
+    accent: hex(0x7E9CD8),
+    disabled_text: hex(0x7E7B71),
+    stroke: hex(0x38373B),
+    sep: hex(0x323137),
+    module_bg: hex(0x25252C),
+    strip: hex(0x1C1C24),
+    field_stroke: hex(0x494748),
+    hover_light: hex(0x2D2D33),
+    elt_bg: hex(0x28282F),
+    elt_stroke: hex(0x3B3B3E),
+    heading_text: hex(0xF1EFE3),
+    surface: hex(0x28282F),
+    accent_soft: Color32::from_rgba_premultiplied(28, 34, 47, 56),
+    accent_text: hex(0xBECEEC),
+    spell_error: hex(0xFF6B6B),
+};
+/// Last Horizon: Omarchy theme.
+pub const KIT_LAST_HORIZON: KitColors = KitColors {
+    window: hex(0x0C0B0C),
+    desk: hex(0x080708),
+    page: hex(0x1A191A),
+    page_edge: hex(0x424242),
+    start_tab_active: hex(0x0C0B0C),
+    rail: hex(0x090909),
+    text: hex(0xFAFCFB),
+    button: hex(0x212122),
+    button_hover: hex(0x302F30),
+    base: hex(0x161516),
+    faint: hex(0x161516),
+    accent: hex(0xB59790),
+    disabled_text: hex(0x838484),
+    stroke: hex(0x2B2A2B),
+    sep: hex(0x242324),
+    module_bg: hex(0x131213),
+    strip: hex(0x0B0A0B),
+    field_stroke: hex(0x404041),
+    hover_light: hex(0x1E1D1E),
+    elt_bg: hex(0x181718),
+    elt_stroke: hex(0x302F30),
+    heading_text: hex(0xFDFEFD),
+    surface: hex(0x181718),
+    accent_soft: Color32::from_rgba_premultiplied(40, 33, 32, 56),
+    accent_text: hex(0xDACBC8),
+    spell_error: hex(0xFF6B6B),
+};
+/// Lumon: Omarchy theme.
+pub const KIT_LUMON: KitColors = KitColors {
+    window: hex(0x16242D),
+    desk: hex(0x0E171D),
+    page: hex(0x222F39),
+    page_edge: hex(0x424F5A),
+    start_tab_active: hex(0x16242D),
+    rail: hex(0x111C23),
+    text: hex(0xD6E2EE),
+    button: hex(0x27353E),
+    button_hover: hex(0x33404A),
+    base: hex(0x1E2C35),
+    faint: hex(0x1E2C35),
+    accent: hex(0x8BC9EB),
+    disabled_text: hex(0x76838E),
+    stroke: hex(0x2F3D46),
+    sep: hex(0x293740),
+    module_bg: hex(0x1C2A33),
+    strip: hex(0x142028),
+    field_stroke: hex(0x404E57),
+    hover_light: hex(0x24323B),
+    elt_bg: hex(0x202E37),
+    elt_stroke: hex(0x33404A),
+    heading_text: hex(0xEFF3F8),
+    surface: hex(0x202E37),
+    accent_soft: Color32::from_rgba_premultiplied(31, 44, 52, 56),
+    accent_text: hex(0xC5E4F5),
+    spell_error: hex(0xFF6B6B),
+};
+/// Lupine: Omarchy theme.
+pub const KIT_LUPINE: KitColors = KitColors {
+    window: hex(0xFAFAFA),
+    desk: hex(0xE8E8E8),
+    page: hex(0xFDFDFD),
+    page_edge: hex(0xDFDFDF),
+    start_tab_active: hex(0xFAFAFA),
+    rail: hex(0xF1F1F1),
+    text: hex(0x212121),
+    button: hex(0xE6E6E6),
+    button_hover: hex(0xD9D9D9),
+    base: hex(0xFEFEFE),
+    faint: hex(0xFEFEFE),
+    accent: hex(0x3264EB),
+    disabled_text: hex(0x8E8E8E),
+    stroke: hex(0xDEDEDE),
+    sep: hex(0xE4E4E4),
+    module_bg: hex(0xFCFCFC),
+    strip: hex(0xF5F5F5),
+    field_stroke: hex(0xCACACA),
+    hover_light: hex(0xEAEAEA),
+    elt_bg: hex(0xEFEFEF),
+    elt_stroke: hex(0xD9D9D9),
+    heading_text: hex(0x121212),
+    surface: hex(0xEFEFEF),
+    accent_soft: Color32::from_rgba_premultiplied(11, 22, 52, 56),
+    accent_text: hex(0x193276),
+    spell_error: hex(0xC62F2F),
+};
+/// Matte Black: Omarchy theme.
+pub const KIT_MATTE_BLACK: KitColors = KitColors {
+    window: hex(0x121212),
+    desk: hex(0x0C0C0C),
+    page: hex(0x1C1C1C),
+    page_edge: hex(0x393939),
+    start_tab_active: hex(0x121212),
+    rail: hex(0x0E0E0E),
+    text: hex(0xBEBEBE),
+    button: hex(0x212121),
+    button_hover: hex(0x2C2C2C),
+    base: hex(0x191919),
+    faint: hex(0x191919),
+    accent: hex(0xE68E0D),
+    disabled_text: hex(0x686868),
+    stroke: hex(0x282828),
+    sep: hex(0x232323),
+    module_bg: hex(0x171717),
+    strip: hex(0x101010),
+    field_stroke: hex(0x383838),
+    hover_light: hex(0x1F1F1F),
+    elt_bg: hex(0x1B1B1B),
+    elt_stroke: hex(0x2C2C2C),
+    heading_text: hex(0xE5E5E5),
+    surface: hex(0x1B1B1B),
+    accent_soft: Color32::from_rgba_premultiplied(51, 31, 3, 56),
+    accent_text: hex(0xF2C686),
+    spell_error: hex(0xFF6B6B),
+};
+/// Miasma: Omarchy theme.
+pub const KIT_MIASMA: KitColors = KitColors {
+    window: hex(0x222222),
+    desk: hex(0x161616),
+    page: hex(0x2C2C2B),
+    page_edge: hex(0x474743),
+    start_tab_active: hex(0x222222),
+    rail: hex(0x1B1B1B),
+    text: hex(0xC2C2B0),
+    button: hex(0x30302F),
+    button_hover: hex(0x3A3A37),
+    base: hex(0x282828),
+    faint: hex(0x282828),
+    accent: hex(0x78824B),
+    disabled_text: hex(0x727269),
+    stroke: hex(0x373734),
+    sep: hex(0x323230),
+    module_bg: hex(0x272726),
+    strip: hex(0x1F1F1F),
+    field_stroke: hex(0x454541),
+    hover_light: hex(0x2E2E2D),
+    elt_bg: hex(0x2A2A29),
+    elt_stroke: hex(0x3A3A37),
+    heading_text: hex(0xE7E7DF),
+    surface: hex(0x2A2A29),
+    accent_soft: Color32::from_rgba_premultiplied(26, 29, 16, 56),
+    accent_text: hex(0xBCC0A5),
+    spell_error: hex(0xFF6B6B),
+};
+/// Nord: Omarchy theme.
+pub const KIT_NORD: KitColors = KitColors {
+    window: hex(0x2E3440),
+    desk: hex(0x1E222A),
+    page: hex(0x383E4A),
+    page_edge: hex(0x555B67),
+    start_tab_active: hex(0x2E3440),
+    rail: hex(0x242932),
+    text: hex(0xD8DEE9),
+    button: hex(0x3D434F),
+    button_hover: hex(0x484E59),
+    base: hex(0x353B47),
+    faint: hex(0x353B47),
+    accent: hex(0x81A1C1),
+    disabled_text: hex(0x838994),
+    stroke: hex(0x444A56),
+    sep: hex(0x3F4551),
+    module_bg: hex(0x333945),
+    strip: hex(0x292F3A),
+    field_stroke: hex(0x535965),
+    hover_light: hex(0x3B414D),
+    elt_bg: hex(0x363C48),
+    elt_stroke: hex(0x484E59),
+    heading_text: hex(0xEFF2F6),
+    surface: hex(0x363C48),
+    accent_soft: Color32::from_rgba_premultiplied(28, 35, 42, 56),
+    accent_text: hex(0xC0D0E0),
+    spell_error: hex(0xFF6B6B),
+};
+/// Retro 82: Omarchy theme.
+pub const KIT_RETRO_82: KitColors = KitColors {
+    window: hex(0x05182E),
+    desk: hex(0x03101E),
+    page: hex(0x132436),
+    page_edge: hex(0x3C454B),
+    start_tab_active: hex(0x05182E),
+    rail: hex(0x041324),
+    text: hex(0xF6DCAC),
+    button: hex(0x1B2A39),
+    button_hover: hex(0x293541),
+    base: hex(0x0F2033),
+    faint: hex(0x0F2033),
+    accent: hex(0xFAA968),
+    disabled_text: hex(0x7E7A6D),
+    stroke: hex(0x24313E),
+    sep: hex(0x1D2C3B),
+    module_bg: hex(0x0C1E32),
+    strip: hex(0x041629),
+    field_stroke: hex(0x3A434A),
+    hover_light: hex(0x172737),
+    elt_bg: hex(0x112234),
+    elt_stroke: hex(0x293541),
+    heading_text: hex(0xFBF1DE),
+    surface: hex(0x112234),
+    accent_soft: Color32::from_rgba_premultiplied(55, 37, 23, 56),
+    accent_text: hex(0xFCD4B4),
+    spell_error: hex(0xFF6B6B),
+};
+/// Ristretto: Omarchy theme.
+pub const KIT_RISTRETTO: KitColors = KitColors {
+    window: hex(0x2C2525),
+    desk: hex(0x1D1818),
+    page: hex(0x373030),
+    page_edge: hex(0x564E4F),
+    start_tab_active: hex(0x2C2525),
+    rail: hex(0x221D1D),
+    text: hex(0xE6D9DB),
+    button: hex(0x3D3535),
+    button_hover: hex(0x484040),
+    base: hex(0x332C2C),
+    faint: hex(0x332C2C),
+    accent: hex(0xF38D70),
+    disabled_text: hex(0x897F80),
+    stroke: hex(0x443C3D),
+    sep: hex(0x3F3737),
+    module_bg: hex(0x322A2A),
+    strip: hex(0x282121),
+    field_stroke: hex(0x554D4D),
+    hover_light: hex(0x3A3233),
+    elt_bg: hex(0x352E2E),
+    elt_stroke: hex(0x484040),
+    heading_text: hex(0xF5F0F1),
+    surface: hex(0x352E2E),
+    accent_soft: Color32::from_rgba_premultiplied(53, 31, 25, 56),
+    accent_text: hex(0xF9C6B8),
+    spell_error: hex(0xFF6B6B),
+};
+/// Rosé Pine: Omarchy theme.
 pub const KIT_ROSE_PINE: KitColors = KitColors {
-    window: hex(0x191724),
-    desk: hex(0x14131F),
-    page: hex(0x1F1D2E),
-    page_edge: hex(0x26233A),
-    start_tab_active: hex(0x191724),
-    rail: hex(0x14131F),
-    text: hex(0xE0DEF4),
-    button: hex(0x26233A),
-    button_hover: hex(0x2E2B44),
-    base: hex(0x1F1D2E),
-    faint: hex(0x1B1928),
-    accent: hex(0xC4A7E7),
-    disabled_text: hex(0x8B87A8),
-    stroke: hex(0x26233A),
-    sep: hex(0x26233A),
-    module_bg: hex(0x1F1D2E),
-    strip: hex(0x1B1928),
-    field_stroke: hex(0x34314A),
-    hover_light: hex(0x241F35),
-    elt_bg: hex(0x1F1D2E),
-    elt_stroke: hex(0x26233A),
-    heading_text: Color32::WHITE,
-    surface: hex(0x1F1D2E),
-    accent_soft: Color32::from_rgba_premultiplied(32, 28, 38, 42),
-    accent_text: hex(0xD9C2F0),
-    spell_error: hex(0xEB6F92),
+    window: hex(0xFAF4ED),
+    desk: hex(0xE8E3DC),
+    page: hex(0xFDFBF8),
+    page_edge: hex(0xDFDDDA),
+    start_tab_active: hex(0xFAF4ED),
+    rail: hex(0xF1EBE5),
+    text: hex(0x534F74),
+    button: hex(0xEBE5E3),
+    button_hover: hex(0xE2DCDC),
+    base: hex(0xFEFCFA),
+    faint: hex(0xFEFCFA),
+    accent: hex(0x56949F),
+    disabled_text: hex(0x908BA2),
+    stroke: hex(0xE5DFDE),
+    sep: hex(0xEAE4E1),
+    module_bg: hex(0xFCFAF6),
+    strip: hex(0xF5EFE8),
+    field_stroke: hex(0xD6D0D3),
+    hover_light: hex(0xEEE8E4),
+    elt_bg: hex(0xF2ECE7),
+    elt_stroke: hex(0xE2DCDC),
+    heading_text: hex(0x2E2B40),
+    surface: hex(0xF2ECE7),
+    accent_soft: Color32::from_rgba_premultiplied(19, 33, 35, 56),
+    accent_text: hex(0x2B4A50),
+    spell_error: hex(0xC62F2F),
+};
+/// Solitude: Omarchy theme.
+pub const KIT_SOLITUDE: KitColors = KitColors {
+    window: hex(0x101315),
+    desk: hex(0x0A0C0E),
+    page: hex(0x1B1E20),
+    page_edge: hex(0x3A3D3F),
+    start_tab_active: hex(0x101315),
+    rail: hex(0x0C0F10),
+    text: hex(0xCACCCC),
+    button: hex(0x212425),
+    button_hover: hex(0x2C2F30),
+    base: hex(0x171A1C),
+    faint: hex(0x171A1C),
+    accent: hex(0x798186),
+    disabled_text: hex(0x6D7070),
+    stroke: hex(0x282B2D),
+    sep: hex(0x232627),
+    module_bg: hex(0x16191A),
+    strip: hex(0x0E1113),
+    field_stroke: hex(0x393C3D),
+    hover_light: hex(0x1E2123),
+    elt_bg: hex(0x191C1E),
+    elt_stroke: hex(0x2C2F30),
+    heading_text: hex(0xEAEBEB),
+    surface: hex(0x191C1E),
+    accent_soft: Color32::from_rgba_premultiplied(27, 28, 29, 56),
+    accent_text: hex(0xBCC0C2),
+    spell_error: hex(0xFF6B6B),
+};
+/// Starship: Omarchy theme.
+pub const KIT_STARSHIP: KitColors = KitColors {
+    window: hex(0x1C1C1E),
+    desk: hex(0x121214),
+    page: hex(0x29292B),
+    page_edge: hex(0x4E4E50),
+    start_tab_active: hex(0x1C1C1E),
+    rail: hex(0x161617),
+    text: hex(0xF5F5F7),
+    button: hex(0x303032),
+    button_hover: hex(0x3D3D3F),
+    base: hex(0x252527),
+    faint: hex(0x252527),
+    accent: hex(0xFF9F0A),
+    disabled_text: hex(0x88888A),
+    stroke: hex(0x38383A),
+    sep: hex(0x323234),
+    module_bg: hex(0x232325),
+    strip: hex(0x19191B),
+    field_stroke: hex(0x4C4C4E),
+    hover_light: hex(0x2C2C2E),
+    elt_bg: hex(0x272729),
+    elt_stroke: hex(0x3D3D3F),
+    heading_text: hex(0xFBFBFC),
+    surface: hex(0x272729),
+    accent_soft: Color32::from_rgba_premultiplied(56, 35, 2, 56),
+    accent_text: hex(0xFFCF84),
+    spell_error: hex(0xFF6B6B),
+};
+/// Tokyo Night: Omarchy theme.
+pub const KIT_TOKYO_NIGHT: KitColors = KitColors {
+    window: hex(0x1A1B26),
+    desk: hex(0x111219),
+    page: hex(0x232431),
+    page_edge: hex(0x3B3D4F),
+    start_tab_active: hex(0x1A1B26),
+    rail: hex(0x14151E),
+    text: hex(0xA9B1D6),
+    button: hex(0x272836),
+    button_hover: hex(0x2F3240),
+    base: hex(0x20212D),
+    faint: hex(0x20212D),
+    accent: hex(0x7AA2F7),
+    disabled_text: hex(0x62667E),
+    stroke: hex(0x2D2E3D),
+    sep: hex(0x282A38),
+    module_bg: hex(0x1E202B),
+    strip: hex(0x171822),
+    field_stroke: hex(0x393C4D),
+    hover_light: hex(0x252633),
+    elt_bg: hex(0x21222F),
+    elt_stroke: hex(0x2F3240),
+    heading_text: hex(0xDDE0EF),
+    surface: hex(0x21222F),
+    accent_soft: Color32::from_rgba_premultiplied(27, 36, 54, 56),
+    accent_text: hex(0xBCD0FB),
+    spell_error: hex(0xFF6B6B),
+};
+/// Vantablack: Omarchy theme.
+pub const KIT_VANTABLACK: KitColors = KitColors {
+    window: hex(0x000000),
+    desk: hex(0x000000),
+    page: hex(0x0F0F0F),
+    page_edge: hex(0x3A3A3A),
+    start_tab_active: hex(0x000000),
+    rail: hex(0x000000),
+    text: hex(0xFFFFFF),
+    button: hex(0x171717),
+    button_hover: hex(0x262626),
+    base: hex(0x0A0A0A),
+    faint: hex(0x0A0A0A),
+    accent: hex(0x8D8D8D),
+    disabled_text: hex(0x808080),
+    stroke: hex(0x212121),
+    sep: hex(0x1A1A1A),
+    module_bg: hex(0x080808),
+    strip: hex(0x000000),
+    field_stroke: hex(0x383838),
+    hover_light: hex(0x131313),
+    elt_bg: hex(0x0D0D0D),
+    elt_stroke: hex(0x262626),
+    heading_text: hex(0xFFFFFF),
+    surface: hex(0x0D0D0D),
+    accent_soft: Color32::from_rgba_premultiplied(31, 31, 31, 56),
+    accent_text: hex(0xC6C6C6),
+    spell_error: hex(0xFF6B6B),
+};
+/// White: Omarchy theme.
+pub const KIT_WHITE: KitColors = KitColors {
+    window: hex(0xFFFFFF),
+    desk: hex(0xEDEDED),
+    page: hex(0xFFFFFF),
+    page_edge: hex(0xE0E0E0),
+    start_tab_active: hex(0xFFFFFF),
+    rail: hex(0xF6F6F6),
+    text: hex(0x000000),
+    button: hex(0xE8E8E8),
+    button_hover: hex(0xD9D9D9),
+    base: hex(0xFFFFFF),
+    faint: hex(0xFFFFFF),
+    accent: hex(0x6E6E6E),
+    disabled_text: hex(0x808080),
+    stroke: hex(0xDEDEDE),
+    sep: hex(0xE6E6E6),
+    module_bg: hex(0xFFFFFF),
+    strip: hex(0xFAFAFA),
+    field_stroke: hex(0xC7C7C7),
+    hover_light: hex(0xECECEC),
+    elt_bg: hex(0xF2F2F2),
+    elt_stroke: hex(0xD9D9D9),
+    heading_text: hex(0x000000),
+    surface: hex(0xF2F2F2),
+    accent_soft: Color32::from_rgba_premultiplied(24, 24, 24, 56),
+    accent_text: hex(0x373737),
+    spell_error: hex(0xC62F2F),
 };
 
 /// Sepia: warm paper for daylight writing, burnt-orange ink accent.
@@ -314,45 +870,213 @@ pub const KIT_HIGH_CONTRAST: KitColors = KitColors {
     spell_error: hex(0xFF6B6B),
 };
 
+// ---- ScriptCraft's KIT imitation ---------------------------------------------
+
+/// KIT Scenarist: Omarchy theme.
+pub const KIT_SCENARIST: KitColors = KitColors {
+    window: hex(0xF3F1EE),
+    desk: hex(0xE2E0DD),
+    page: hex(0xFAF9F8),
+    page_edge: hex(0xDCDBDA),
+    start_tab_active: hex(0xF3F1EE),
+    rail: hex(0xEAE9E6),
+    text: hex(0x2A2A28),
+    button: hex(0xE1DFDC),
+    button_hover: hex(0xD5D3D0),
+    base: hex(0xFCFCFB),
+    faint: hex(0xFCFCFB),
+    accent: hex(0xC96A12),
+    disabled_text: hex(0x8B8B89),
+    stroke: hex(0xD9D7D4),
+    sep: hex(0xDFDDDA),
+    module_bg: hex(0xF9F8F6),
+    strip: hex(0xEEECE9),
+    field_stroke: hex(0xC7C5C2),
+    hover_light: hex(0xE4E2DF),
+    elt_bg: hex(0xE9E7E4),
+    elt_stroke: hex(0xD5D3D0),
+    heading_text: hex(0x171716),
+    surface: hex(0xE9E7E4),
+    accent_soft: Color32::from_rgba_premultiplied(44, 23, 4, 56),
+    accent_text: hex(0x643509),
+    spell_error: hex(0xC62F2F),
+};
+
 /// User-selectable theme. Persisted by name in `settings.conf`; the old
 /// `dark_mode` setting is still honoured as a fallback.
 ///
-/// `ALL` is also the Settings dropdown order: darks first, then lights.
+/// `ALL` is the Settings dropdown order: ScriptCraft's own palettes, then the
+/// themed palettes. The dropdown shows one heading per [`ThemeGroup`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Theme {
     #[default]
     Midnight,
-    TokyoNight,
-    Nord,
-    Gruvbox,
-    RosePine,
     Light,
     Sepia,
     HighContrast,
+    KitScenarist,
+    Catppuccin,
+    CatppuccinLatte,
+    Ethereal,
+    Everforest,
+    FlexokiLight,
+    Gruvbox,
+    Hackerman,
+    JadeHorse,
+    Kanagawa,
+    LastHorizon,
+    Lumon,
+    Lupine,
+    MatteBlack,
+    Miasma,
+    Nord,
+    Retro82,
+    Ristretto,
+    RosePine,
+    Solitude,
+    Starship,
+    TokyoNight,
+    Vantablack,
+    White,
+}
+
+/// Family a theme belongs to. The Settings dropdown renders a heading per
+/// group, so a long list stays navigable.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ThemeGroup {
+    ScriptCraft,
+    Omarchy,
+}
+
+impl ThemeGroup {
+    pub const ALL: [ThemeGroup; 2] = [ThemeGroup::ScriptCraft, ThemeGroup::Omarchy];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            ThemeGroup::ScriptCraft => "ScriptCraft",
+            ThemeGroup::Omarchy => "Omarchy",
+        }
+    }
+
+    /// Themes in this group, in dropdown order.
+    pub fn themes(self) -> &'static [Theme] {
+        match self {
+            ThemeGroup::ScriptCraft => &Theme::SCRIPT,
+            ThemeGroup::Omarchy => &Theme::OMARCHY,
+        }
+    }
 }
 
 impl Theme {
-    pub const ALL: [Theme; 8] = [
+    /// ScriptCraft's own palettes, including a light imitation of KIT
+    /// Scenarist's warm-grey chrome and orange mark.
+    pub const SCRIPT: [Theme; 5] = [
         Theme::Midnight,
-        Theme::TokyoNight,
-        Theme::Nord,
-        Theme::Gruvbox,
-        Theme::RosePine,
         Theme::Light,
         Theme::Sepia,
         Theme::HighContrast,
+        Theme::KitScenarist,
     ];
+
+    /// The 23 base themes Omarchy ships in `themes/` (basecamp/omarchy).
+    /// Palettes are imported rather than approximated; the order is the
+    /// folder order, with the four we carried before in their same places.
+    pub const OMARCHY: [Theme; 23] = [
+        Theme::Catppuccin,
+        Theme::CatppuccinLatte,
+        Theme::Ethereal,
+        Theme::Everforest,
+        Theme::FlexokiLight,
+        Theme::Gruvbox,
+        Theme::Hackerman,
+        Theme::JadeHorse,
+        Theme::Kanagawa,
+        Theme::LastHorizon,
+        Theme::Lumon,
+        Theme::Lupine,
+        Theme::MatteBlack,
+        Theme::Miasma,
+        Theme::Nord,
+        Theme::Retro82,
+        Theme::Ristretto,
+        Theme::RosePine,
+        Theme::Solitude,
+        Theme::Starship,
+        Theme::TokyoNight,
+        Theme::Vantablack,
+        Theme::White,
+    ];
+
+    pub const ALL: [Theme; 28] = [
+        Theme::Midnight,
+        Theme::Light,
+        Theme::Sepia,
+        Theme::HighContrast,
+        Theme::KitScenarist,
+        Theme::Catppuccin,
+        Theme::CatppuccinLatte,
+        Theme::Ethereal,
+        Theme::Everforest,
+        Theme::FlexokiLight,
+        Theme::Gruvbox,
+        Theme::Hackerman,
+        Theme::JadeHorse,
+        Theme::Kanagawa,
+        Theme::LastHorizon,
+        Theme::Lumon,
+        Theme::Lupine,
+        Theme::MatteBlack,
+        Theme::Miasma,
+        Theme::Nord,
+        Theme::Retro82,
+        Theme::Ristretto,
+        Theme::RosePine,
+        Theme::Solitude,
+        Theme::Starship,
+        Theme::TokyoNight,
+        Theme::Vantablack,
+        Theme::White,
+    ];
+
+    /// Group this theme is listed under in Settings.
+    pub fn group(self) -> ThemeGroup {
+        if Self::SCRIPT.contains(&self) {
+            ThemeGroup::ScriptCraft
+        } else {
+            ThemeGroup::Omarchy
+        }
+    }
 
     pub fn label(self) -> &'static str {
         match self {
             Theme::Midnight => "Midnight",
-            Theme::TokyoNight => "Tokyo Night",
-            Theme::Nord => "Nord",
-            Theme::Gruvbox => "Gruvbox",
-            Theme::RosePine => "Rosé Pine",
             Theme::Light => "Light",
             Theme::Sepia => "Sepia",
             Theme::HighContrast => "High Contrast",
+            Theme::KitScenarist => "KIT Scenarist",
+            Theme::Catppuccin => "Catppuccin",
+            Theme::CatppuccinLatte => "Catppuccin Latte",
+            Theme::Ethereal => "Ethereal",
+            Theme::Everforest => "Everforest",
+            Theme::FlexokiLight => "Flexoki Light",
+            Theme::Gruvbox => "Gruvbox",
+            Theme::Hackerman => "Hackerman",
+            Theme::JadeHorse => "Jade Horse",
+            Theme::Kanagawa => "Kanagawa",
+            Theme::LastHorizon => "Last Horizon",
+            Theme::Lumon => "Lumon",
+            Theme::Lupine => "Lupine",
+            Theme::MatteBlack => "Matte Black",
+            Theme::Miasma => "Miasma",
+            Theme::Nord => "Nord",
+            Theme::Retro82 => "Retro 82",
+            Theme::Ristretto => "Ristretto",
+            Theme::RosePine => "Rosé Pine",
+            Theme::Solitude => "Solitude",
+            Theme::Starship => "Starship",
+            Theme::TokyoNight => "Tokyo Night",
+            Theme::Vantablack => "Vantablack",
+            Theme::White => "White",
         }
     }
 
@@ -360,13 +1084,33 @@ impl Theme {
     pub fn key(self) -> &'static str {
         match self {
             Theme::Midnight => "midnight",
-            Theme::TokyoNight => "tokyo-night",
-            Theme::Nord => "nord",
-            Theme::Gruvbox => "gruvbox",
-            Theme::RosePine => "rose-pine",
             Theme::Light => "light",
             Theme::Sepia => "sepia",
             Theme::HighContrast => "high-contrast",
+            Theme::KitScenarist => "kit-scenarist",
+            Theme::Catppuccin => "catppuccin",
+            Theme::CatppuccinLatte => "catppuccin-latte",
+            Theme::Ethereal => "ethereal",
+            Theme::Everforest => "everforest",
+            Theme::FlexokiLight => "flexoki-light",
+            Theme::Gruvbox => "gruvbox",
+            Theme::Hackerman => "hackerman",
+            Theme::JadeHorse => "jade-horse",
+            Theme::Kanagawa => "kanagawa",
+            Theme::LastHorizon => "last-horizon",
+            Theme::Lumon => "lumon",
+            Theme::Lupine => "lupine",
+            Theme::MatteBlack => "matte-black",
+            Theme::Miasma => "miasma",
+            Theme::Nord => "nord",
+            Theme::Retro82 => "retro-82",
+            Theme::Ristretto => "ristretto",
+            Theme::RosePine => "rose-pine",
+            Theme::Solitude => "solitude",
+            Theme::Starship => "starship",
+            Theme::TokyoNight => "tokyo-night",
+            Theme::Vantablack => "vantablack",
+            Theme::White => "white",
         }
     }
 
@@ -380,20 +1124,50 @@ impl Theme {
     pub fn palette(self) -> &'static KitColors {
         match self {
             Theme::Midnight => &KIT_MIDNIGHT,
-            Theme::TokyoNight => &KIT_TOKYO_NIGHT,
-            Theme::Nord => &KIT_NORD,
-            Theme::Gruvbox => &KIT_GRUVBOX,
-            Theme::RosePine => &KIT_ROSE_PINE,
             Theme::Light => &KIT_LIGHT,
             Theme::Sepia => &KIT_SEPIA,
             Theme::HighContrast => &KIT_HIGH_CONTRAST,
+            Theme::KitScenarist => &KIT_SCENARIST,
+            Theme::Catppuccin => &KIT_CATPPUCCIN,
+            Theme::CatppuccinLatte => &KIT_CATPPUCCIN_LATTE,
+            Theme::Ethereal => &KIT_ETHEREAL,
+            Theme::Everforest => &KIT_EVERFOREST,
+            Theme::FlexokiLight => &KIT_FLEXOKI_LIGHT,
+            Theme::Gruvbox => &KIT_GRUVBOX,
+            Theme::Hackerman => &KIT_HACKERMAN,
+            Theme::JadeHorse => &KIT_JADE_HORSE,
+            Theme::Kanagawa => &KIT_KANAGAWA,
+            Theme::LastHorizon => &KIT_LAST_HORIZON,
+            Theme::Lumon => &KIT_LUMON,
+            Theme::Lupine => &KIT_LUPINE,
+            Theme::MatteBlack => &KIT_MATTE_BLACK,
+            Theme::Miasma => &KIT_MIASMA,
+            Theme::Nord => &KIT_NORD,
+            Theme::Retro82 => &KIT_RETRO_82,
+            Theme::Ristretto => &KIT_RISTRETTO,
+            Theme::RosePine => &KIT_ROSE_PINE,
+            Theme::Solitude => &KIT_SOLITUDE,
+            Theme::Starship => &KIT_STARSHIP,
+            Theme::TokyoNight => &KIT_TOKYO_NIGHT,
+            Theme::Vantablack => &KIT_VANTABLACK,
+            Theme::White => &KIT_WHITE,
         }
     }
 
     /// Light palettes need dark ink; everything in `kit_visuals` branches on
-    /// this instead of the old single `Light` variant.
+    /// this.
     pub fn is_light(self) -> bool {
-        matches!(self, Theme::Light | Theme::Sepia)
+        matches!(
+            self,
+            Theme::Light
+                | Theme::Sepia
+                | Theme::KitScenarist
+                | Theme::CatppuccinLatte
+                | Theme::FlexokiLight
+                | Theme::Lupine
+                | Theme::RosePine
+                | Theme::White
+        )
     }
 }
 
@@ -973,6 +1747,74 @@ mod tests {
                 assert_ne!(a.label(), b.label());
             }
         }
+    }
+
+    #[test]
+    fn theme_groups_partition_all_themes() {
+        let mut seen: Vec<Theme> = Vec::new();
+        for group in ThemeGroup::ALL {
+            for theme in group.themes() {
+                assert!(
+                    !seen.contains(theme),
+                    "{} appears in two groups",
+                    theme.label()
+                );
+                assert_eq!(theme.group(), group, "{}", theme.label());
+                seen.push(*theme);
+            }
+        }
+        assert_eq!(
+            seen,
+            Theme::ALL.to_vec(),
+            "dropdown order covers every theme"
+        );
+    }
+
+    /// The Omarchy group is the full set from basecamp/omarchy `themes/`:
+    /// 23 palettes, imported rather than approximated.
+    #[test]
+    fn omarchy_group_is_the_full_omarchy_set() {
+        let keys: Vec<&str> = Theme::OMARCHY.iter().map(|t| t.key()).collect();
+        assert_eq!(
+            keys,
+            vec![
+                "catppuccin",
+                "catppuccin-latte",
+                "ethereal",
+                "everforest",
+                "flexoki-light",
+                "gruvbox",
+                "hackerman",
+                "jade-horse",
+                "kanagawa",
+                "last-horizon",
+                "lumon",
+                "lupine",
+                "matte-black",
+                "miasma",
+                "nord",
+                "retro-82",
+                "ristretto",
+                "rose-pine",
+                "solitude",
+                "starship",
+                "tokyo-night",
+                "vantablack",
+                "white",
+            ]
+        );
+        assert_eq!(Theme::OMARCHY.len(), 23);
+        assert_eq!(Theme::SCRIPT.len(), 5);
+        assert_eq!(Theme::ALL.len(), 28);
+    }
+
+    /// KIT Scenarist's own palette: warm grey chrome, orange mark, light page.
+    #[test]
+    fn kit_scenarist_imitates_the_warm_orange_brand() {
+        let c = *Theme::KitScenarist.palette();
+        assert!(Theme::KitScenarist.is_light());
+        assert!(c.accent.r() > c.accent.g() && c.accent.g() > c.accent.b());
+        assert!(c.window.r() > c.window.b(), "chrome should stay warm");
     }
 
     #[test]

@@ -5,7 +5,7 @@
 use egui::{Context, Ui};
 
 use crate::app::{kit_section, kit_square_button, start_button, KitIcon};
-use crate::theme::{kit, Theme};
+use crate::theme::{kit, Theme, ThemeGroup};
 
 /// Selected page in Settings, mirroring KIT's Preferences list.
 #[derive(Default, PartialEq, Eq, Clone, Copy, Debug)]
@@ -320,6 +320,78 @@ fn settings_nav_row(ui: &mut Ui, label: &str, selected: bool) -> egui::Response 
     resp
 }
 
+/// One card per theme in `group`: a paper swatch, the accent bar and a text
+/// sample, with the theme name underneath. Selecting a card sets the theme;
+/// `ScriptCraftApp` re-applies the palette on the next frame.
+fn theme_grid(ui: &mut Ui, settings: &mut AppSettings, group: ThemeGroup) -> bool {
+    let mut changed = false;
+    const CELL: egui::Vec2 = egui::vec2(108.0, 56.0);
+    ui.horizontal_wrapped(|ui| {
+        ui.add_space(16.0);
+        ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
+        for theme in group.themes() {
+            let selected = settings.theme == *theme;
+            let (rect, resp) = ui.allocate_exact_size(CELL, egui::Sense::click());
+            if !ui.is_rect_visible(rect) {
+                continue;
+            }
+            let c = *theme.palette();
+            let painter = ui.painter();
+            let bg = if resp.hovered() {
+                c.button_hover
+            } else {
+                c.window
+            };
+            painter.rect_filled(rect, 6.0, bg);
+            let paper = egui::Rect::from_min_max(
+                egui::pos2(rect.left() + 7.0, rect.top() + 7.0),
+                egui::pos2(rect.left() + 47.0, rect.bottom() - 7.0),
+            );
+            painter.rect_filled(paper, 2.0, c.page);
+            painter.rect_stroke(
+                paper,
+                2.0,
+                egui::Stroke::new(1.0_f32, c.page_edge),
+                egui::StrokeKind::Inside,
+            );
+            let bar = egui::Rect::from_min_max(
+                egui::pos2(rect.left() + 55.0, rect.top() + 10.0),
+                egui::pos2(rect.right() - 7.0, rect.top() + 16.0),
+            );
+            painter.rect_filled(bar, 3.0, c.accent);
+            let sample = egui::Rect::from_min_max(
+                egui::pos2(rect.left() + 55.0, rect.top() + 25.0),
+                egui::pos2(rect.right() - 16.0, rect.top() + 29.0),
+            );
+            painter.rect_filled(sample, 2.0, c.text);
+            painter.text(
+                egui::pos2(rect.left() + 7.0, rect.bottom() - 8.0),
+                egui::Align2::LEFT_BOTTOM,
+                theme.label(),
+                egui::FontId::proportional(10.0),
+                c.text,
+            );
+            if selected {
+                painter.rect_stroke(
+                    rect,
+                    6.0,
+                    egui::Stroke::new(2.0_f32, c.accent),
+                    egui::StrokeKind::Inside,
+                );
+            }
+            let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+            if resp.clicked() {
+                settings.theme = *theme;
+                changed = true;
+            }
+            resp.widget_info(|| {
+                egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, theme.label())
+            });
+        }
+    });
+    changed
+}
+
 /// Application page: theme, autosave, backups and the reset action.
 /// Returns `(changed, reset)`.
 fn settings_application(ui: &mut Ui, settings: &mut AppSettings) -> (bool, bool) {
@@ -345,16 +417,40 @@ fn settings_application(ui: &mut Ui, settings: &mut AppSettings) -> (bool, bool)
         ui.add_space(16.0);
         ui.label("Theme:");
         ui.add_space(6.0);
-        egui::ComboBox::from_id_salt("theme")
-            .selected_text(settings.theme.label())
-            .width(140.0)
-            .show_ui(ui, |ui| {
-                for theme in Theme::ALL {
-                    changed |= ui
-                        .selectable_value(&mut settings.theme, theme, theme.label())
-                        .changed();
-                }
-            });
+        ui.label(egui::RichText::new(settings.theme.label()).strong());
+    });
+    ui.add_space(6.0);
+    // A swatch per theme instead of a long dropdown: with 28 palettes every
+    // one is visible at once, and the swatch previews the page, accent and
+    // text colours before the click.
+    for group in ThemeGroup::ALL {
+        ui.horizontal(|ui| {
+            ui.add_space(16.0);
+            ui.label(
+                egui::RichText::new(group.label())
+                    .size(11.0)
+                    .color(kit().disabled_text),
+            );
+        });
+        ui.add_space(3.0);
+        changed |= theme_grid(ui, settings, group);
+        ui.add_space(4.0);
+    }
+    ui.add_space(4.0);
+    // Right under the theme it modifies: the page can drop to white paper and
+    // black ink while the palette above keeps the rest of the app themed.
+    ui.horizontal(|ui| {
+        ui.add_space(16.0);
+        changed |= ui
+            .checkbox(
+                &mut settings.paper_mono,
+                "Monochrome paper (white page, black ink)",
+            )
+            .on_hover_text(
+                "Keep the page white with black text whatever the theme does. Panels, \
+                 menus and toolbars keep the theme; revision marks stay coloured.",
+            )
+            .changed();
     });
     ui.add_space(12.0);
     ui.horizontal(|ui| {
@@ -463,20 +559,6 @@ fn settings_editor(ui: &mut Ui, settings: &mut AppSettings) -> (bool, bool) {
             .size(11.0)
             .color(kit().disabled_text),
         );
-    });
-    ui.add_space(10.0);
-    ui.horizontal(|ui| {
-        ui.add_space(16.0);
-        changed |= ui
-            .checkbox(
-                &mut settings.paper_mono,
-                "Monochrome paper (white page, black ink)",
-            )
-            .on_hover_text(
-                "Keep the page white with black text whatever the theme does. Panels, \
-                 menus and toolbars keep the theme; revision marks stay coloured.",
-            )
-            .changed();
     });
     ui.add_space(20.0);
     kit_section(ui, "View");

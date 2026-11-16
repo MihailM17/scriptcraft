@@ -523,3 +523,25 @@ fn snap_28_research_characters() {
     h.run_steps(2);
     h.snapshot("28_research_characters");
 }
+
+/// KIT Scenarist: warm grey chrome, orange accent, light paper.
+#[test]
+fn snap_29_script_kit_scenarist() {
+    use scriptcraft_app::theme::Theme;
+
+    let mut h = Harness::builder()
+        .with_size(egui::Vec2::new(1360.0, 880.0))
+        .build_eframe(|cc| {
+            app::apply_theme(&cc.egui_ctx);
+            app::install_fonts(&cc.egui_ctx);
+            let mut a = ScriptCraftApp::default();
+            assert!(a.open_fixture(), "A95 fixture not found");
+            a.pin_stats_generated("18.10.2026 16:03:47");
+            a.pin_backups_dir("/Users/test/Documents/ScriptCraft/backups");
+            a.set_theme(Theme::KitScenarist);
+            a.goto_tab(SideTab::Script);
+            a
+        });
+    h.run();
+    h.snapshot("29_script_kit_scenarist");
+}

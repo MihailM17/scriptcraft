@@ -16,7 +16,9 @@ macOS, Windows and Linux.
 > smoke on macOS/Linux/Windows. v0.8.6 keeps every typed space on the page,
 > makes IBM Plex Mono the default face so Latin and Cyrillic share one design
 > (Courier Prime stays as a Latin-only option), adds a monochrome-paper theme
-> option, a Tab character picker and live script recognition in Research.
+> option directly under the theme picker, 28 theme palettes shown as swatches
+> (KIT Scenarist plus every base Omarchy theme), a Tab character picker and
+> live script recognition in Research.
 > v0.8.5 corrected editor input: clicks and carets map through whitespace,
 > double-click selects a word, triple-click the paragraph, and drag selections
 > start at the press. v0.8.4 added live
@@ -98,12 +100,19 @@ app on day one.
   word for suggestions, **Add to dictionary** (saved per language) or
   **Ignore**; scene headings, cues and sound effects in ALL CAPS are skipped so
   screenplay formatting is not flagged as prose.
-- Eight themes — Midnight, Tokyo Night, Nord, Gruvbox, Rosé Pine, Light, Sepia
-  and High Contrast — picked in Settings ▸ Theme. Every palette is
-  contrast-tested, and revision colours stay industry-standard on all of them
-  (pale marks get an edge so they remain locatable on white and cream pages).
-  Monochrome paper turns the page white-with-black-ink while the app keeps its
-  theme; revision marks stay coloured.
+- 28 theme palettes in Settings ▸ Theme, shown as swatches with a page,
+  accent and text preview. ScriptCraft's own are Midnight, Light, Sepia, High
+  Contrast and **KIT Scenarist** — a light imitation of KIT's warm-grey chrome
+  and orange mark. The rest are the base themes Omarchy ships, imported from
+  its palettes: Catppuccin, Catppuccin Latte, Ethereal, Everforest, Flexoki
+  Light, Gruvbox, Hackerman, Jade Horse, Kanagawa, Last Horizon, Lumon, Lupine,
+  Matte Black, Miasma, Nord, Retro 82, Ristretto, Rosé Pine, Solitude,
+  Starship, Tokyo Night, Vantablack and White. Every palette is contrast-tested,
+  and revision colours stay industry-standard on all of them (pale marks get an
+  edge so they remain locatable on white and cream pages).
+- Monochrome paper, directly under the theme picker, turns the page
+  white-with-black-ink while the app keeps its theme; revision marks stay
+  coloured.
   Settings lists only controls that take effect — language and feature stubs
   that changed nothing are gone.
 - FastFormat shortcuts: select one or more blocks and press `Cmd+1`…`Cmd+0`

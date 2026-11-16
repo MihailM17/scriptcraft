@@ -25,7 +25,7 @@ Status legend: `[ ]` to do `[-]` in progress `[x]` done `[!]` blocked
 | Rust workspace | `scriptcraft-core`, `scriptcraft-app`, `scriptcraft-layout` (`Cargo.toml`, resolver 2) |
 | App crate version | `scriptcraft-app 0.8.6` (unreleased); `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
 | Distribution | **v0.8.5 released 2026-11-15** — <https://github.com/MihailM17/scriptcraft/releases/tag/v0.8.5>. Assets: macOS arm64 DMG (ad-hoc signed, not notarised), Windows x64 zip and Linux x86_64 tar.gz from Packages run `43700341929`, each with `.sha256`. No auto-update. |
-| Current one-liner | Free, open-source, revision-first studio: one screenplay engine (Editor 2.0), crash-safe saves + recovery, revision colours/marks/pages, compare/restore, revision summary with scene counts + CSV + printable PDF, omitted scenes, smart screenplay paste, KIT version write/import, changes-only compare with context gaps and template indentation, revision headers/title-page fields, production page locks with A/B page numbers and FDX revision metadata, dual dialogue side by side in editor/PDF with FDX interchange, a title-page editor whose A4 preview is the exporter's own layout, KIT-style editor/navigator settings, macOS standard selection keys, a compact file-focused Menu, OFL fonts, FDX/Fountain import/export; PDF export paginates exactly like the editor; eight contrast-tested themes with revision marks legible on every palette, and live spellchecking in English, Bulgarian and Russian with screenplay-aware ALL-CAPS skipping, right-click suggestions and per-language custom dictionaries; v0.8.5 corrected editor input with whitespace-aware caret mapping, press-point clicks, double-click word selection and press-anchored drag selection; v0.8.6 gives every typed space its own cell, sets IBM Plex Mono as the default page face with Courier Prime as a Latin-only alternative, adds monochrome paper, a Tab character picker and live script recognition in Research. |
+| Current one-liner | Free, open-source, revision-first studio: one screenplay engine (Editor 2.0), crash-safe saves + recovery, revision colours/marks/pages, compare/restore, revision summary with scene counts + CSV + printable PDF, omitted scenes, smart screenplay paste, KIT version write/import, changes-only compare with context gaps and template indentation, revision headers/title-page fields, production page locks with A/B page numbers and FDX revision metadata, dual dialogue side by side in editor/PDF with FDX interchange, a title-page editor whose A4 preview is the exporter's own layout, KIT-style editor/navigator settings, macOS standard selection keys, a compact file-focused Menu, OFL fonts, FDX/Fountain import/export; PDF export paginates exactly like the editor; eight contrast-tested themes with revision marks legible on every palette, and live spellchecking in English, Bulgarian and Russian with screenplay-aware ALL-CAPS skipping, right-click suggestions and per-language custom dictionaries; v0.8.5 corrected editor input with whitespace-aware caret mapping, press-point clicks, double-click word selection and press-anchored drag selection; v0.8.6 gives every typed space its own cell, sets IBM Plex Mono as the default page face with Courier Prime as a Latin-only alternative, adds monochrome paper under the theme picker, 28 theme palettes as swatches (KIT Scenarist plus all 23 base Omarchy themes), a Tab character picker and live script recognition in Research. |
 | Next release | **v0.8.6 (unreleased)** — notes and version are in place; tag/publish pending. Then Windows signing, optional release-binary/screenshot probe, Developer ID/notarisation and auto-update. |
 
 **Positioning (locked 2026-10-26):** the free, open-source, revision-first
@@ -2106,3 +2106,49 @@ never showed; and Research listed nothing the script already contained.
 - Release prep: `docs/releases/v0.8.6.md`, version `0.8.6`, README status line.
   Not tagged or published yet. Deferred unchanged: Developer ID/notarisation,
   Windows code signing, auto-update.
+
+### 2026-11-16 — Themes: KIT Scenarist, every Omarchy palette, swatch picker
+
+Requested: more colour combinations, a KIT Scenarist imitation, all the themes
+Omarchy uses, and the monochrome setting moved directly under the theme setting.
+
+- **28 palettes, two groups.** `Theme` now carries ScriptCraft's five
+  (Midnight, Light, Sepia, High Contrast, **KitScenarist**) and the 23 base
+  palettes from basecamp/omarchy's `themes/*/colors.toml` (imported, not
+  approximated): Catppuccin, Catppuccin Latte, Ethereal, Everforest, Flexoki
+  Light, Gruvbox, Hackerman, Jade Horse, Kanagawa, Last Horizon, Lumon, Lupine,
+  Matte Black, Miasma, Nord, Retro 82, Ristretto, Rosé Pine, Solitude,
+  Starship, Tokyo Night, Vantablack, White. `ThemeGroup` drives the headings;
+  `Theme::SCRIPT` and `Theme::OMARCHY` partition `Theme::ALL`, and a unit test
+  asserts the exact 23-key Omarchy list so a palette cannot silently disappear.
+- **Palette derivation.** Each Omarchy theme supplies its background,
+  foreground and accent; the remaining roles (page, desk, rail, buttons,
+  borders, muted text, heading text, accent text, spell underline) are derived
+  by one deterministic rule set (blend toward ink/paper, then push `text` to
+  7:1, `disabled_text` to 3:1, `accent_text` to 4.5:1, the underline to 3:1).
+  The existing `every_theme_is_legible`, `light_themes_have_light_pages` and
+  `revision_marks_stay_visible_on_every_palette` now run on all 28. Rosé Pine
+  is Omarchy's Dawn (light) palette; Tokyo Night/Nord/Gruvbox are their exact
+  Omarchy values, so snapshot 23 was regenerated and checked.
+- **KIT Scenarist.** Warm-grey chrome (`#F3F1EE`), near-white paper, orange
+  `#C96A12` accent and dark warm ink, matching KIT's brand (orange KIT, green
+  SCENARIST mark). Unit test `kit_scenarist_imitates_the_warm_orange_brand`;
+  snapshot 29 shows the script view in it.
+- **Swatch grid.** A 28-item dropdown hid two thirds of the list behind an
+  invisible scroll, so Settings ▸ Theme now paints one card per palette (page
+  swatch, accent bar, text sample, name) in a 5-column wrapped grid, 5
+  ScriptCraft cards and 23 Omarchy cards. Cards are real widgets with
+  `WidgetInfo`, so clicking by accessible label works without opening a popup.
+  Old dropdown tests were replaced with `theme_picker_switches_palette`,
+  `theme_picker_switches_between_dark_palettes` and
+  `theme_picker_lists_kit_scenarist_and_omarchy_themes`.
+- **Monochrome under Theme.** The checkbox moved from Scenario Editor ▸ Page
+  to Application, directly below the picker, with the same label and tooltip.
+  `settings_monochrome_paper_sits_under_the_theme` clicks it on the default
+  page, so the move is what the test asserts.
+- Snapshots: 07 (Application: grid + moved checkbox), 16 (Scenario Editor:
+  checkbox gone), 23 (exact Tokyo Night palette) regenerated, 29
+  (`29_script_kit_scenarist`) added; every changed PNG viewed first.
+- Gate green: app 57 lib + 68 interaction + 28 snapshots; core 101 lib + 54
+  integration; layout 30 lib + 24 integration; clippy, deny and diff checks
+  clean. Release notes v0.8.6 and README updated; still unreleased.
