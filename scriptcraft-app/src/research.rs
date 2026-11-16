@@ -253,7 +253,6 @@ fn tree(ui: &mut Ui, state: &mut ResearchView<'_>, actions: &mut Vec<ResearchAct
 }
 
 #[allow(clippy::too_many_arguments)]
-#[allow(clippy::too_many_arguments)]
 fn folder(
     ui: &mut Ui,
     state: &ResearchView<'_>,

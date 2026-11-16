@@ -18,15 +18,15 @@ Status legend: `[ ]` to do `[-]` in progress `[x]` done `[!]` blocked
 
 | Field | Value |
 |---|---|
-| Date | 2026-11-15 |
+| Date | 2026-11-16 |
 | Project | ScriptCraft — free, open-source, revision-first screenwriting studio |
 | Repo | `/Users/mihailmihaylov/Documents/Dev_work/scriptcraft` |
-| Branch / commit | `main` at v0.8.5; tags `v0.7.0` at `9ce2e0e`, `v0.7.1` at `d8b17de`, `v0.7.2` at `8b75f9a`, `v0.8.0` at `0052bba`, `v0.8.1` at `0fa598e`, `v0.8.2` at `6bf1983`, `v0.8.3` at `69c0329`, `v0.8.4` at `b178e00`, `v0.8.5` at `a9394bc`; M8/M9 progress at `a44ace0`, `1fe8c21`, `9d791a7`, `3b61227`; release prep at `d36ae4b`; assets/checksums at `aaad983`; M9 settings/export at `b284a78`; M9 research at `b9f9c21`; editor-input fixes at `6732bd0`; v0.8.5 release at `a9394bc`. |
+| Branch / commit | `main` past v0.8.5, v0.8.6 unreleased; tags `v0.7.0` at `9ce2e0e`, `v0.7.1` at `d8b17de`, `v0.7.2` at `8b75f9a`, `v0.8.0` at `0052bba`, `v0.8.1` at `0fa598e`, `v0.8.2` at `6bf1983`, `v0.8.3` at `69c0329`, `v0.8.4` at `b178e00`, `v0.8.5` at `a9394bc`; M8/M9 progress at `a44ace0`, `1fe8c21`, `9d791a7`, `3b61227`; release prep at `d36ae4b`; assets/checksums at `aaad983`; M9 settings/export at `b284a78`; M9 research at `b9f9c21`; editor-input fixes at `6732bd0`; v0.8.5 release at `a9394bc`; writer-surface fixes at `cff996e`, `3db11fc`, `f774705`, `adf31c8`. |
 | Rust workspace | `scriptcraft-core`, `scriptcraft-app`, `scriptcraft-layout` (`Cargo.toml`, resolver 2) |
-| App crate version | `scriptcraft-app 0.8.5`; `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
+| App crate version | `scriptcraft-app 0.8.6` (unreleased); `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
 | Distribution | **v0.8.5 released 2026-11-15** — <https://github.com/MihailM17/scriptcraft/releases/tag/v0.8.5>. Assets: macOS arm64 DMG (ad-hoc signed, not notarised), Windows x64 zip and Linux x86_64 tar.gz from Packages run `43700341929`, each with `.sha256`. No auto-update. |
-| Current one-liner | Free, open-source, revision-first studio: one screenplay engine (Editor 2.0), crash-safe saves + recovery, revision colours/marks/pages, compare/restore, revision summary with scene counts + CSV + printable PDF, omitted scenes, smart screenplay paste, KIT version write/import, changes-only compare with context gaps and template indentation, revision headers/title-page fields, production page locks with A/B page numbers and FDX revision metadata, dual dialogue side by side in editor/PDF with FDX interchange, a title-page editor whose A4 preview is the exporter's own layout, KIT-style editor/navigator settings, macOS standard selection keys, a compact file-focused Menu, OFL fonts, FDX/Fountain import/export; PDF export paginates exactly like the editor; eight contrast-tested themes with revision marks legible on every palette, and live spellchecking in English, Bulgarian and Russian with screenplay-aware ALL-CAPS skipping, right-click suggestions and per-language custom dictionaries; v0.8.5 corrected editor input with whitespace-aware caret mapping, press-point clicks, double-click word selection and press-anchored drag selection. |
-| Next release | **Post-v0.8.5** — Windows signing, optional release-binary/screenshot probe, Developer ID/notarisation and auto-update. |
+| Current one-liner | Free, open-source, revision-first studio: one screenplay engine (Editor 2.0), crash-safe saves + recovery, revision colours/marks/pages, compare/restore, revision summary with scene counts + CSV + printable PDF, omitted scenes, smart screenplay paste, KIT version write/import, changes-only compare with context gaps and template indentation, revision headers/title-page fields, production page locks with A/B page numbers and FDX revision metadata, dual dialogue side by side in editor/PDF with FDX interchange, a title-page editor whose A4 preview is the exporter's own layout, KIT-style editor/navigator settings, macOS standard selection keys, a compact file-focused Menu, OFL fonts, FDX/Fountain import/export; PDF export paginates exactly like the editor; eight contrast-tested themes with revision marks legible on every palette, and live spellchecking in English, Bulgarian and Russian with screenplay-aware ALL-CAPS skipping, right-click suggestions and per-language custom dictionaries; v0.8.5 corrected editor input with whitespace-aware caret mapping, press-point clicks, double-click word selection and press-anchored drag selection; v0.8.6 gives every typed space its own cell, sets IBM Plex Mono as the default page face with Courier Prime as a Latin-only alternative, adds monochrome paper, a Tab character picker and live script recognition in Research. |
+| Next release | **v0.8.6 (unreleased)** — notes and version are in place; tag/publish pending. Then Windows signing, optional release-binary/screenshot probe, Developer ID/notarisation and auto-update. |
 
 **Positioning (locked 2026-10-26):** the free, open-source, revision-first
 screenwriting studio. Moat = the production revision workflow (colours, locked
@@ -2026,3 +2026,83 @@ selections started a few pixels after the press.
     and SHA-256 verified.
   - Deferred (unchanged): Developer ID/notarisation, Windows code signing,
     auto-update.
+
+### 2026-11-16 — Writer surface: spaces, faces, mono paper, pickers, research
+
+Seven complaints from a writer using v0.8.5: a second space typed nothing;
+Latin looked smaller and higher than Cyrillic, and the Cyrillic face "wasn't
+quite right"; there was no font choice in Settings; no way to print a plain
+black-and-white page while keeping the themed UI; Tab in a blank character cue
+meant retyping a name from memory; the draft date sat below the page edge and
+never showed; and Research listed nothing the script already contained.
+
+- **Every space is a real cell** (`3db11fc`). `wrap_paragraph` rendered a run of
+  whitespace as one cell, so a second or third space could never be seen and the
+  caret could not sit between them. Display text is now the source text: each
+  space keeps its own cell, leading/trailing spaces survive, and only the run
+  that causes a wrap is swallowed into the previous line's span. Nothing
+  collapses, so `cols` is the identity map, which removes the whole class of
+  click/caret offset bugs rather than patching around it. Single-space
+  paragraphs wrap byte-identically, so A95 and the synthetic pagination goldens
+  are unchanged.
+- **One face for Latin and Cyrillic, and a choice** (`f774705`). Courier Prime
+  has no Cyrillic, so every Cyrillic glyph fell back to IBM Plex Mono with a
+  different x-height and baseline. `IBM Plex Mono` is now the default page face
+  — it draws both scripts in one design — with `Courier Prime` kept as the
+  "classic, Latin only" alternative. `ScriptFace` persists as `script_face=`;
+  editor and PDF both follow it; the 12 pt / 0.6 em grid is unchanged, so no
+  page break moves. Settings ▸ Scenario Editor ▸ Page shows a live sample of
+  each face.
+- **Monochrome paper** (`f774705`). A new `paper_mono` theme/settings option
+  paints the page white with black ink while panels, menus and toolbars keep the
+  palette. Selection, caret, current-line band and page numbers switch to
+  ink/grey; revision marks stay coloured. Persisted as `paper_mono=`.
+- **Tab picks a character** (`adf31c8`). Tab in an **empty** Character block
+  opens the story's characters instead of cycling the element type; arrows move
+  the highlight, Enter or Tab commits, Escape closes without touching the cue.
+  Shift+Tab still cycles back and a cue with text keeps the old Tab behaviour.
+  The list is `script_characters(blocks)` (parenthetical extensions folded, one
+  row per name) followed by Research characters not yet in the script, so a
+  planned character is reachable before it speaks; the typed-cue autocomplete
+  uses the same merge. The popup consumes plain Up/Down/Enter/Tab/Escape only
+  while open, and the focus filter must set `escape: true` or Escape would also
+  drop editor focus.
+- **Draft date and REVISED block** (`cff996e`). Both were laid out on the KIT
+  slot grid, but on A4 the 4.754 mm pitch puts slot 57 at −2.3 mm and the
+  REVISED block at −16.6 mm, below the bottom edge. `PrintLine` can now carry an
+  explicit height above the page bottom: the draft date anchors at 22 mm and
+  REVISED heading/name/date at 40/35/30 mm, keeping their slot indexes so line
+  order and KIT field order are unchanged. Tests assert every non-empty
+  title-page line lands inside the paper, with and without an active revision.
+- **Research recognises the script** (`adf31c8`). Research ▸ Characters and ▸
+  Locations rebuild their list from the live draft every frame: a cue or scene
+  heading typed in the editor is listed the next time the tab is drawn, with a
+  count, an "Add N missing …" import button and a per-name "Add NAME" button.
+  Cards are never deleted — entities that exist only in Research are listed
+  under "Only in Research" — and tree folder rows now select their pane, which
+  they previously never did. Shared helpers live in `scriptcraft-core`:
+  `character_name_of`, `script_characters` and `same_name`, which folds Cyrillic
+  case (`eq_ignore_ascii_case` folds only A-Z, so `ИВАН` and `иван` counted as
+  two characters); the import paths reuse them.
+- Tests: core `script_characters_folds_extensions_and_duplicates`; app lib
+  `tab_picker_lists_story_characters_only_in_an_empty_cue`,
+  `typed_cue_dropdown_includes_research_only_characters`; interaction
+  `tab_in_an_empty_character_cue_opens_the_character_picker`,
+  `character_picker_arrows_move_and_escape_cancels`,
+  `research_recognises_characters_and_locations_from_the_script`, plus the
+  spaces/settings/mono-paper tests from the earlier commits. Snapshots 27
+  (picker) and 28 (research characters) added, 26 (mono paper) added earlier,
+  16 (settings) regenerated for the new Page checkbox, and 28 refreshed once
+  more for the selected folder row. Every changed PNG was viewed before
+  committing; no other snapshot moved.
+- Gate: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets
+  -- -D warnings`, `cargo test --workspace` (app 54 lib + 67 interaction + 27
+  snapshots; core 101 lib + 24 A95 + 6 dual + 12 identity + 4 omitted + 4
+  restore; layout 30 lib + 4 dual + 3 omitted + 1 pagination + 3 parity (1
+  ignored) + 6 PDF + 4 place + 2 relayout + 3 scale), `cargo deny check`,
+  `git diff --check` — green. Known pre-existing flake:
+  `native_quit_request_prompts_when_dirty` (global quit-guard race); it passes
+  alone and on rerun and is unrelated to this batch.
+- Release prep: `docs/releases/v0.8.6.md`, version `0.8.6`, README status line.
+  Not tagged or published yet. Deferred unchanged: Developer ID/notarisation,
+  Windows code signing, auto-update.

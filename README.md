@@ -8,14 +8,18 @@ production revisions. Open KIT projects, exchange Final Draft files, lock
 pages, issue coloured revisions, and export page-exact PDFs — offline, on
 macOS, Windows and Linux.
 
-> **Status — v0.8.5.** Revision-complete for the core production workflow:
+> **Status — v0.8.6.** Revision-complete for the core production workflow:
 > stable block/scene identity, draft diff and compare, restore-as-copy, omitted
 > scenes, dual dialogue, title-page editor and revision summary (scene counts,
 > CSV and printable PDF). Layout metrics are derived from the bundled font,
 > `.kitsp` saves preserve unknown sidecar rows, and CI runs runtime interaction
-> smoke on macOS/Linux/Windows. v0.8.5 corrects editor input: clicks and carets
-> map through collapsed whitespace, double-click selects a word, triple-click
-> the paragraph, and drag selections start at the press. v0.8.4 added live
+> smoke on macOS/Linux/Windows. v0.8.6 keeps every typed space on the page,
+> makes IBM Plex Mono the default face so Latin and Cyrillic share one design
+> (Courier Prime stays as a Latin-only option), adds a monochrome-paper theme
+> option, a Tab character picker and live script recognition in Research.
+> v0.8.5 corrected editor input: clicks and carets map through whitespace,
+> double-click selects a word, triple-click the paragraph, and drag selections
+> start at the press. v0.8.4 added live
 > spellchecking in English, Bulgarian and Russian (Hunspell dictionaries shipped
 > as removable data files, ALL-CAPS screenplay lines ignored, right-click
 > suggestions, custom and session dictionaries) and eight contrast-tested
@@ -73,10 +77,15 @@ app on day one.
 
 ## The editor
 
-- Fixed A4 page editor with Courier Prime, page-accurate pagination, scene
+- Fixed A4 page editor with IBM Plex Mono (Courier Prime optional) for one
+  type design across Latin and Cyrillic, page-accurate pagination, scene
   numbers, `(MORE)` / `(CONT'D)` markers, and zoom that scales pages without
-  reflowing text.
-- Autocomplete for scene headings, characters, locations and transitions.
+  reflowing text. Every space you type keeps its own cell, on screen and in the
+  PDF.
+- Autocomplete for scene headings, characters, locations and transitions; Tab
+  in an empty character cue opens the story's character picker.
+- Research ▸ Characters and ▸ Locations recognise the cues and scene headings
+  already in the draft, with one click to turn a recognised name into a card.
 - Screenplay-aware paste: plain text copied from ChatGPT or another editor is
   split into scene headings, action, cues, parentheticals, dialogue and
   transitions. Prose without screenplay structure still pastes as one block.
@@ -93,6 +102,8 @@ app on day one.
   and High Contrast — picked in Settings ▸ Theme. Every palette is
   contrast-tested, and revision colours stay industry-standard on all of them
   (pale marks get an edge so they remain locatable on white and cream pages).
+  Monochrome paper turns the page white-with-black-ink while the app keeps its
+  theme; revision marks stay coloured.
   Settings lists only controls that take effect — language and feature stubs
   that changed nothing are gone.
 - FastFormat shortcuts: select one or more blocks and press `Cmd+1`…`Cmd+0`
