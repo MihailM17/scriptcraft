@@ -1609,7 +1609,11 @@ mod tests {
         assert_eq!(year.y_from_bottom_mm, Some(TITLE_YEAR_Y_MM));
         assert_eq!(title_page_line_y_mm(57, year), TITLE_YEAR_Y_MM);
         // The slot grid would have placed it below the paper edge.
-        assert!(PAGE_H - MARGIN_T - BASELINE_OFF - 57.0 * PITCH_MM < 0.0);
+        let slot_baseline = PAGE_H - MARGIN_T - BASELINE_OFF - 57.0 * PITCH_MM;
+        assert!(
+            slot_baseline < 0.0,
+            "slot 57 used to sit at {slot_baseline} mm"
+        );
     }
 
     #[test]

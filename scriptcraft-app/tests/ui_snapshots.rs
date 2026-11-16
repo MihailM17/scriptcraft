@@ -448,3 +448,25 @@ fn snap_25_spelling_marks() {
     h.run_steps(2);
     h.snapshot("25_spelling_marks");
 }
+
+/// Monochrome paper: the page is white with black ink while the panels keep
+/// the Midnight palette, and revision marks stay coloured.
+#[test]
+fn snap_26_script_mono_paper() {
+    let mut h = Harness::builder()
+        .with_size(egui::Vec2::new(1360.0, 880.0))
+        .build_eframe(|cc| {
+            app::apply_theme(&cc.egui_ctx);
+            app::install_fonts(&cc.egui_ctx);
+            let mut a = ScriptCraftApp::default();
+            assert!(a.open_fixture(), "A95 fixture not found");
+            a.pin_stats_generated("18.10.2026 16:03:47");
+            a.pin_backups_dir("/Users/test/Documents/ScriptCraft/backups");
+            a.set_paper_mono_for_test(true);
+            a.goto_tab(SideTab::Script);
+            a
+        });
+    h.run();
+    assert!(h.state().paper_mono_for_test());
+    h.snapshot("26_script_mono_paper");
+}

@@ -587,9 +587,15 @@ pub fn paint_ellipsized(
 }
 
 /// Paper sheet with a soft drop shadow, used for every script page.
-pub fn paint_page(painter: &Painter, rect: Rect) {
+pub fn paint_page(painter: &Painter, rect: Rect, paper_mono: bool) {
     let c = kit();
-    let a = if kit_is_light() { 30 } else { 100 };
+    let a = if paper_mono {
+        60
+    } else if kit_is_light() {
+        30
+    } else {
+        100
+    };
     painter.add(
         Shadow {
             offset: [0, 4],
@@ -599,13 +605,13 @@ pub fn paint_page(painter: &Painter, rect: Rect) {
         }
         .as_shape(rect, 3.0),
     );
-    painter.rect_filled(rect, 3.0, c.page);
-    painter.rect_stroke(
-        rect,
-        3.0,
-        Stroke::new(1.0_f32, c.page_edge),
-        StrokeKind::Inside,
-    );
+    let (fill, edge) = if paper_mono {
+        (Color32::WHITE, Color32::from_gray(0xD5))
+    } else {
+        (c.page, c.page_edge)
+    };
+    painter.rect_filled(rect, 3.0, fill);
+    painter.rect_stroke(rect, 3.0, Stroke::new(1.0_f32, edge), StrokeKind::Inside);
 }
 
 /// Tiny dot used for the saved / unsaved indicator.

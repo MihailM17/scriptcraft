@@ -7,6 +7,44 @@ use scriptcraft_core::revision::RevisionHistory;
 const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../fixtures/A95.kitsp");
 
 #[test]
+fn plex_primary_exports_the_same_page_count_and_both_scripts() {
+    use scriptcraft_layout::pdf;
+    let p = kitsp::load_file(FIXTURE).expect("fixture must load");
+    let read = |name: &str| {
+        std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../scriptcraft-app/assets/fonts")
+                .join(name),
+        )
+        .expect("bundled font")
+    };
+    // IBM Plex Mono is the default script face: it carries Latin and Cyrillic
+    // in one design, so the Cyrillic no longer comes from a fallback.
+    let fonts = pdf::ExportFonts {
+        regular: &read("IBMPlexMono-Regular.ttf"),
+        bold: &read("IBMPlexMono-Bold.ttf"),
+        fallback_regular: &read("CourierPrime-Regular.ttf"),
+        fallback_bold: &read("CourierPrime-Bold.ttf"),
+    };
+    let meta = kitsp::load_metadata(FIXTURE).expect("load metadata");
+    let opts = pdf::ExportOptions::default();
+    let bytes = pdf::to_pdf_bytes(&p, &meta, &opts, &fonts).expect("pdf renders");
+    let doc = lopdf::Document::load_mem(&bytes).expect("generated PDF must parse");
+    assert_eq!(
+        doc.get_pages().len(),
+        pdf::layout_pages(&p, &meta, &opts).len() + 1,
+        "choosing a face must never move a page break"
+    );
+    let mut all = String::new();
+    for page_num in doc.get_pages().keys() {
+        all.push_str(&doc.extract_text(&[*page_num]).unwrap_or_default());
+        all.push('\n');
+    }
+    assert!(all.contains("A95"), "title text missing from PDF");
+    assert!(all.contains("ПАРКИНГ"), "Cyrillic heading text missing");
+}
+
+#[test]
 fn a95_exports_valid_pdf() {
     use scriptcraft_layout::pdf;
     let p = kitsp::load_file(FIXTURE).expect("fixture must load");

@@ -94,7 +94,6 @@ pub fn wrap_paragraph(para: &str, chars_per_line: usize) -> Vec<WrappedLine> {
     if end < total {
         let tail: String = para.chars().skip(end).take(total - end).collect();
         line.push_str(&tail);
-        end = total;
     }
     out.push(WrappedLine {
         text: line,
@@ -216,6 +215,7 @@ fn tokens_with_spans(para: &str) -> Vec<Token<'_>> {
 
 /// Place one token (its whitespace run plus the word) on the current line,
 /// wrapping first at word boundaries and then at internal hyphens.
+#[allow(clippy::too_many_arguments)]
 fn place_token(
     out: &mut Vec<WrappedLine>,
     line: &mut String,
@@ -322,7 +322,7 @@ mod tests {
 
     /// The display must be the source span itself, minus only the whitespace
     /// run that the line break swallowed at the end.
-    fn joined_source<'a>(para: &'a str, start: usize, end: usize) -> String {
+    fn joined_source(para: &str, start: usize, end: usize) -> String {
         para.chars()
             .skip(start)
             .take(end.saturating_sub(start))

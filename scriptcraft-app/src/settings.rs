@@ -26,6 +26,47 @@ impl SettingsPage {
     }
 }
 
+/// Script face used for the page (editor and PDF). Bounded to faces that are
+/// bundled with the app, so a chosen face can never fall back to a system font
+/// with different Latin/Cyrillic proportions.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum ScriptFace {
+    /// Courier Prime: the classic screenplay look. Latin only — Cyrillic is
+    /// drawn from IBM Plex Mono.
+    CourierPrime,
+    /// IBM Plex Mono: monospaced, with a matched Latin and Cyrillic design.
+    /// The default: it is the only bundled face whose Latin and Cyrillic
+    /// share proportions, so mixed-script pages stay level.
+    #[default]
+    PlexMono,
+}
+
+impl ScriptFace {
+    pub const ALL: [Self; 2] = [Self::PlexMono, Self::CourierPrime];
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::CourierPrime => "courier",
+            Self::PlexMono => "plex",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::CourierPrime => "Courier Prime (classic, Latin only)",
+            Self::PlexMono => "IBM Plex Mono (Latin + Cyrillic)",
+        }
+    }
+
+    pub fn from_key(key: &str) -> Option<Self> {
+        match key.trim() {
+            "courier" | "courier_prime" => Some(Self::CourierPrime),
+            "plex" | "plex_mono" => Some(Self::PlexMono),
+            _ => None,
+        }
+    }
+}
+
 /// Persisted application settings (`settings.conf` in the per-user config dir).
 #[derive(Clone)]
 pub struct AppSettings {
@@ -34,6 +75,11 @@ pub struct AppSettings {
     pub backups: bool,
     pub backups_dir: String,
     pub theme: Theme,
+    /// Face used for the page (editor and exported PDF).
+    pub script_face: ScriptFace,
+    /// Keep the page white with black ink whatever the theme does. The rest
+    /// of the UI keeps its palette, and revision marks stay coloured.
+    pub paper_mono: bool,
     /// KIT's Scenario Editor toggles. Defaults preserve the editor's
     /// previous behaviour: scene numbers and a preview in the navigator on,
     /// automatic typography off until the writer asks for it.
@@ -62,6 +108,8 @@ impl Default for AppSettings {
             backups: true,
             backups_dir: crate::app::default_backups_dir(),
             theme: Theme::Midnight,
+            script_face: ScriptFace::default(),
+            paper_mono: false,
             show_scene_numbers: true,
             highlight_current_line: false,
             capitalize_first_word: false,
@@ -108,6 +156,10 @@ impl AppSettings {
                             s.backups_dir = v.to_string();
                         }
                     }
+                    "paper_mono" => s.paper_mono = v == "1",
+                    "script_face" => {
+                        s.script_face = ScriptFace::from_key(v).unwrap_or(s.script_face);
+                    }
                     "show_scene_numbers" => s.show_scene_numbers = v != "0",
                     "highlight_current_line" => s.highlight_current_line = v == "1",
                     "capitalize_first_word" => s.capitalize_first_word = v == "1",
@@ -146,7 +198,7 @@ impl AppSettings {
         let _ = std::fs::create_dir_all(crate::app::config_dir());
         let text = format!(
             "autosave={}\nautosave_minutes={}\nbackups={}\nbackups_dir={}\ntheme={}\n\
-             show_scene_numbers={}\nhighlight_current_line={}\ncapitalize_first_word={}\n\
+             script_face={}\npaper_mono={}\nshow_scene_numbers={}\nhighlight_current_line={}\ncapitalize_first_word={}\n\
              correct_double_capitals={}\nreplace_three_dots={}\nsmart_quotes={}\nnavigator_preview={}\n\
              navigator_show_numbers={}\nspellcheck={}\nspell_language={}\nspell_ignore_caps={}\n",
             self.autosave as u8,
@@ -154,6 +206,8 @@ impl AppSettings {
             self.backups as u8,
             self.backups_dir,
             self.theme.key(),
+            self.script_face.key(),
+            self.paper_mono as u8,
             self.show_scene_numbers as u8,
             self.highlight_current_line as u8,
             self.capitalize_first_word as u8,
@@ -367,6 +421,64 @@ fn settings_application(ui: &mut Ui, settings: &mut AppSettings) -> (bool, bool)
 /// Scenario Editor page: KIT's view toggles and automatic corrections.
 fn settings_editor(ui: &mut Ui, settings: &mut AppSettings) -> (bool, bool) {
     let mut changed = false;
+    kit_section(ui, "Page");
+    ui.horizontal(|ui| {
+        ui.add_space(16.0);
+        ui.label("Script font:");
+        ui.add_space(6.0);
+        changed |= egui::ComboBox::from_id_salt("script_face")
+            .selected_text(settings.script_face.label())
+            .width(280.0)
+            .show_ui(ui, |ui| {
+                let mut picked = false;
+                for face in ScriptFace::ALL {
+                    picked |= ui
+                        .selectable_value(&mut settings.script_face, face, face.label())
+                        .changed();
+                }
+                picked
+            })
+            .inner
+            .unwrap_or(false);
+    });
+    ui.add_space(8.0);
+    ui.horizontal(|ui| {
+        ui.add_space(16.0);
+        ui.label(
+            egui::RichText::new("INT. КУХНЯ — NIGHT      МАРА (V.O.)      Hello, свят.")
+                .font(egui::FontId::monospace(14.0))
+                .color(kit().text),
+        );
+    });
+    ui.add_space(4.0);
+    ui.horizontal_wrapped(|ui| {
+        ui.add_space(16.0);
+        ui.label(
+            egui::RichText::new(
+                "IBM Plex Mono draws Latin and Cyrillic with the same proportions and \
+                 baseline. Courier Prime is the classic screenplay face but has no \
+                 Cyrillic, so Cyrillic falls back to Plex. The page grid does not \
+                 change, so pagination is identical with either face.",
+            )
+            .size(11.0)
+            .color(kit().disabled_text),
+        );
+    });
+    ui.add_space(10.0);
+    ui.horizontal(|ui| {
+        ui.add_space(16.0);
+        changed |= ui
+            .checkbox(
+                &mut settings.paper_mono,
+                "Monochrome paper (white page, black ink)",
+            )
+            .on_hover_text(
+                "Keep the page white with black text whatever the theme does. Panels, \
+                 menus and toolbars keep the theme; revision marks stay coloured.",
+            )
+            .changed();
+    });
+    ui.add_space(20.0);
     kit_section(ui, "View");
     ui.horizontal(|ui| {
         ui.add_space(16.0);

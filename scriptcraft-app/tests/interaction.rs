@@ -300,6 +300,38 @@ fn recovery_bar_restores_and_discards() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Settings ▸ Script font picks the face used for the page and the PDF, and
+/// the app installs it immediately.
+#[test]
+fn settings_script_font_switches_the_page_face() {
+    use scriptcraft_app::settings::ScriptFace;
+
+    let mut h = harness(SideTab::Settings);
+    h.run();
+    h.get_by_label("Scenario Editor").click();
+    h.run();
+    assert_eq!(
+        h.state().script_face_for_test(),
+        (ScriptFace::PlexMono, Some(ScriptFace::PlexMono)),
+        "IBM Plex Mono is the default and must be installed"
+    );
+    let face_combo = h
+        .get_all_by_role(egui::accesskit::Role::ComboBox)
+        .find(|n| !n.accesskit_node().is_disabled())
+        .expect("script font chooser should be an enabled combo box");
+    face_combo.click();
+    h.run();
+    h.get_by_label("Courier Prime (classic, Latin only)")
+        .click();
+    h.run();
+
+    assert_eq!(
+        h.state().script_face_for_test(),
+        (ScriptFace::CourierPrime, Some(ScriptFace::CourierPrime)),
+        "choosing Courier Prime must apply and install it"
+    );
+}
+
 /// Settings pages apply their choices to the editor and navigator.
 #[test]
 fn settings_pages_apply_navigator_and_typography_options() {
@@ -2879,4 +2911,22 @@ fn typing_many_spaces_keeps_every_one() {
         .editor2_selection()
         .expect("typing must leave a caret");
     assert_eq!(focus, (bi, 0, 4));
+}
+
+/// Settings ▸ Scenario Editor ▸ Monochrome paper: the page turns white with
+/// black ink while the panels keep the theme.
+#[test]
+fn settings_monochrome_paper_keeps_the_ui_themed() {
+    let mut h = harness(SideTab::Settings);
+    h.run();
+    h.get_by_label("Scenario Editor").click();
+    h.run();
+    assert!(!h.state().paper_mono_for_test(), "off by default");
+    h.get_by_label("Monochrome paper (white page, black ink)")
+        .click();
+    h.run_steps(2);
+    assert!(
+        h.state().paper_mono_for_test(),
+        "the checkbox must flip the page to black on white"
+    );
 }

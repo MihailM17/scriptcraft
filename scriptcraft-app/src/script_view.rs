@@ -211,6 +211,8 @@ pub struct ScriptViewStyle<'a> {
     pub omitted_headings: &'a [uuid::Uuid],
     /// Scenario Editor preferences (numbers, current-line highlight, typing).
     pub options: EditorOptions,
+    /// White paper and black ink regardless of the theme.
+    pub paper_mono: bool,
 }
 
 /// What the widget wants the app to apply this frame.
@@ -239,6 +241,7 @@ pub fn script_view(
         hidden_blocks,
         omitted_headings,
         options,
+        paper_mono,
     } = style;
     let page = page_size_pt(zoom);
     let scale = PT_PER_MM * zoom;
@@ -488,21 +491,34 @@ pub fn script_view(
 
         let painter = ui.painter();
         let clip = ui.clip_rect();
-        let sel_fill = ui.visuals().selection.bg_fill;
-        let caret_color = ui.visuals().text_cursor.stroke.color;
+        let sel_fill = if paper_mono {
+            // Monochrome paper: the selection is ink, not a theme colour.
+            egui::Color32::from_rgba_unmultiplied(0, 0, 0, 45)
+        } else {
+            ui.visuals().selection.bg_fill
+        };
+        let caret_color = if paper_mono {
+            egui::Color32::BLACK
+        } else {
+            ui.visuals().text_cursor.stroke.color
+        };
         let caret_w = ui.visuals().text_cursor.stroke.width.max(1.0);
         // Current-line tint follows the theme accent; Midnight and Light both
-        // use #4294F8, so their pixels are unchanged.
+        // use #4294F8, so their pixels are unchanged. On monochrome paper it
+        // becomes a faint grey band.
         let accent = kit().accent;
-        let line_band =
-            egui::Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), 26);
+        let line_band = if paper_mono {
+            egui::Color32::from_rgba_unmultiplied(0, 0, 0, 18)
+        } else {
+            egui::Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), 26)
+        };
         for (pi, page_lay) in doc.pages.iter().enumerate() {
             let prect = page_rects[pi];
             if !clip.intersects(prect) {
                 continue;
             }
-            paint_page(painter, prect);
-            paint_page_number(painter, prect, page_lay, body, row_h, scale);
+            paint_page(painter, prect, paper_mono);
+            paint_page_number(painter, prect, page_lay, body, row_h, scale, paper_mono);
             if focused && options.highlight_current_line {
                 if let Some((cpi, page_rect, caret)) = caret_geo {
                     if cpi == pi {
@@ -538,6 +554,7 @@ pub fn script_view(
                     scale,
                     row_h,
                     revision,
+                    paper_mono,
                 };
                 paint_line(painter, prect, blocks, line, paint);
                 if line.role == LineRole::Body {
@@ -2310,6 +2327,7 @@ fn caret_geometry(
 }
 
 /// KIT page numbers: nothing on page one, "2."… in the top margin after.
+#[allow(clippy::too_many_arguments)]
 fn paint_page_number(
     painter: &egui::Painter,
     prect: egui::Rect,
@@ -2317,6 +2335,7 @@ fn paint_page_number(
     body: f32,
     row_h: f32,
     scale: f32,
+    paper_mono: bool,
 ) {
     let Some(n) = page.number.as_deref() else {
         return;
@@ -2329,7 +2348,11 @@ fn paint_page_number(
         egui::Align2::RIGHT_BOTTOM,
         format!("{n}."),
         egui::FontId::new(body, MONO),
-        kit().disabled_text,
+        if paper_mono {
+            egui::Color32::from_gray(0x70)
+        } else {
+            kit().disabled_text
+        },
     );
 }
 
@@ -2339,6 +2362,7 @@ struct LinePaint {
     scale: f32,
     row_h: f32,
     revision: Option<RevisionColor>,
+    paper_mono: bool,
 }
 
 fn paint_line(
@@ -2353,6 +2377,7 @@ fn paint_line(
         scale,
         row_h,
         revision,
+        paper_mono,
     } = paint;
     let c = kit();
     let family = if line.bold {
@@ -2363,7 +2388,7 @@ fn paint_line(
         MONO
     };
     let font = egui::FontId::new(body, family);
-    let color = line_color(line, blocks, &c);
+    let color = line_color(line, blocks, &c, paper_mono);
     let cell = MM_PER_CELL * scale;
     let galley = line_galley(painter, &line.text, font, color, cell);
     let size = galley.size();
@@ -2506,7 +2531,26 @@ fn line_galley(
 }
 
 /// Same colors as the old chunk editor: headings light, notes muted.
-fn line_color(line: &PlacedLine, blocks: &[ScriptBlock], c: &KitColors) -> egui::Color32 {
+fn line_color(
+    line: &PlacedLine,
+    blocks: &[ScriptBlock],
+    c: &KitColors,
+    paper_mono: bool,
+) -> egui::Color32 {
+    if paper_mono {
+        // White paper, black ink. Non-printable notes stay distinguishable,
+        // but only by weight of grey — no pitch or underline is implied.
+        return match line.role {
+            LineRole::SceneNumber | LineRole::Omitted => egui::Color32::from_gray(0x70),
+            LineRole::Body => match line.span.and_then(|s| blocks.get(s.bi)) {
+                Some(b) if b.element_type == ElementType::NonPrintable => {
+                    egui::Color32::from_gray(0x70)
+                }
+                _ => egui::Color32::BLACK,
+            },
+            _ => egui::Color32::BLACK,
+        };
+    }
     match line.role {
         LineRole::SceneNumber => c.disabled_text,
         LineRole::Omitted => c.disabled_text,
@@ -2989,6 +3033,25 @@ mod tests {
         assert_eq!(at.bi, span.bi);
         assert_eq!(at.para, span.para);
         assert_eq!(at.ch, span.start + 3);
+    }
+
+    #[test]
+    fn monochrome_paper_paints_black_ink() {
+        let blocks = sample();
+        let labels: Vec<String> = Vec::new();
+        let doc = document_layout(&blocks, &RUSSIAN, &labels);
+        let line = body_lines(&doc)[0];
+        let c = kit();
+        assert_eq!(
+            line_color(line, &blocks, &c, false),
+            c.heading_text,
+            "themed paper uses the palette"
+        );
+        assert_eq!(
+            line_color(line, &blocks, &c, true),
+            egui::Color32::BLACK,
+            "monochrome paper prints black ink"
+        );
     }
 
     #[test]

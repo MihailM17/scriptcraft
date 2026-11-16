@@ -87,6 +87,14 @@ pub fn run() -> eframe::Result<()> {
 }
 
 pub fn install_fonts(ctx: &egui::Context) {
+    install_script_fonts(ctx, crate::settings::ScriptFace::default());
+}
+
+/// Install the UI face and the script faces, with `face` first in the
+/// monospace family list. The other bundled face stays behind it so a glyph
+/// missing from the chosen face (Cyrillic in Courier Prime) still renders.
+pub fn install_script_fonts(ctx: &egui::Context, face: crate::settings::ScriptFace) {
+    use crate::settings::ScriptFace;
     let mut fonts = egui::FontDefinitions::default();
     // UI face: PT Sans (Roboto-spirit humanist, Latin + Cyrillic).
     fonts.font_data.insert(
@@ -123,21 +131,29 @@ pub fn install_fonts(ctx: &egui::Context) {
         "plex_mono_bold".to_owned(),
         egui::FontData::from_static(include_bytes!("../assets/fonts/IBMPlexMono-Bold.ttf")).into(),
     );
+    let (script_regular, script_bold) = match face {
+        ScriptFace::CourierPrime => ("courier_prime", "courier_prime_bold"),
+        ScriptFace::PlexMono => ("plex_mono", "plex_mono_bold"),
+    };
     if let Some(prop) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
         prop.insert(0, "ui_regular".to_owned());
     }
-    if let Some(mono) = fonts.families.get_mut(&egui::FontFamily::Monospace) {
-        *mono = vec!["courier_prime".to_owned(), "plex_mono".to_owned()]
-            .into_iter()
-            .chain(mono.iter().cloned())
-            .collect();
+    let mut mono = vec![script_regular.to_owned()];
+    for extra in ["courier_prime", "plex_mono", "courier_prime_italic"] {
+        if extra != script_regular {
+            mono.push(extra.to_owned());
+        }
     }
+    mono.extend(fonts.families[&egui::FontFamily::Monospace].iter().cloned());
+    fonts.families.insert(egui::FontFamily::Monospace, mono);
     fonts.families.insert(
         bold_mono(),
         vec![
-            "courier_prime_bold".to_owned(),
+            script_bold.to_owned(),
             "plex_mono_bold".to_owned(),
+            "courier_prime_bold".to_owned(),
             "plex_mono".to_owned(),
+            "courier_prime".to_owned(),
         ],
     );
     fonts.families.insert(
@@ -435,6 +451,8 @@ pub struct ScriptCraftApp {
     recent: Vec<(String, String)>,
     settings: AppSettings,
     settings_page: SettingsPage,
+    /// Script face currently installed in the egui context.
+    rendered_script_face: Option<crate::settings::ScriptFace>,
     /// Disk persistence armed (real app only; tests never touch the disk).
     persist: bool,
     last_autosave: std::time::Instant,
@@ -540,6 +558,7 @@ impl Default for ScriptCraftApp {
             recent: Vec::new(),
             settings: AppSettings::default(),
             settings_page: SettingsPage::Application,
+            rendered_script_face: None,
             persist: false,
             last_autosave: std::time::Instant::now(),
             recovery: Vec::new(),
@@ -879,6 +898,30 @@ impl ScriptCraftApp {
     #[doc(hidden)]
     pub fn is_dirty(&self) -> bool {
         self.dirty
+    }
+
+    /// Test hook: force the monochrome paper setting (snapshot proof).
+    #[doc(hidden)]
+    pub fn set_paper_mono_for_test(&mut self, on: bool) {
+        self.settings.paper_mono = on;
+    }
+
+    /// Test hook: the monochrome-paper setting.
+    #[doc(hidden)]
+    pub fn paper_mono_for_test(&self) -> bool {
+        self.settings.paper_mono
+    }
+
+    /// Test hook: the chosen script face and the one currently installed in
+    /// the egui context.
+    #[doc(hidden)]
+    pub fn script_face_for_test(
+        &self,
+    ) -> (
+        crate::settings::ScriptFace,
+        Option<crate::settings::ScriptFace>,
+    ) {
+        (self.settings.script_face, self.rendered_script_face)
     }
 
     /// Test hook: is the save-before-quit/switch prompt open?
@@ -2759,11 +2802,25 @@ impl ScriptCraftApp {
             None
         };
         let marks = self.revisions.latest_marks(&p.blocks).colors;
+        let (regular, bold, fallback_regular, fallback_bold) = match self.settings.script_face {
+            crate::settings::ScriptFace::PlexMono => (
+                &include_bytes!("../assets/fonts/IBMPlexMono-Regular.ttf")[..],
+                &include_bytes!("../assets/fonts/IBMPlexMono-Bold.ttf")[..],
+                &include_bytes!("../assets/fonts/CourierPrime-Regular.ttf")[..],
+                &include_bytes!("../assets/fonts/CourierPrime-Bold.ttf")[..],
+            ),
+            crate::settings::ScriptFace::CourierPrime => (
+                &include_bytes!("../assets/fonts/CourierPrime-Regular.ttf")[..],
+                &include_bytes!("../assets/fonts/CourierPrime-Bold.ttf")[..],
+                &include_bytes!("../assets/fonts/IBMPlexMono-Regular.ttf")[..],
+                &include_bytes!("../assets/fonts/IBMPlexMono-Bold.ttf")[..],
+            ),
+        };
         let fonts = scriptcraft_layout::pdf::ExportFonts {
-            regular: include_bytes!("../assets/fonts/CourierPrime-Regular.ttf"),
-            bold: include_bytes!("../assets/fonts/CourierPrime-Bold.ttf"),
-            fallback_regular: include_bytes!("../assets/fonts/IBMPlexMono-Regular.ttf"),
-            fallback_bold: include_bytes!("../assets/fonts/IBMPlexMono-Bold.ttf"),
+            regular,
+            bold,
+            fallback_regular,
+            fallback_bold,
         };
         let latest = self.revisions.latest();
         match scriptcraft_layout::pdf::to_pdf_bytes_with_marks_and_latest(
@@ -4516,6 +4573,14 @@ impl eframe::App for ScriptCraftApp {
         if crate::theme::current_theme() != want {
             set_kit_theme(want);
             apply_theme(ctx);
+        }
+        // Script face: reinstalling fonts is only needed when the choice
+        // changes, but it must also run on the first frame so a project is
+        // never drawn with the wrong face.
+        let want_face = self.settings.script_face;
+        if self.rendered_script_face != Some(want_face) {
+            install_script_fonts(ctx, want_face);
+            self.rendered_script_face = Some(want_face);
         }
         // Spellcheck: push the settings into the engine every frame. Cheap
         // when nothing changed; the dictionary is parsed lazily on the first
@@ -6977,6 +7042,7 @@ impl ScriptCraftApp {
                             hidden_blocks: &self.hidden_block_ids,
                             omitted_headings: &self.omitted_heading_ids,
                             options: self.settings.editor_options(),
+                            paper_mono: self.settings.paper_mono,
                         },
                         &mut self.editor2,
                     ),
