@@ -130,8 +130,12 @@ app on day one.
   (`Ctrl+1`…`Ctrl+0` on Windows/Linux) for scene heading, action, character,
   parenthetical, dialogue, transition, shot, scene characters, lyrics and
   non-printable text.
-- Native macOS menu bar plus the KIT-style in-app menu (Windows and Linux use
-  the in-app menu).
+- Native macOS menu bar. On Windows and Linux the toolbar carries a real
+  File / Edit / Script / View / Window / Help menu bar (the compact Menu popup
+  is macOS-only). The Windows title bar is dark-on-dark and tinted from the
+  active palette instead of following the desktop's light theme, and both the
+  window and the `.exe` file carry the ScriptCraft icon (the icon is embedded
+  as a Windows resource at build time).
 - IME input, cross-block selection, and command-based undo/redo through the
   shared document model.
 

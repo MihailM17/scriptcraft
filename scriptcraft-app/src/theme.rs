@@ -1300,7 +1300,19 @@ pub fn kit_visuals() -> egui::Visuals {
 /// `interact_size` is deliberately left alone: the script editor's row
 /// grid depends on it.
 pub fn apply_theme(ctx: &egui::Context) {
-    ctx.set_visuals(kit_visuals());
+    let visuals = kit_visuals();
+    // egui keeps one style per brightness and picks it from
+    // `theme_preference`, which defaults to following the OS. Styling only the
+    // active slot left the other one as stock egui: on a light-mode Windows
+    // desktop every popup, menu and window came back white the moment the OS
+    // reported its theme, even though the app's own palette is dark. Pin the
+    // preference to the palette we just built, then style that slot.
+    ctx.set_theme(if visuals.dark_mode {
+        egui::ThemePreference::Dark
+    } else {
+        egui::ThemePreference::Light
+    });
+    ctx.set_visuals(visuals);
     ctx.style_mut(|s| {
         s.spacing.button_padding = egui::vec2(10.0, 5.0);
         s.spacing.window_margin = Margin::same(16);
@@ -1937,5 +1949,49 @@ mod tests {
             tokyo.b() > tokyo.r(),
             "Tokyo Night selection should be cool"
         );
+    }
+
+    /// The palette must survive the OS reporting a different brightness. egui
+    /// keeps a style per brightness and, with the default preference, switches
+    /// to the *other* one on a system theme change — which was unstyled stock
+    /// egui. Windows desktops in light mode hit this on the first frame.
+    #[test]
+    fn a_system_theme_change_does_not_replace_the_palette() {
+        let ctx = egui::Context::default();
+        set_kit_theme(Theme::Midnight);
+        apply_theme(&ctx);
+
+        let input = egui::RawInput {
+            system_theme: Some(egui::Theme::Light),
+            ..Default::default()
+        };
+        ctx.begin_pass(input);
+        let visuals = ctx.style().visuals.clone();
+        assert!(
+            visuals.dark_mode,
+            "a light desktop must not repaint the app with stock egui light visuals"
+        );
+        assert_eq!(
+            visuals.panel_fill,
+            Theme::Midnight.palette().window,
+            "the Midnight panel fill must survive the system theme change"
+        );
+        let _ = ctx.end_pass();
+
+        // The same in reverse: a dark desktop must not override Light.
+        set_kit_theme(Theme::Light);
+        apply_theme(&ctx);
+        let input = egui::RawInput {
+            system_theme: Some(egui::Theme::Dark),
+            ..Default::default()
+        };
+        ctx.begin_pass(input);
+        let visuals = ctx.style().visuals.clone();
+        assert!(
+            !visuals.dark_mode,
+            "a dark desktop must not repaint the app with stock egui dark visuals"
+        );
+        assert_eq!(visuals.panel_fill, Theme::Light.palette().window);
+        let _ = ctx.end_pass();
     }
 }

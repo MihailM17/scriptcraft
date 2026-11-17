@@ -249,6 +249,63 @@ fn export_dialog_opens_and_cancels() {
     );
 }
 
+/// Windows and Linux have no native menu bar, so the toolbar carries File,
+/// Edit, Script, View, Window and Help. macOS keeps its native menu bar plus
+/// the compact Menu popup; the test hook draws the in-window bar there too so
+/// the Windows/Linux path is exercised on the machine the suite runs on.
+#[test]
+fn inline_menu_bar_has_every_native_menu_and_opens_help() {
+    let mut h = Harness::builder()
+        .with_size(egui::Vec2::new(1360.0, 880.0))
+        .with_step_dt(1.0 / 4.0)
+        .with_max_steps(200)
+        .build_eframe(|cc| {
+            app::apply_theme(&cc.egui_ctx);
+            app::install_fonts(&cc.egui_ctx);
+            let mut a = ScriptCraftApp::default();
+            assert!(a.open_fixture(), "A95 fixture not found");
+            a.goto_tab(SideTab::Script);
+            a.show_inline_menu_bar_for_test(true);
+            a
+        });
+    h.run();
+
+    for label in ["File", "Edit", "Script", "View", "Window", "Help"] {
+        assert!(
+            h.query_all_by_label(label).next().is_some(),
+            "the in-window menu bar is missing the {label} menu"
+        );
+    }
+    assert!(
+        h.query_by_label("Menu").is_none(),
+        "the compact Menu popup must be replaced by the menu bar"
+    );
+
+    // "Script" is also a side-tab label, so open the toolbar one (the tab sits
+    // in the left panel, below the menu bar) and check an item that only
+    // exists in a menu.
+    let script_menu = h
+        .query_all_by_label("Script")
+        .min_by(|a, b| a.rect().top().total_cmp(&b.rect().top()))
+        .expect("the Script menu must be in the toolbar");
+    assert!(script_menu.rect().top() < 100.0, "expected a toolbar item");
+    script_menu.click();
+    h.run();
+    assert!(
+        h.query_by_label("Start Revision").is_some(),
+        "the Script menu should list its revision commands"
+    );
+    h.get_by_label("Help").click();
+    h.run();
+    h.get_by_label("ScriptCraft Help").click();
+    h.run();
+    h.run();
+    assert!(
+        h.query_by_label("Keep writing!").is_some(),
+        "Help ▸ ScriptCraft Help should open the help window"
+    );
+}
+
 /// The crash-recovery banner: a leftover unsaved copy can be restored (the
 /// session comes back dirty and keeps its original path) or discarded.
 #[test]

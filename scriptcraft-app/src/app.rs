@@ -41,8 +41,11 @@ pub(crate) fn italic_mono() -> egui::FontFamily {
 }
 
 pub fn run() -> eframe::Result<()> {
+    // The bundled PNG is the macOS artwork with its generous transparent
+    // margin; `ScriptCraft-app.png` is the same art cropped to a thin margin,
+    // which is what Windows taskbars and Linux launchers expect.
     let app_icon =
-        eframe::icon_data::from_png_bytes(include_bytes!("../assets/ScriptCraft-1024.png"))
+        eframe::icon_data::from_png_bytes(include_bytes!("../assets/ScriptCraft-app.png"))
             .unwrap_or_default();
     let viewport_builder = egui::ViewportBuilder::default()
         .with_inner_size([1360.0, 880.0])
@@ -85,6 +88,59 @@ pub fn run() -> eframe::Result<()> {
             Ok(Box::new(app))
         }),
     )
+}
+
+/// Ask Windows to paint its title bar in the app's palette.
+///
+/// The native title bar follows the OS light/dark setting, so a dark-themed
+/// app on a light desktop sat under a white band that also looked unlike the
+/// macOS window. DWM's immersive-dark flag (Windows 10 20H1+) turns it dark;
+/// on Windows 11 the caption, text and border colours are tinted to the
+/// palette so the frame continues the toolbar. Older builds ignore the colour
+/// attributes and simply keep the dark flag.
+#[cfg(target_os = "windows")]
+fn paint_windows_titlebar(frame: &eframe::Frame, theme: crate::theme::Theme) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use windows_sys::Win32::Graphics::Dwm::DwmSetWindowAttribute;
+
+    /// `DWMWINDOWATTRIBUTE` values; kept as numbers so older SDK bindings
+    /// without the constants still compile.
+    const USE_IMMERSIVE_DARK_MODE: u32 = 20;
+    const BORDER_COLOR: u32 = 34;
+    const CAPTION_COLOR: u32 = 35;
+    const TEXT_COLOR: u32 = 36;
+
+    fn colorref(color: egui::Color32) -> u32 {
+        // COLORREF is 0x00BBGGRR: blue in the high byte, red in the low one.
+        (u32::from(color.b()) << 16) | (u32::from(color.g()) << 8) | u32::from(color.r())
+    }
+
+    let Ok(handle) = frame.window_handle() else {
+        return;
+    };
+    let RawWindowHandle::Win32(win32) = handle.as_raw() else {
+        return;
+    };
+    let hwnd = win32.hwnd.get() as *mut core::ffi::c_void;
+    let palette = theme.palette();
+    let dark = u32::from(!theme.is_light());
+    for (attribute, value) in [
+        (USE_IMMERSIVE_DARK_MODE, dark),
+        (CAPTION_COLOR, colorref(palette.window)),
+        (TEXT_COLOR, colorref(palette.text)),
+        (BORDER_COLOR, colorref(palette.stroke)),
+    ] {
+        // Shown as an attribute-sized void pointer; DWM reads it as a BOOL or
+        // a COLORREF depending on the attribute.
+        let _ = unsafe {
+            DwmSetWindowAttribute(
+                hwnd,
+                attribute,
+                std::ptr::addr_of!(value).cast(),
+                std::mem::size_of::<u32>() as u32,
+            )
+        };
+    }
 }
 
 pub fn install_fonts(ctx: &egui::Context) {
@@ -278,6 +334,20 @@ pub(crate) fn shortcut_prefix() -> &'static str {
     }
 }
 
+/// A shortcut label in the platform's own notation ("⌘S" / "Ctrl+S").
+pub(crate) fn shortcut(key: &str) -> String {
+    format!("{}{key}", shortcut_prefix())
+}
+
+/// A shift-modified shortcut label ("⇧⌘S" / "Shift+Ctrl+S").
+pub(crate) fn shift_shortcut(key: &str) -> String {
+    if cfg!(target_os = "macos") {
+        format!("⇧⌘{key}")
+    } else {
+        format!("Shift+Ctrl+{key}")
+    }
+}
+
 fn element_label(t: ElementType) -> &'static str {
     FORMAT_ORDER
         .iter()
@@ -417,6 +487,70 @@ fn menu_check(
     enabled: bool,
 ) -> bool {
     menu_row(ui, label, shortcut, enabled, Some(checked))
+}
+
+/// A command reachable from the in-window menu bar (Windows/Linux, where
+/// there is no native menu bar).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum MenuCommand {
+    New,
+    Open,
+    Save,
+    SaveAs,
+    ImportFountain,
+    ImportFdx,
+    Export,
+    Preview,
+    Quit,
+    Undo,
+    Redo,
+    Find,
+    DualDialogue,
+    StartRevision,
+    Revisions,
+    RevisionSummary,
+    CompareDrafts,
+    ClearRevisions,
+    ToggleNavigator,
+    ToggleFormatPanel,
+    ToggleTypewriter,
+    ZoomIn,
+    ZoomOut,
+    ZoomReset,
+    ZoomFitPage,
+    ZoomFitWidth,
+    Minimize,
+    ToggleMaximize,
+    CloseWindow,
+    Settings,
+    Help,
+    About,
+}
+
+/// Flat text trigger for the in-window menu bar. Unlike the toolbar's Menu
+/// button it carries no chrome of its own; hover tints the row, like a native
+/// menu title.
+fn menu_bar_trigger(ui: &mut egui::Ui, label: &str) -> egui::Response {
+    let galley = ui.painter().layout_no_wrap(
+        label.to_owned(),
+        egui::FontId::proportional(13.5),
+        kit().text,
+    );
+    let width = galley.size().x + 18.0;
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(width, 26.0), egui::Sense::click());
+    if resp.hovered() {
+        ui.painter().rect_filled(rect, 6.0, kit().hover_light);
+    }
+    ui.painter().galley(
+        egui::pos2(
+            rect.center().x - galley.size().x / 2.0,
+            rect.center().y - galley.size().y / 2.0,
+        ),
+        galley,
+        kit().text,
+    );
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 #[derive(Default, PartialEq, Eq, Clone, Copy, Debug)]
@@ -581,6 +715,12 @@ pub struct ScriptCraftApp {
     last_window_title: String,
     /// Native macOS menu bar (production only; tests keep it None).
     menu: Option<crate::menu::NativeMenu>,
+    /// Test hook: draw the in-window menu bar on macOS too, where the native
+    /// menu bar normally plays that role.
+    inline_menu_bar_for_test: bool,
+    /// Palette last painted into the Windows title bar.
+    #[cfg(target_os = "windows")]
+    titlebar_theme: Option<crate::theme::Theme>,
     /// The toolbar is painted behind a transparent native titlebar (macOS
     /// production window only; tests keep the native titlebar layout).
     custom_titlebar: bool,
@@ -674,6 +814,9 @@ impl Default for ScriptCraftApp {
             drop_before: None,
             last_window_title: String::new(),
             menu: None,
+            inline_menu_bar_for_test: false,
+            #[cfg(target_os = "windows")]
+            titlebar_theme: None,
             custom_titlebar: false,
             pending_save: None,
             allow_close: false,
@@ -1085,6 +1228,14 @@ impl ScriptCraftApp {
     #[doc(hidden)]
     pub fn set_script_face_for_test(&mut self, face: crate::settings::ScriptFace) {
         self.settings.script_face = face;
+    }
+
+    /// Test hook: draw the in-window menu bar on macOS too, where the native
+    /// menu bar normally plays that role. Lets the Windows/Linux bar be
+    /// exercised on the machine the test suite runs on.
+    #[doc(hidden)]
+    pub fn show_inline_menu_bar_for_test(&mut self, on: bool) {
+        self.inline_menu_bar_for_test = on;
     }
 
     /// Test hook: the chosen script face and the one currently installed in
@@ -4761,7 +4912,9 @@ fn scene_preview(p: &Project, s: &Scene) -> String {
 }
 
 impl eframe::App for ScriptCraftApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        #[cfg(not(target_os = "windows"))]
+        let _ = frame;
         // Theme: keep the palette/Visuals in sync with the setting. Comparing
         // the theme (not just dark/light) matters now that several palettes
         // share a brightness class.
@@ -4769,6 +4922,14 @@ impl eframe::App for ScriptCraftApp {
         if crate::theme::current_theme() != want {
             set_kit_theme(want);
             apply_theme(ctx);
+        }
+        #[cfg(target_os = "windows")]
+        {
+            let current = crate::theme::current_theme();
+            if self.titlebar_theme != Some(current) {
+                paint_windows_titlebar(frame, current);
+                self.titlebar_theme = Some(current);
+            }
         }
         // Script face: reinstalling fonts is only needed when the choice
         // changes, but it must also run on the first frame so a project is
@@ -5037,11 +5198,15 @@ impl ScriptCraftApp {
                         // Clear the native traffic lights (macOS owns them).
                         ui.add_space(62.0);
                     }
-                    let menu_resp = menu_trigger(ui);
-                    egui::Popup::menu(&menu_resp).show(|ui| {
-                        ui.set_min_width(230.0);
-                        self.menu_contents(ui);
-                    });
+                    if self.uses_inline_menu_bar() {
+                        self.draw_menu_bar(ui);
+                    } else {
+                        let menu_resp = menu_trigger(ui);
+                        egui::Popup::menu(&menu_resp).show(|ui| {
+                            ui.set_min_width(230.0);
+                            self.menu_contents(ui);
+                        });
+                    }
                     toolbar_sep(ui);
                     let has = self.project.is_some();
                     let editable = self.compare.is_none();
@@ -5063,16 +5228,17 @@ impl ScriptCraftApp {
                     toolbar_sep(ui);
                     let can_undo = editing && self.editor2.history.can_undo();
                     let can_redo = editing && self.editor2.history.can_redo();
-                    if toolbar_icon_button(ui, can_undo, "Undo (⌘Z)", draw_undo_arrow).clicked() {
+                    let undo_hint = format!("Undo ({})", shortcut("Z"));
+                    let redo_hint = format!("Redo ({})", shift_shortcut("Z"));
+                    let dual_hint = format!("Dual dialogue ({})", shortcut("D"));
+                    if toolbar_icon_button(ui, can_undo, &undo_hint, draw_undo_arrow).clicked() {
                         self.do_undo();
                     }
-                    if toolbar_icon_button(ui, can_redo, "Redo (⇧⌘Z)", draw_redo_arrow).clicked()
-                    {
+                    if toolbar_icon_button(ui, can_redo, &redo_hint, draw_redo_arrow).clicked() {
                         self.do_redo();
                     }
                     let can_dual = editing && self.dual_dialogue_target().is_some();
-                    if toolbar_icon_button(ui, can_dual, "Dual dialogue (⌘D)", draw_dual).clicked()
-                    {
+                    if toolbar_icon_button(ui, can_dual, &dual_hint, draw_dual).clicked() {
                         self.toggle_dual_dialogue();
                     }
                     toolbar_sep(ui);
@@ -5214,6 +5380,283 @@ impl ScriptCraftApp {
             });
     }
 
+    /// Windows and Linux have no native menu bar, so the toolbar carries one.
+    /// macOS uses the real menu bar and keeps the compact Menu popup.
+    fn uses_inline_menu_bar(&self) -> bool {
+        !cfg!(target_os = "macos") || self.inline_menu_bar_for_test
+    }
+
+    /// File / Edit / Script / View / Window / Help in the toolbar, mirroring
+    /// the macOS native menu. Items only record what was chosen; the command
+    /// runs after the popup closes so no menu state is mutated mid-frame.
+    fn draw_menu_bar(&mut self, ui: &mut egui::Ui) {
+        let mut cmd: Option<MenuCommand> = None;
+        let has = self.project.is_some();
+        let navigator = self.show_left_panel;
+        let format_panel = self.show_format_panel;
+        let typewriter = self.typewriter;
+        let maximized = ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
+
+        let file = menu_bar_trigger(ui, "File");
+        egui::Popup::menu(&file).show(|ui| {
+            ui.set_min_width(250.0);
+            ui.spacing_mut().item_spacing.y = 2.0;
+            if menu_item(ui, "New", None, true) {
+                cmd = Some(MenuCommand::New);
+            }
+            if menu_item(ui, "Open…", Some(&shortcut("O")), true) {
+                cmd = Some(MenuCommand::Open);
+            }
+            if menu_item(ui, "Save", Some(&shortcut("S")), true) {
+                cmd = Some(MenuCommand::Save);
+            }
+            if menu_item(ui, "Save as…", Some(&shift_shortcut("S")), true) {
+                cmd = Some(MenuCommand::SaveAs);
+            }
+            ui.separator();
+            ui.menu_button("Import", |ui| {
+                ui.set_min_width(220.0);
+                if menu_item(ui, "Fountain…", None, true) {
+                    cmd = Some(MenuCommand::ImportFountain);
+                }
+                if menu_item(ui, "Final Draft (.fdx)…", None, true) {
+                    cmd = Some(MenuCommand::ImportFdx);
+                }
+            });
+            if menu_item(ui, "Export…", None, has) {
+                cmd = Some(MenuCommand::Export);
+            }
+            if menu_item(ui, "Print preview script", Some("F12"), has) {
+                cmd = Some(MenuCommand::Preview);
+            }
+            ui.separator();
+            if menu_item(ui, "Quit", Some(&shortcut("Q")), true) {
+                cmd = Some(MenuCommand::Quit);
+            }
+        });
+
+        let edit = menu_bar_trigger(ui, "Edit");
+        egui::Popup::menu(&edit).show(|ui| {
+            ui.set_min_width(230.0);
+            ui.spacing_mut().item_spacing.y = 2.0;
+            if menu_item(ui, "Undo", Some(&shortcut("Z")), true) {
+                cmd = Some(MenuCommand::Undo);
+            }
+            if menu_item(ui, "Redo", Some(&shift_shortcut("Z")), true) {
+                cmd = Some(MenuCommand::Redo);
+            }
+            ui.separator();
+            if menu_item(ui, "Find…", Some(&shortcut("F")), true) {
+                cmd = Some(MenuCommand::Find);
+            }
+            if menu_item(ui, "Dual Dialogue", Some(&shortcut("D")), true) {
+                cmd = Some(MenuCommand::DualDialogue);
+            }
+        });
+
+        let script = menu_bar_trigger(ui, "Script");
+        egui::Popup::menu(&script).show(|ui| {
+            ui.set_min_width(250.0);
+            ui.spacing_mut().item_spacing.y = 2.0;
+            if menu_item(ui, "Start Revision", None, true) {
+                cmd = Some(MenuCommand::StartRevision);
+            }
+            if menu_item(ui, "Revision History…", None, true) {
+                cmd = Some(MenuCommand::Revisions);
+            }
+            if menu_item(ui, "Revision Summary…", None, true) {
+                cmd = Some(MenuCommand::RevisionSummary);
+            }
+            if menu_item(ui, "Compare Drafts…", None, true) {
+                cmd = Some(MenuCommand::CompareDrafts);
+            }
+            ui.separator();
+            if menu_item(
+                ui,
+                "Clear Revision History…",
+                None,
+                !self.revisions.is_empty(),
+            ) {
+                cmd = Some(MenuCommand::ClearRevisions);
+            }
+        });
+
+        let view = menu_bar_trigger(ui, "View");
+        egui::Popup::menu(&view).show(|ui| {
+            ui.set_min_width(230.0);
+            ui.spacing_mut().item_spacing.y = 2.0;
+            if menu_check(ui, "Navigator", navigator, None, true) {
+                cmd = Some(MenuCommand::ToggleNavigator);
+            }
+            if menu_check(ui, "Format panel", format_panel, None, true) {
+                cmd = Some(MenuCommand::ToggleFormatPanel);
+            }
+            if menu_check(ui, "Typewriter scrolling", typewriter, None, true) {
+                cmd = Some(MenuCommand::ToggleTypewriter);
+            }
+            ui.separator();
+            if menu_item(ui, "Zoom In", Some(&shortcut("=")), true) {
+                cmd = Some(MenuCommand::ZoomIn);
+            }
+            if menu_item(ui, "Zoom Out", Some(&shortcut("-")), true) {
+                cmd = Some(MenuCommand::ZoomOut);
+            }
+            if menu_item(ui, "Actual Size", Some(&shortcut("0")), true) {
+                cmd = Some(MenuCommand::ZoomReset);
+            }
+            if menu_item(ui, "Fit Page", None, true) {
+                cmd = Some(MenuCommand::ZoomFitPage);
+            }
+            if menu_item(ui, "Fit Width", None, true) {
+                cmd = Some(MenuCommand::ZoomFitWidth);
+            }
+        });
+
+        let window = menu_bar_trigger(ui, "Window");
+        egui::Popup::menu(&window).show(|ui| {
+            ui.set_min_width(220.0);
+            ui.spacing_mut().item_spacing.y = 2.0;
+            if menu_item(ui, "Minimize", None, true) {
+                cmd = Some(MenuCommand::Minimize);
+            }
+            let label = if maximized { "Restore" } else { "Maximize" };
+            if menu_item(ui, label, None, true) {
+                cmd = Some(MenuCommand::ToggleMaximize);
+            }
+            ui.separator();
+            if menu_item(ui, "Close Window", None, true) {
+                cmd = Some(MenuCommand::CloseWindow);
+            }
+        });
+
+        let help = menu_bar_trigger(ui, "Help");
+        egui::Popup::menu(&help).show(|ui| {
+            ui.set_min_width(230.0);
+            ui.spacing_mut().item_spacing.y = 2.0;
+            if menu_item(ui, "ScriptCraft Help", Some("F1"), true) {
+                cmd = Some(MenuCommand::Help);
+            }
+            if menu_item(ui, "About ScriptCraft", None, true) {
+                cmd = Some(MenuCommand::About);
+            }
+            ui.separator();
+            if menu_item(ui, "Settings…", Some(&shortcut(",")), true) {
+                cmd = Some(MenuCommand::Settings);
+            }
+        });
+
+        if cmd.is_some() {
+            egui::Popup::close_all(ui.ctx());
+        }
+        if let Some(cmd) = cmd {
+            self.run_menu_bar_command(cmd, ui.ctx());
+        }
+    }
+
+    /// Apply a menu-bar choice. Behaviours match the macOS native menu, so the
+    /// two bars cannot drift apart.
+    fn run_menu_bar_command(&mut self, cmd: MenuCommand, ctx: &egui::Context) {
+        match cmd {
+            MenuCommand::New => self.request_pending(PendingAction::New, ctx),
+            MenuCommand::Open => {
+                self.open_dialog(ctx);
+            }
+            MenuCommand::Save => {
+                self.do_save();
+            }
+            MenuCommand::SaveAs => {
+                self.do_save_as();
+            }
+            MenuCommand::ImportFountain => {
+                self.do_import_fountain();
+            }
+            MenuCommand::ImportFdx => {
+                self.do_import_fdx();
+            }
+            MenuCommand::Export => {
+                self.close_compare();
+                self.show_export = true;
+            }
+            MenuCommand::Preview => {
+                self.close_compare();
+                self.preview_pdf();
+            }
+            MenuCommand::Quit | MenuCommand::CloseWindow => {
+                self.request_quit(ctx);
+            }
+            MenuCommand::Undo => {
+                self.do_undo();
+            }
+            MenuCommand::Redo => {
+                self.do_redo();
+            }
+            MenuCommand::Find => {
+                if self.project.is_some() {
+                    self.close_compare();
+                    self.show_find = true;
+                }
+            }
+            MenuCommand::DualDialogue => {
+                if self.side_tab == SideTab::Script && self.compare.is_none() {
+                    self.toggle_dual_dialogue();
+                }
+            }
+            MenuCommand::StartRevision => {
+                self.start_revision();
+            }
+            MenuCommand::Revisions => {
+                self.close_compare();
+                self.show_revisions = true;
+            }
+            MenuCommand::RevisionSummary => {
+                self.open_revision_summary();
+            }
+            MenuCommand::CompareDrafts => {
+                self.open_compare();
+            }
+            MenuCommand::ClearRevisions => {
+                self.close_compare();
+                if !self.revisions.is_empty() {
+                    self.show_clear_revisions = true;
+                }
+            }
+            MenuCommand::ToggleNavigator => self.show_left_panel = !self.show_left_panel,
+            MenuCommand::ToggleFormatPanel => self.show_format_panel = !self.show_format_panel,
+            MenuCommand::ToggleTypewriter => self.typewriter = !self.typewriter,
+            MenuCommand::ZoomIn => {
+                self.fit = FitMode::Off;
+                self.zoom = (self.zoom * 1.1).min(4.0);
+            }
+            MenuCommand::ZoomOut => {
+                self.fit = FitMode::Off;
+                self.zoom = (self.zoom / 1.1).max(0.25);
+            }
+            MenuCommand::ZoomReset => {
+                self.fit = FitMode::Off;
+                self.zoom = 1.0;
+            }
+            MenuCommand::ZoomFitPage => self.fit = FitMode::Page,
+            MenuCommand::ZoomFitWidth => self.fit = FitMode::Width,
+            MenuCommand::Minimize => ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true)),
+            MenuCommand::ToggleMaximize => {
+                let maximized = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
+                ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
+            }
+            MenuCommand::Settings => {
+                self.close_compare();
+                self.side_tab = SideTab::Settings;
+            }
+            MenuCommand::Help => {
+                self.close_compare();
+                self.show_help = true;
+            }
+            MenuCommand::About => {
+                self.close_compare();
+                self.show_about = true;
+            }
+        }
+    }
+
     /// Contents of the toolbar Menu popup: KIT's compact script-file menu.
     /// Editing, view and revision commands live in the native menu bar,
     /// the toolbar, Research ▸ Versions and keyboard shortcuts instead.
@@ -5241,13 +5684,13 @@ impl ScriptCraftApp {
             if menu_item(ui, "New", None, true) {
                 action = Some(M::New);
             }
-            if menu_item(ui, "Open…", Some("⌘O"), true) {
+            if menu_item(ui, "Open…", Some(&shortcut("O")), true) {
                 action = Some(M::Open);
             }
-            if menu_item(ui, "Save", Some("⌘S"), true) {
+            if menu_item(ui, "Save", Some(&shortcut("S")), true) {
                 action = Some(M::Save);
             }
-            if menu_item(ui, "Save as…", Some("⇧⌘S"), true) {
+            if menu_item(ui, "Save as…", Some(&shift_shortcut("S")), true) {
                 action = Some(M::SaveAs);
             }
             ui.separator();
@@ -5270,7 +5713,7 @@ impl ScriptCraftApp {
                 action = Some(M::Preview);
             }
             ui.separator();
-            if menu_item(ui, "Settings…", Some("⌘,"), true) {
+            if menu_item(ui, "Settings…", Some(&shortcut(",")), true) {
                 action = Some(M::Settings);
             }
             ui.separator();
