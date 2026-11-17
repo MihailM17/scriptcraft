@@ -95,23 +95,77 @@ fn snap_07_settings() {
 }
 
 #[test]
-fn snap_16_settings_editor() {
+fn snap_16_settings_appearance() {
     use egui_kittest::kittest::Queryable;
     let mut h = harness(SideTab::Settings, None);
     h.run();
-    h.get_by_label("Scenario Editor").click();
+    h.get_by_label("Appearance").click();
     h.run();
-    h.snapshot("16_settings_editor");
+    h.snapshot("16_settings_appearance");
 }
 
 #[test]
-fn snap_17_settings_navigator() {
+fn snap_17_settings_writing() {
     use egui_kittest::kittest::Queryable;
     let mut h = harness(SideTab::Settings, None);
     h.run();
-    h.get_by_label("Navigator").click();
+    h.get_by_label("Writing").click();
     h.run();
-    h.snapshot("17_settings_navigator");
+    h.snapshot("17_settings_writing");
+}
+
+#[test]
+fn snap_32_settings_spelling() {
+    use egui_kittest::kittest::Queryable;
+    let mut h = harness(SideTab::Settings, None);
+    h.run();
+    h.get_by_label("Spelling").click();
+    h.run();
+    h.snapshot("32_settings_spelling");
+}
+
+#[test]
+fn snap_33_settings_saving() {
+    use egui_kittest::kittest::Queryable;
+    let mut h = harness(SideTab::Settings, None);
+    h.run();
+    h.get_by_label("Saving").click();
+    h.run();
+    h.snapshot("33_settings_saving");
+}
+
+/// The sidebar while a query is typed: matching rows with their page names.
+#[test]
+fn snap_34_settings_search() {
+    use egui::accesskit::Role;
+    use egui_kittest::kittest::Queryable;
+
+    let mut h = harness(SideTab::Settings, None);
+    h.run();
+    let field = h
+        .get_all_by_role(Role::TextInput)
+        .next()
+        .expect("search box");
+    field.focus();
+    h.run();
+    h.get_all_by_role(Role::TextInput)
+        .next()
+        .expect("search box")
+        .type_text("save");
+    h.run();
+    h.snapshot("34_settings_search");
+}
+
+/// Arming the reset shows the confirmation card instead of resetting.
+#[test]
+fn snap_35_settings_reset_confirm() {
+    use egui_kittest::kittest::Queryable;
+
+    let mut h = harness(SideTab::Settings, None);
+    h.run();
+    h.get_by_label("Reset Settings…").click();
+    h.run();
+    h.snapshot("35_settings_reset_confirm");
 }
 
 #[test]
@@ -552,6 +606,8 @@ fn snap_30_settings_theme_menu() {
     use egui_kittest::kittest::{NodeT, Queryable};
 
     let mut h = harness(SideTab::Settings, None);
+    h.run();
+    h.get_by_label("Appearance").click();
     h.run();
     h.get_all_by_role(egui::accesskit::Role::ComboBox)
         .find(|n| !n.accesskit_node().is_disabled())

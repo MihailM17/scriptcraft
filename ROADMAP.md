@@ -2214,3 +2214,34 @@ Requested: Courier New as the default when it is installed.
 - 19 snapshots regenerated (01, 02, 08, 09, 12–16, 18, 19, 21, 23–27, 29,
   31) because the page face changed; each was viewed, and the diff is glyph
   shape only — same line breaks, same page count. Unreleased on `main`.
+
+### 2026-11-17 — Settings rebuilt as five pages with search
+
+Requested: the Settings organisation felt arbitrary. Research against Final
+Draft, KIT Scenarist, Scrivener, VS Code, Apple HIG and WinUI guidance showed
+the old three pages had inherited KIT's *shape* (narrow pages in a left list)
+without its density, so everything without a home was pushed into Application
+or Scenario Editor.
+
+- Pages are now General, Appearance, Writing, Spelling and Saving. Theme,
+  monochrome paper and the page face share Appearance; the page view, scene
+  list and typing corrections share Writing; update checking, About and reset
+  share General. The Navigator page is gone (its two rows are the Scene list
+  group) and the dead "Language" label is deleted.
+- A search box sits above the page list and finds any row by its label or by
+  likely words ("courier" finds Script font, "autosave" finds Saving). Results
+  show the page that holds each row and jump there, clearing the query.
+- Reset is no longer a one-click button under the update check. The first
+  click arms an inline confirmation card ("Reset every setting to its
+  default?", Cancel / Reset); only the second click restores defaults, and the
+  description says projects, recent files and backups are untouched.
+- `start_button` now publishes its label to assistive tech (it was painted
+  text with no accesskit node), which is what lets the reset flow be tested.
+- Tests: `settings_lists_five_pages_and_drops_the_dead_language_row`,
+  `settings_search_opens_the_page_holding_the_match`,
+  `settings_reset_needs_a_second_explicit_click`, plus unit tests for page
+  labels, search coverage of every page, case/whitespace-insensitive matching
+  and the default UI state. The inset test now checks one page at a time.
+- Snapshots: 07 regenerated; 16/17 renamed to `16_settings_appearance` and
+  `17_settings_writing`; new 32_spelling, 33_saving, 34_search and
+  35_reset_confirm. Each viewed. Unreleased on `main`.

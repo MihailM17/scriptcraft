@@ -16,7 +16,7 @@ use crate::compare_view::{CompareAction, CompareState};
 use crate::export::{ExportAction, ExportDialog, ExportFormat, ExportTab};
 pub use crate::research::ResearchPane;
 use crate::research::{ResearchAction, ResearchEdit, ResearchView};
-use crate::settings::{AppSettings, SettingsPage};
+use crate::settings::{AppSettings, SettingsUi};
 use crate::theme::*;
 pub use crate::theme::{apply_theme, kit_visuals, set_kit_theme};
 /// Statistics report bar palette (sampled from KIT's summary report).
@@ -521,7 +521,7 @@ pub struct ScriptCraftApp {
     /// Recent projects (path, "dd.mm.yyyy HH:MM"); persisted in recent.txt.
     recent: Vec<(String, String)>,
     settings: AppSettings,
-    settings_page: SettingsPage,
+    settings_ui: SettingsUi,
     /// Latest-release check, run on open and from Settings ▸ Application.
     update: crate::update::UpdateState,
     /// Script face currently installed in the egui context.
@@ -630,7 +630,7 @@ impl Default for ScriptCraftApp {
             side_tab: SideTab::default(),
             recent: Vec::new(),
             settings: AppSettings::default(),
-            settings_page: SettingsPage::Application,
+            settings_ui: SettingsUi::default(),
             update: crate::update::UpdateState::default(),
             rendered_script_face: None,
             persist: false,
@@ -4426,7 +4426,7 @@ pub(crate) fn start_button(ui: &mut egui::Ui, icon: Option<KitIcon>, text: &str)
 }
 
 /// Primary (filled accent) variant for the one main action on a page.
-fn start_button_primary(ui: &mut egui::Ui, icon: Option<KitIcon>, text: &str) -> bool {
+pub(crate) fn start_button_primary(ui: &mut egui::Ui, icon: Option<KitIcon>, text: &str) -> bool {
     start_button_styled(ui, icon, text, true)
 }
 
@@ -4472,8 +4472,9 @@ fn start_button_styled(
         egui::FontId::proportional(13.5),
         ink,
     );
-    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
-        .clicked()
+    let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, text));
+    resp.clicked()
 }
 
 /// Small square glyph button (folder pickers, strip icons).
@@ -7200,7 +7201,7 @@ impl ScriptCraftApp {
         let outcome = crate::settings::show(
             ctx,
             &mut self.settings,
-            &mut self.settings_page,
+            &mut self.settings_ui,
             &self.update.check,
         );
         if outcome.check_updates {

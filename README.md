@@ -102,7 +102,7 @@ app on day one.
   word for suggestions, **Add to dictionary** (saved per language) or
   **Ignore**; scene headings, cues and sound effects in ALL CAPS are skipped so
   screenplay formatting is not flagged as prose.
-- 28 theme palettes in one grouped Settings ▸ Theme dropdown, with the
+- 28 theme palettes in one grouped Settings ▸ Appearance dropdown, with the
   ScriptCraft and Omarchy families as headings and a solid scrollbar so the
   long list is obvious. ScriptCraft's own are Midnight, Light, Sepia, High
   Contrast and **KIT Scenarist** — a light imitation of KIT's warm-grey chrome
@@ -113,15 +113,19 @@ app on day one.
   Starship, Tokyo Night, Vantablack and White. Every palette is contrast-tested,
   and revision colours stay industry-standard on all of them (pale marks get an
   edge so they remain locatable on white and cream pages).
-- **Check for updates.** Settings ▸ Application shows the build version and a
+- **Check for updates.** Settings ▸ General shows the build version and a
   Check for updates button; the app also asks GitHub once at launch. When a
   newer release exists it offers a download link instead of updating silently —
   builds are ad-hoc signed, so there is no self-installer.
 - Monochrome paper, directly under the theme picker, turns the page
   white-with-black-ink while the app keeps its theme; revision marks stay
   coloured.
-  Settings lists only controls that take effect — language and feature stubs
-  that changed nothing are gone.
+- Five Settings pages, one kind of decision each: General (updates, About,
+  reset), Appearance (theme, paper, page face), Writing (view, scene list,
+  corrections), Spelling, Saving. A search box finds any row by name or by the
+  words you would use for it and opens the page that holds it. Reset is last
+  in General, asks before wiping anything, and leaves projects and backups
+  alone. Only controls that take effect appear — the dead Language row is gone.
 - FastFormat shortcuts: select one or more blocks and press `Cmd+1`…`Cmd+0`
   (`Ctrl+1`…`Ctrl+0` on Windows/Linux) for scene heading, action, character,
   parenthetical, dialogue, transition, shot, scene characters, lyrics and

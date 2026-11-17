@@ -308,7 +308,7 @@ fn settings_script_font_switches_the_page_face() {
 
     let mut h = harness(SideTab::Settings);
     h.run();
-    h.get_by_label("Scenario Editor").click();
+    h.get_by_label("Appearance").click();
     h.run();
     let default_face = ScriptFace::default();
     assert_eq!(
@@ -316,10 +316,14 @@ fn settings_script_font_switches_the_page_face() {
         (default_face, Some(default_face)),
         "the default face must be the installed one, not just the stored choice"
     );
+    // Appearance has two combo boxes: the theme comes first, the page face
+    // second. Combo boxes expose no label of their own, so the order is the
+    // only way to tell them apart from the test.
     let face_combo = h
         .get_all_by_role(egui::accesskit::Role::ComboBox)
-        .find(|n| !n.accesskit_node().is_disabled())
-        .expect("script font chooser should be an enabled combo box");
+        .filter(|n| !n.accesskit_node().is_disabled())
+        .nth(1)
+        .expect("the page-face chooser must be the second combo box");
     face_combo.click();
     h.run();
     h.get_by_label("Courier Prime (classic, Latin only)")
@@ -334,8 +338,9 @@ fn settings_script_font_switches_the_page_face() {
 
     // Courier New is the third option, next to the two bundled faces.
     h.get_all_by_role(egui::accesskit::Role::ComboBox)
-        .find(|n| !n.accesskit_node().is_disabled())
-        .expect("script font chooser should still be enabled")
+        .filter(|n| !n.accesskit_node().is_disabled())
+        .nth(1)
+        .expect("the page-face chooser must still be the second combo box")
         .click();
     h.run();
     h.get_by_label("Courier New (system font)").click();
@@ -387,18 +392,22 @@ fn settings_pages_apply_navigator_and_typography_options() {
 
     let mut h = harness(SideTab::Settings);
     h.run();
-    h.get_by_label("Scenario Editor").click();
+    h.get_by_label("Writing").click();
     h.run();
     assert!(
         h.query_by_label("Smart quotes").is_some(),
-        "the Scenario Editor page must expose its typing options"
+        "the Writing page must expose its typing options"
     );
     h.get_by_label("Smart quotes").click();
     h.run();
 
-    h.get_by_label("Navigator").click();
-    h.run();
-    h.get_by_label("Show scene numbers").click();
+    // The navigator's two checkboxes live on the same page now, under a
+    // "Scene list" heading rather than behind their own nav entry.
+    assert!(
+        h.query_by_label("Number scenes in the list").is_some(),
+        "the Scene list group must be on the Writing page"
+    );
+    h.get_by_label("Number scenes in the list").click();
     h.get_by_label("Show scene description").click();
     h.run();
 
@@ -439,9 +448,19 @@ fn settings_pages_apply_navigator_and_typography_options() {
     );
 }
 
-/// Open the grouped theme dropdown. It is the only enabled combo box on
-/// Settings ▸ Application.
+/// Open the grouped theme dropdown. It lives on Settings ▸ Appearance and is
+/// the only enabled combo box on that page.
 fn open_theme_menu(h: &mut Harness<'static, ScriptCraftApp>) {
+    // The page heading carries the same text as its sidebar row while the
+    // page is open, so only the button is clickable.
+    let switched = h
+        .query_all_by_label("Appearance")
+        .find(|n| n.accesskit_node().role() == egui::accesskit::Role::Button)
+        .map(|row| row.click())
+        .is_some();
+    if switched {
+        h.run();
+    }
     h.get_all_by_role(egui::accesskit::Role::ComboBox)
         .find(|n| !n.accesskit_node().is_disabled())
         .expect("theme chooser should be an enabled combo box")
@@ -483,27 +502,36 @@ fn theme_picker_switches_palette() {
     );
 }
 
-/// Application rows share one left inset. The wrapped swatch grid used to
-/// indent its first row, which is what made the page look uneven.
+/// Rows on a page share one left inset. The wrapped swatch grid used to
+/// indent its first row, which is what made the old Application page uneven.
 #[test]
-fn settings_application_rows_align_to_one_inset() {
+fn settings_rows_align_to_one_inset_on_each_page() {
     let mut h = harness(SideTab::Settings);
     h.run();
-    let language = h.get_by_label("Language:").rect();
-    for label in [
-        "Theme:",
-        "Monochrome paper (white page, black ink)",
-        "Automatically Save Every",
-        "Save Backups",
-    ] {
+
+    h.get_by_label("Appearance").click();
+    h.run();
+    let theme = h.get_by_label("Theme:").rect();
+    for label in ["Monochrome paper (white page, black ink)", "Script font:"] {
         let rect = h.get_by_label(label).rect();
         assert!(
-            (rect.left() - language.left()).abs() < 0.5,
-            "{label} starts at x={} but Language starts at x={}",
+            (rect.left() - theme.left()).abs() < 0.5,
+            "{label} starts at x={} but Theme starts at x={}",
             rect.left(),
-            language.left()
+            theme.left()
         );
     }
+
+    h.get_by_label("Saving").click();
+    h.run();
+    let autosave = h.get_by_label("Automatically Save Every").rect();
+    let backups = h.get_by_label("Save Backups").rect();
+    assert!(
+        (backups.left() - autosave.left()).abs() < 0.5,
+        "backups starts at x={} but autosave starts at x={}",
+        backups.left(),
+        autosave.left()
+    );
 }
 
 /// Cmd/Ctrl+1…0 retypes every block covered by the editor selection.
@@ -2977,14 +3005,14 @@ fn typing_many_spaces_keeps_every_one() {
     assert_eq!(focus, (bi, 0, 4));
 }
 
-/// Settings ▸ Application: Monochrome paper sits directly under Theme, so it
-/// is reachable without opening Scenario Editor, and the page turns white with
-/// black ink while the panels keep the theme.
+/// Settings ▸ Appearance: Monochrome paper sits directly under Theme, so the
+/// page can turn white with black ink while the panels keep the theme.
 #[test]
 fn settings_monochrome_paper_sits_under_the_theme() {
     let mut h = harness(SideTab::Settings);
     h.run();
-    // The Application page is the default; this label only exists there now.
+    h.get_by_label("Appearance").click();
+    h.run();
     assert!(!h.state().paper_mono_for_test(), "off by default");
     h.get_by_label("Monochrome paper (white page, black ink)")
         .click();
@@ -2994,9 +3022,131 @@ fn settings_monochrome_paper_sits_under_the_theme() {
         "the checkbox must flip the page to black on white"
     );
     assert!(
-        h.query_by_label("Scenario Editor")
+        h.query_by_label("Writing")
             .is_some_and(|n| n.accesskit_node().role() == egui::accesskit::Role::Button),
         "the settings nav stays available next to the moved checkbox"
+    );
+}
+
+/// Settings is five pages with one job each; the old Application / Scenario
+/// Editor / Navigator split and the dead Language row are gone.
+#[test]
+fn settings_lists_five_pages_and_drops_the_dead_language_row() {
+    use egui::accesskit::Role;
+
+    let mut h = harness(SideTab::Settings);
+    h.run();
+    for label in ["General", "Appearance", "Writing", "Spelling", "Saving"] {
+        assert!(
+            h.get_all_by_label(label)
+                .any(|n| n.accesskit_node().role() == Role::Button),
+            "{label} must be a page row in the sidebar"
+        );
+    }
+    for gone in ["Application", "Scenario Editor", "Navigator", "Language:"] {
+        assert!(
+            h.query_by_label(gone).is_none(),
+            "{gone} must not appear in Settings any more"
+        );
+    }
+    assert!(
+        h.query_by_label("Check for updates").is_some(),
+        "General opens first and holds update checking"
+    );
+}
+
+/// Search finds a row by words the writer might use and opens the page that
+/// holds it; the box then clears so the page list is usable again.
+#[test]
+fn settings_search_opens_the_page_holding_the_match() {
+    use egui::accesskit::Role;
+
+    let mut h = harness(SideTab::Settings);
+    h.run();
+    let field = h
+        .get_all_by_role(Role::TextInput)
+        .next()
+        .expect("the sidebar must offer a search box");
+    field.focus();
+    h.run();
+    h.get_all_by_role(Role::TextInput)
+        .next()
+        .expect("the search box must survive the click")
+        .type_text("backups");
+    h.run();
+
+    assert!(
+        h.query_by_label("No matching settings.").is_none(),
+        "\"backups\" must match the backup row"
+    );
+    h.get_by_label("Save Backups").click();
+    h.run();
+
+    assert!(
+        h.query_by_label("Save Backups").is_some(),
+        "the Saving page must be open, with its checkbox visible"
+    );
+    assert!(
+        h.query_by_label("Check spelling as you type").is_none(),
+        "the jump must land on Saving, not Spelling"
+    );
+    assert!(
+        h.query_by_label("Appearance").is_some(),
+        "the page list must be back after the search clears"
+    );
+}
+
+/// Reset is destructive, so the first click only arms it. Cancel leaves every
+/// setting alone; confirming restores the defaults.
+#[test]
+fn settings_reset_needs_a_second_explicit_click() {
+    let mut h = harness(SideTab::Settings);
+    h.run();
+    h.get_by_label("Appearance").click();
+    h.run();
+    h.get_by_label("Monochrome paper (white page, black ink)")
+        .click();
+    h.run();
+    assert!(h.state().paper_mono_for_test(), "the checkbox must be on");
+
+    h.get_by_label("General").click();
+    h.run();
+    h.get_by_label("Reset Settings…").click();
+    h.run();
+    assert!(
+        h.query_by_label("Reset every setting to its default?")
+            .is_some(),
+        "the first click must ask, not reset"
+    );
+    assert!(
+        h.state().paper_mono_for_test(),
+        "arming the reset must not change any setting"
+    );
+
+    h.get_by_label("Cancel").click();
+    h.run();
+    assert!(
+        h.query_by_label("Reset every setting to its default?")
+            .is_none(),
+        "Cancel must close the confirmation"
+    );
+    assert!(
+        h.state().paper_mono_for_test(),
+        "Cancel must leave the setting alone"
+    );
+
+    h.get_by_label("Reset Settings…").click();
+    h.run();
+    h.get_by_label("Reset").click();
+    h.run();
+    assert!(
+        !h.state().paper_mono_for_test(),
+        "confirming must restore the defaults"
+    );
+    assert!(
+        h.query_by_label("Reset every setting to its default?")
+            .is_none(),
+        "the confirmation must close after resetting"
     );
 }
 
