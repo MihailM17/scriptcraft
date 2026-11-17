@@ -8,7 +8,7 @@ production revisions. Open KIT projects, exchange Final Draft files, lock
 pages, issue coloured revisions, and export page-exact PDFs — offline, on
 macOS, Windows and Linux.
 
-> **Status — v0.8.6.** Revision-complete for the core production workflow:
+> **Status — v0.8.7.** Revision-complete for the core production workflow:
 > stable block/scene identity, draft diff and compare, restore-as-copy, omitted
 > scenes, dual dialogue, title-page editor and revision summary (scene counts,
 > CSV and printable PDF). Layout metrics are derived from the bundled font,
@@ -20,6 +20,11 @@ macOS, Windows and Linux.
 > in a grouped dropdown (KIT Scenarist plus every base Omarchy theme), a Tab
 > character picker, live script recognition in Research, and a release check
 > that offers a newer version when the app opens.
+> **v0.8.7 fixes the Windows desktop**: a light-mode Windows desktop no longer
+> replaces the app's menus with stock white visuals, the File / Edit / Script /
+> View / Window / Help menu bar is drawn on Windows and Linux, the Windows title
+> bar follows the active palette instead of turning white, and the
+> `ScriptCraft.exe` now carries the app icon.
 > v0.8.5 corrected editor input: clicks and carets map through whitespace,
 > double-click selects a word, triple-click the paragraph, and drag selections
 > start at the press. v0.8.4 added live
