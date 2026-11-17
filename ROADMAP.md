@@ -21,10 +21,10 @@ Status legend: `[ ]` to do `[-]` in progress `[x]` done `[!]` blocked
 | Date | 2026-11-17 |
 | Project | ScriptCraft — free, open-source, revision-first screenwriting studio |
 | Repo | `/Users/mihailmihaylov/Documents/Dev_work/scriptcraft` |
-| Branch / commit | `main` at **v0.8.7** (released 2026-11-17, tag at this commit); tags `v0.7.0` at `9ce2e0e`, `v0.7.1` at `d8b17de`, `v0.7.2` at `8b75f9a`, `v0.8.0` at `0052bba`, `v0.8.1` at `0fa598e`, `v0.8.2` at `6bf1983`, `v0.8.3` at `69c0329`, `v0.8.4` at `b178e00`, `v0.8.5` at `a9394bc`, `v0.8.6` at `cf48880`, `v0.8.7` at `<tag>`; M8/M9 progress at `a44ace0`, `1fe8c21`, `9d791a7`, `3b61227`; release prep at `d36ae4b`; assets/checksums at `aaad983`; M9 settings/export at `b284a78`; M9 research at `b9f9c21`; editor-input fixes at `6732bd0`; v0.8.5 release at `a9394bc`; writer-surface fixes at `cff996e`, `3db11fc`, `f774705`, `adf31c8`. |
+| Branch / commit | `main` at **v0.8.7** (released 2026-11-17, tag at this commit, `v0.8.7` at `8ea4437`); tags `v0.7.0` at `9ce2e0e`, `v0.7.1` at `d8b17de`, `v0.7.2` at `8b75f9a`, `v0.8.0` at `0052bba`, `v0.8.1` at `0fa598e`, `v0.8.2` at `6bf1983`, `v0.8.3` at `69c0329`, `v0.8.4` at `b178e00`, `v0.8.5` at `a9394bc`, `v0.8.6` at `cf48880`, `v0.8.7` at `8ea4437`; M8/M9 progress at `a44ace0`, `1fe8c21`, `9d791a7`, `3b61227`; release prep at `d36ae4b`; assets/checksums at `aaad983`; M9 settings/export at `b284a78`; M9 research at `b9f9c21`; editor-input fixes at `6732bd0`; v0.8.5 release at `a9394bc`; writer-surface fixes at `cff996e`, `3db11fc`, `f774705`, `adf31c8`. |
 | Rust workspace | `scriptcraft-core`, `scriptcraft-app`, `scriptcraft-layout` (`Cargo.toml`, resolver 2) |
 | App crate version | `scriptcraft-app 0.8.7` (`0.8.6` shipped the Windows fixes); `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
-| Distribution | **v0.8.7 released** — <https://github.com/MihailM17/scriptcraft/releases/tag/v0.8.7> — <https://github.com/MihailM17/scriptcraft/releases/tag/v0.8.6>. Assets: macOS arm64 DMG (ad-hoc signed, not notarised), Windows x64 zip and Linux x86_64 tar.gz, each with `.sha256`. No auto-update. |
+| Distribution | **v0.8.7 released** — <https://github.com/MihailM17/scriptcraft/releases/tag/v0.8.7>. Assets: macOS arm64 DMG (ad-hoc signed, not notarised), Windows x64 zip and Linux x86_64 tar.gz, each with `.sha256`. No auto-update. |
 | Current one-liner | Free, open-source, revision-first studio: one screenplay engine (Editor 2.0), crash-safe saves + recovery, revision colours/marks/pages, compare/restore, revision summary with scene counts + CSV + printable PDF, omitted scenes, smart screenplay paste, KIT version write/import, changes-only compare with context gaps and template indentation, revision headers/title-page fields, production page locks with A/B page numbers and FDX revision metadata, dual dialogue side by side in editor/PDF with FDX interchange, a title-page editor whose A4 preview is the exporter's own layout, KIT-style editor/navigator settings, macOS standard selection keys, a compact file-focused Menu, OFL fonts, FDX/Fountain import/export; PDF export paginates exactly like the editor; eight contrast-tested themes with revision marks legible on every palette, and live spellchecking in English, Bulgarian and Russian with screenplay-aware ALL-CAPS skipping, right-click suggestions and per-language custom dictionaries; v0.8.5 corrected editor input with whitespace-aware caret mapping, press-point clicks, double-click word selection and press-anchored drag selection; v0.8.6 gives every typed space its own cell, sets IBM Plex Mono as the default page face with Courier Prime as a Latin-only alternative, adds monochrome paper under the theme picker, 28 theme palettes as swatches (KIT Scenarist plus all 23 base Omarchy themes), a Tab character picker and live script recognition in Research. |
 | Next release | Post-v0.8.7: Windows signing, optional release-binary/screenshot probe, Developer ID/notarisation and auto-update. |
 
@@ -2301,9 +2301,17 @@ Released after the Windows menu bar / title bar / icon fixes shipped on `main`
 
 - Version bumped to `scriptcraft-app 0.8.7`; release notes written at
   `docs/releases/v0.8.7.md`; README status and this log updated.
-- Tag `v0.8.7` created at the gated release commit; Windows and Linux artifacts
-  rebuilt through the `Packages` workflow; macOS DMG built locally and all
-  checksums verified. Release published on GitHub with the three assets.
+- Full gate green before the release commit (`cargo fmt`, clippy `-D warnings`,
+  workspace tests, deny, `git diff --check`); four snapshots regenerated for the
+  version bump (07, 31, 34, 35) and re-verified.
+- Tag `v0.8.7` created at the gated release commit `8ea4437`; Windows and
+  Linux artifacts rebuilt through the `Packages` workflow run `44070332995`
+  (both green); macOS DMG built locally (`packaging/macos/bundle.sh`,
+  ad-hoc signed) and all three assets checksummed.
+  - `ScriptCraft-0.8.7-windows-x64.zip` 8,216,185 B  sha256 `613a3682…`
+  - `ScriptCraft-0.8.7-linux-x86_64.tar.gz` 12,445,599 B  sha256 `ca73c1db…`
+  - `ScriptCraft-0.8.7-macos-arm64.dmg` 10,004,508 B  sha256 `122ce908…`
+- Release published on GitHub as `v0.8.7` with the three assets and checksums.
 - Deferred as before: Windows code signing, Developer ID/notarisation, true
   auto-update.
 - Known limitation: the Windows title bar and menu bar could not be exercised
