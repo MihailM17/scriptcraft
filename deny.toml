@@ -29,6 +29,11 @@ ignore = [
     # deep transitive dep of epaint/winit/printpdf; migrate to skrifa when the
     # font stack moves.
     "RUSTSEC-2026-0192",
+    # Unmaintained (not a vulnerability), published 2026: the whole chrono
+    # crate is flagged, with no fixed release. We only format local dates for
+    # revision timestamps and project metadata; nothing untrusted is parsed.
+    # Revisit when our date code (or the PDF stack's chrono) moves to jiff.
+    "RUSTSEC-2026-0543",
 ]
 
 [licenses]
