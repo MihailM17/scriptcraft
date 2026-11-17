@@ -14,8 +14,8 @@ macOS, Windows and Linux.
 > CSV and printable PDF). Layout metrics are derived from the bundled font,
 > `.kitsp` saves preserve unknown sidecar rows, and CI runs runtime interaction
 > smoke on macOS/Linux/Windows. v0.8.6 keeps every typed space on the page,
-> makes IBM Plex Mono the default face so Latin and Cyrillic share one design
-> (Courier Prime and the system's Courier New stay as Latin-only options), adds
+> uses Courier New as the page face when the system has it (falling back to
+> IBM Plex Mono), adds
 > a monochrome-paper option directly under the theme picker, 28 theme palettes
 > in a grouped dropdown (KIT Scenarist plus every base Omarchy theme), a Tab
 > character picker, live script recognition in Research, and a release check
@@ -80,9 +80,9 @@ app on day one.
 
 ## The editor
 
-- Fixed A4 page editor with IBM Plex Mono (Courier Prime and the system's
-  Courier New optional) for one type design across Latin and Cyrillic,
-  page-accurate pagination, scene
+- Fixed A4 page editor with Courier New (system face, with IBM Plex Mono and
+  Courier Prime as alternatives) for one type design across Latin and
+  Cyrillic, page-accurate pagination, scene
   numbers, `(MORE)` / `(CONT'D)` markers, and zoom that scales pages without
   reflowing text. Every space you type keeps its own cell, on screen and in the
   PDF.

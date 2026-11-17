@@ -310,10 +310,11 @@ fn settings_script_font_switches_the_page_face() {
     h.run();
     h.get_by_label("Scenario Editor").click();
     h.run();
+    let default_face = ScriptFace::default();
     assert_eq!(
         h.state().script_face_for_test(),
-        (ScriptFace::PlexMono, Some(ScriptFace::PlexMono)),
-        "IBM Plex Mono is the default and must be installed"
+        (default_face, Some(default_face)),
+        "the default face must be the installed one, not just the stored choice"
     );
     let face_combo = h
         .get_all_by_role(egui::accesskit::Role::ComboBox)

@@ -26,23 +26,36 @@ impl SettingsPage {
     }
 }
 
-/// Script face used for the page (editor and PDF). Bounded to faces that are
-/// bundled with the app, so a chosen face can never fall back to a system font
-/// with different Latin/Cyrillic proportions.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+/// Script face used for the page (editor and PDF). Bounded to faces with the
+/// same 0.6 em advance, so choosing one never moves a page break.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ScriptFace {
     /// Courier Prime: the classic screenplay look. Latin only — Cyrillic is
     /// drawn from IBM Plex Mono.
     CourierPrime,
-    /// Courier New: the Windows/Mac system face. Not bundled (its licence
-    /// does not allow redistribution); read from the OS, and Courier Prime is
-    /// used when the system doesn't have it.
+    /// Courier New: the Windows/Mac system face and the default when the
+    /// computer has it. Not bundled (its licence does not allow
+    /// redistribution); read from the OS, with Courier Prime as the fallback
+    /// when it isn't installed.
     CourierNew,
     /// IBM Plex Mono: monospaced, with a matched Latin and Cyrillic design.
-    /// The default: it is the only bundled face whose Latin and Cyrillic
-    /// share proportions, so mixed-script pages stay level.
-    #[default]
+    /// The fallback default: it is the only bundled face whose Latin and
+    /// Cyrillic share proportions, so mixed-script pages stay level.
     PlexMono,
+}
+
+impl Default for ScriptFace {
+    /// Courier New is the face most screenwriters and producers expect to
+    /// see on a script, so it is used whenever the operating system provides
+    /// it. Machines without it (and stripped-down Linux images) get IBM Plex
+    /// Mono, the only bundled face that draws Cyrillic and Latin alike.
+    fn default() -> Self {
+        if crate::system_font::courier_new_installed() {
+            Self::CourierNew
+        } else {
+            Self::PlexMono
+        }
+    }
 }
 
 impl ScriptFace {
@@ -566,11 +579,10 @@ fn settings_editor(ui: &mut Ui, settings: &mut AppSettings) -> (bool, bool, bool
         ui.add_space(16.0);
         ui.label(
             egui::RichText::new(
-                "IBM Plex Mono draws Latin and Cyrillic with the same proportions and \
-                 baseline. Courier Prime and Courier New are the classic screenplay \
-                 faces; neither has Cyrillic, so Cyrillic falls back to Plex. All three \
-                 share 0.6 em advances, so pagination is identical whichever face you \
-                 pick.",
+                "Courier New and IBM Plex Mono both draw Latin and Cyrillic in one \
+                 design. Courier Prime is Latin only and borrows Plex for Cyrillic. All \
+                 three share 0.6 em advances, so pagination is identical whichever face \
+                 you pick.",
             )
             .size(11.0)
             .color(kit().disabled_text),
@@ -738,4 +750,34 @@ fn settings_navigator(ui: &mut Ui, settings: &mut AppSettings) -> (bool, bool, b
             .color(kit().disabled_text),
     );
     (changed, false, false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The default page face is the system's Courier New when it exists, and
+    /// IBM Plex Mono when it does not. Either way the default must be
+    /// drawable without a fallback warning.
+    #[test]
+    fn default_face_follows_the_installed_fonts() {
+        let expected = if crate::system_font::courier_new_installed() {
+            ScriptFace::CourierNew
+        } else {
+            ScriptFace::PlexMono
+        };
+        assert_eq!(ScriptFace::default(), expected);
+        assert_eq!(AppSettings::default().script_face, expected);
+        assert!(
+            !ScriptFace::default().is_fallback(),
+            "the default face must never need the fallback warning"
+        );
+    }
+
+    #[test]
+    fn every_face_round_trips_through_its_key() {
+        for face in ScriptFace::ALL {
+            assert_eq!(ScriptFace::from_key(face.key()), Some(face), "{face:?}");
+        }
+    }
 }

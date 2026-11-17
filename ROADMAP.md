@@ -2194,3 +2194,23 @@ prompt when a newer release appears.
   stable after the italic-order fix. All viewed.
 - Gate green: fmt, clippy, workspace tests, deny, `git diff --check`.
   README, release notes and this log updated. Nothing tagged or published.
+
+### 2026-11-17 — Courier New is the default page face
+
+Requested: Courier New as the default when it is installed.
+
+- `ScriptFace` no longer derives `Default`; `Default::default()` returns
+  `CourierNew` when `system_font::courier_new_installed()` finds the OS file
+  and `PlexMono` otherwise. The default is therefore always drawable and the
+  fallback warning never appears on a fresh install.
+- Existing installs keep their stored `script_face`; only new profiles and
+  Reset Settings pick the new default.
+- Corrected a claim in the Settings hint and README: Courier New **does**
+  include Cyrillic, so a Courier New page draws both scripts in one design.
+  Courier Prime is the Latin-only face.
+- `default_face_follows_the_installed_fonts` and
+  `every_face_round_trips_through_its_key` added; the interaction test now
+  compares against `ScriptFace::default()` instead of hard-coding Plex.
+- 19 snapshots regenerated (01, 02, 08, 09, 12–16, 18, 19, 21, 23–27, 29,
+  31) because the page face changed; each was viewed, and the diff is glyph
+  shape only — same line breaks, same page count. Unreleased on `main`.
