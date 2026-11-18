@@ -128,7 +128,7 @@ app on day one.
   The rest are the base themes Omarchy ships, imported from
   its palettes: Catppuccin, Catppuccin Latte, Ethereal, Everforest, Flexoki
   Light, Gruvbox, Hackerman, Jade Horse, Kanagawa, Last Horizon, Lumon, Lupine,
-  Matte Black, Miasma, Nord, Retro 82, Ristretto, Rosé Pine, Solitude,
+  Matte Black, Matcha, Nord, Retro 82, Ristretto, Rosé Pine, Solitude,
   Starship, Tokyo Night, Vantablack and White. Every palette is contrast-tested,
   and revision colours stay industry-standard on all of them (pale marks get an
   edge so they remain locatable on white and cream pages).

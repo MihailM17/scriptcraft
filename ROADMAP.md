@@ -2119,7 +2119,7 @@ Omarchy uses, and the monochrome setting moved directly under the theme setting.
   palettes from basecamp/omarchy's `themes/*/colors.toml` (imported, not
   approximated): Catppuccin, Catppuccin Latte, Ethereal, Everforest, Flexoki
   Light, Gruvbox, Hackerman, Jade Horse, Kanagawa, Last Horizon, Lumon, Lupine,
-  Matte Black, Miasma, Nord, Retro 82, Ristretto, Rosé Pine, Solitude,
+  Matte Black, Matcha, Nord, Retro 82, Ristretto, Rosé Pine, Solitude,
   Starship, Tokyo Night, Vantablack, White. `ThemeGroup` drives the headings;
   `Theme::SCRIPT` and `Theme::OMARCHY` partition `Theme::ALL`, and a unit test
   asserts the exact 23-key Omarchy list so a palette cannot silently disappear.
