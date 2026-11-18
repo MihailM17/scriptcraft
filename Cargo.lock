@@ -4053,7 +4053,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "scriptcraft-app"
-version = "0.8.7"
+version = "0.8.8"
 dependencies = [
  "chrono",
  "eframe",
@@ -4068,6 +4068,7 @@ dependencies = [
  "scriptcraft-layout",
  "serde",
  "serde_json",
+ "sha2",
  "spellbook",
  "uuid",
  "windows-sys 0.59.0",
@@ -4097,7 +4098,6 @@ dependencies = [
  "printpdf",
  "scriptcraft-core",
  "thiserror 2.0.21",
- "ttf-parser",
  "uuid",
 ]
 

@@ -23,9 +23,9 @@ cargo deny check
 git diff --check
 ```
 
-Expected v0.8 counts (2026-11-10): app 52 interaction + 19 snapshots + 23 lib,
-core 100 lib + 49 integration, layout 26 unit + 25 integration. Counts grow;
-what matters is zero failures.
+Expected v0.8.8 counts (2026-11-18): app 87 lib + 79 interaction + 35
+snapshots, core 101 lib + 50 integration, layout 30 lib + 26 integration.
+Counts grow; what matters is zero failures.
 
 Timing gates use best-of-five samples and a CI-tolerant unit threshold; the
 Criterion benches in `docs/benchmarks.md` remain the real performance budget.
@@ -103,9 +103,30 @@ requirement.
 
 ## 6. Updates
 
-There is no auto-updater in v0.8. Do not add a silent installer. Users install
-a new DMG/zip over the old app; projects stay local. Update checking and signed
-manifests move to v0.8.1 with their own tests.
+Since v0.8.8 the app can install a detected release itself: it downloads the
+platform asset and its `.sha256` into `updates/<version>/` in the per-user
+config folder, verifies the digest, and starts a helper that waits for this
+process to exit before replacing the app and relaunching. It is **not** a
+silent updater: the prompt always asks, and Cancel/Later are real actions.
+
+Release requirements:
+
+- [ ] Every platform archive is uploaded with a matching `<asset>.sha256`
+      (`shasum -a 256` / `sha256sum` format: `<hex>  <name>`). Selection and
+      verification are covered by `scriptcraft-app/src/update.rs` tests.
+- [ ] Asset names keep the `<os>-<arch>` tags the selector expects
+      (`macos-arm64`, `windows-x64`, `linux-x86_64`); an OS-only name is the
+      fallback.
+- [ ] Re-run `helper_script_is_valid_shell_syntax`; it parses the generated
+      POSIX helper with `sh -n`. The Windows PowerShell helper is exercised
+      only by inspection on a non-Windows host.
+- [ ] Release notes say the checksum verifies the transfer, not the publisher,
+      and that unsigned builds still trigger Gatekeeper/SmartScreen.
+- [ ] An install from a read-only location (mounted DMG) must fail with the
+      "move it to Applications" message, not a half-replaced app.
+
+Do not describe this as signed, notarised or silent distribution. Signed
+manifests and code signing remain deferred.
 
 ## 7. Publish
 

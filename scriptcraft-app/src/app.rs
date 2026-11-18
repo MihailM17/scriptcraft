@@ -41,6 +41,7 @@ pub(crate) fn italic_mono() -> egui::FontFamily {
 }
 
 pub fn run() -> eframe::Result<()> {
+    crate::panic_log::install();
     // The bundled PNG is the macOS artwork with its generous transparent
     // margin; `ScriptCraft-app.png` is the same art cropped to a thin margin,
     // which is what Windows taskbars and Linux launchers expect.
@@ -658,6 +659,8 @@ pub struct ScriptCraftApp {
     settings_ui: SettingsUi,
     /// Latest-release check, run on open and from Settings ▸ Application.
     update: crate::update::UpdateState,
+    /// The installer asked for a restart; send Close once.
+    update_restart_sent: bool,
     /// Script face currently installed in the egui context.
     rendered_script_face: Option<crate::settings::ScriptFace>,
     /// Disk persistence armed (real app only; tests never touch the disk).
@@ -772,6 +775,7 @@ impl Default for ScriptCraftApp {
             settings: AppSettings::default(),
             settings_ui: SettingsUi::default(),
             update: crate::update::UpdateState::default(),
+            update_restart_sent: false,
             rendered_script_face: None,
             persist: false,
             last_autosave: std::time::Instant::now(),
@@ -1042,17 +1046,24 @@ impl ScriptCraftApp {
         }
     }
 
-    /// One prompt per detected release. The build is ad-hoc signed and has no
-    /// updater, so the action opens the release page in the browser; the
-    /// writer replaces the app the same way they installed it.
+    /// One prompt per detected release. Install downloads the platform
+    /// archive, verifies its published checksum and hands a post-exit helper
+    /// the job of replacing the app, so the writer does not have to find the
+    /// right file and drag it into place.
     fn update_prompt(&mut self, ctx: &egui::Context) {
+        use crate::update::Install;
+
         let Some(release) = self.update.prompt.clone() else {
             return;
         };
+        let install = self.update.install.clone();
         let mut dismiss = false;
-        let mut download = false;
+        let mut install_now = false;
+        let mut retry = false;
+        let mut open_notes = false;
+        let mut cancel = false;
         let modal = egui::Modal::new(egui::Id::new("update_available")).show(ctx, |ui| {
-            ui.set_width(430.0);
+            ui.set_width(450.0);
             ui.label(egui::RichText::new("Update available").size(17.0).strong());
             ui.add_space(6.0);
             ui.label(format!(
@@ -1061,43 +1072,117 @@ impl ScriptCraftApp {
                 crate::update::CURRENT
             ));
             ui.add_space(4.0);
+            let note = match &install {
+                Install::Idle => {
+                    "Installing downloads the build for this computer, verifies the published SHA-256, then restarts ScriptCraft. Your projects and settings are untouched.".to_string()
+                }
+                Install::Downloading => {
+                    "Downloading and verifying the update… ScriptCraft will restart when it is ready."
+                        .to_string()
+                }
+                Install::Ready => "The update is verified. Restarting ScriptCraft…".to_string(),
+                Install::Failed(why) => {
+                    format!("The update did not install: {why}")
+                }
+            };
             ui.label(
-                egui::RichText::new(
-                    "Download the new build, then drag it to Applications. Your projects and settings stay where they are.",
-                )
-                .size(12.0)
-                .color(kit().disabled_text),
+                egui::RichText::new(note)
+                    .size(12.0)
+                    .color(match install {
+                        Install::Failed(_) => kit().spell_error,
+                        _ => kit().disabled_text,
+                    }),
             );
+            if matches!(install, Install::Idle | Install::Failed(_)) {
+                ui.add_space(4.0);
+                ui.label(
+                    egui::RichText::new(crate::update::install_caveat())
+                    .size(11.0)
+                    .color(kit().disabled_text),
+                );
+            }
+            if matches!(install, Install::Downloading | Install::Ready) {
+                ui.add_space(8.0);
+                ui.spinner();
+            }
             ui.add_space(14.0);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let get = ui.add(
-                    egui::Button::new(
-                        egui::RichText::new("Download update")
-                            .strong()
-                            .color(egui::Color32::WHITE),
-                    )
-                    .fill(kit().accent),
-                );
-                if get.clicked() {
-                    download = true;
-                }
-                if ui.button("Later").clicked() {
-                    dismiss = true;
+                match &install {
+                    Install::Idle | Install::Failed(_) => {
+                        let label = if matches!(install, Install::Failed(_)) {
+                            "Try again"
+                        } else {
+                            "Install update"
+                        };
+                        let get = ui.add(
+                            egui::Button::new(
+                                egui::RichText::new(label)
+                                    .strong()
+                                    .color(egui::Color32::WHITE),
+                            )
+                            .fill(kit().accent),
+                        );
+                        if get.clicked() {
+                            if matches!(install, Install::Failed(_)) {
+                                retry = true;
+                            } else {
+                                install_now = true;
+                            }
+                        }
+                        if ui.button("Later").clicked() {
+                            dismiss = true;
+                        }
+                        if ui.button("Release notes").clicked() {
+                            open_notes = true;
+                        }
+                    }
+                    Install::Downloading => {
+                        if ui.button("Cancel").clicked() {
+                            cancel = true;
+                        }
+                    }
+                    Install::Ready => {
+                        ui.label(egui::RichText::new("Restarting…").color(kit().disabled_text));
+                    }
                 }
             });
         });
-        if modal.should_close() {
+        if modal.should_close() && !install.is_busy() {
             dismiss = true;
         }
-        if download {
+        if open_notes {
             match crate::update::open_release(&release.url) {
-                Ok(()) => self.status = format!("Opened the {} release page.", release.version),
+                Ok(()) => self.status = format!("Opened the {} release notes.", release.version),
                 Err(e) => self.status = e,
             }
-            dismiss = true;
+        }
+        if cancel {
+            self.update.cancel_install();
+            self.status = "Update cancelled.".to_string();
+        }
+        if install_now || retry {
+            if self.has_unsaved_changes() {
+                if self.path.is_empty() || Self::is_fixture_path(&self.path) {
+                    self.update.set_install_for_test(Install::Failed(
+                        "save the project first, then try again".to_string(),
+                    ));
+                } else {
+                    self.do_save();
+                    if self.has_unsaved_changes() {
+                        self.update.set_install_for_test(Install::Failed(
+                            "the project could not be saved; save it and try again".to_string(),
+                        ));
+                    } else {
+                        self.update.start_install(release.clone());
+                    }
+                }
+            } else {
+                self.update.start_install(release.clone());
+            }
         }
         if dismiss {
             self.update.prompt = None;
+            self.update.cancel_install();
         }
     }
 
@@ -1117,6 +1202,18 @@ impl ScriptCraftApp {
     #[doc(hidden)]
     pub fn update_check_for_test(&self) -> &crate::update::Check {
         &self.update.check
+    }
+
+    /// Test hook: the install state the prompt renders.
+    #[doc(hidden)]
+    pub fn update_install_for_test(&self) -> &crate::update::Install {
+        &self.update.install
+    }
+
+    /// Test hook: inject an install state without a download.
+    #[doc(hidden)]
+    pub fn set_update_install_for_test(&mut self, install: crate::update::Install) {
+        self.update.set_install_for_test(install);
     }
 
     /// Test hook: is the "update available" prompt on screen?
@@ -5115,6 +5212,18 @@ impl eframe::App for ScriptCraftApp {
         }
         if self.update.check.is_checking() {
             ctx.request_repaint_after(std::time::Duration::from_millis(250));
+        }
+        if self.update.poll_install() {
+            ctx.request_repaint();
+        }
+        if self.update.is_installing() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(250));
+        }
+        if matches!(self.update.install, crate::update::Install::Ready) && !self.update_restart_sent
+        {
+            self.update_restart_sent = true;
+            self.allow_close = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
         // Above every module so it can block the app while open.
         self.save_prompt(ctx);

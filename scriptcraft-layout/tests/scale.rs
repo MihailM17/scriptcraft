@@ -1,4 +1,4 @@
-//! Scale smoke check: pagination + placement of a ~500-page script.
+//! Scale smoke check: pagination + placement of a feature-length script.
 //!
 //! Prints engine timings (run with `--release -- --nocapture` for
 //! representative numbers) and asserts the structure stays coherent: the
@@ -11,8 +11,8 @@ use scriptcraft_core::model::{ElementType, Project, ScriptBlock};
 use scriptcraft_layout::{layout, paginate, relayout_from, LineRole, RUSSIAN_GEOMETRY};
 use std::time::Instant;
 
-/// Deterministic ~500-page script: uniform scenes of one heading plus a
-/// 12-paragraph action block (≈14 grid rows per scene at 54 rows/page).
+/// Deterministic feature-length script: uniform scenes of one heading plus a
+/// 12-paragraph action block (≈14 grid rows per scene at 58 rows/page).
 fn big_script(scenes: usize) -> Vec<ScriptBlock> {
     let mut blocks = Vec::with_capacity(scenes * 2);
     for i in 0..scenes {
@@ -38,7 +38,7 @@ fn labels(blocks: &[ScriptBlock]) -> Vec<String> {
 }
 
 #[test]
-fn five_hundred_pages_paginate_and_place() {
+fn feature_length_script_paginates_and_places() {
     let blocks = big_script(1750);
     let labels = labels(&blocks);
 
@@ -64,8 +64,8 @@ fn five_hundred_pages_paginate_and_place() {
     );
 
     assert!(
-        (470..=530).contains(&pages.len()),
-        "expected ~500 pages, got {}",
+        (440..=480).contains(&pages.len()),
+        "expected ~460 pages, got {}",
         pages.len()
     );
     assert_eq!(doc.pages.len(), pages.len(), "place must keep the pages");

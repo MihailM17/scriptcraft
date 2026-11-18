@@ -441,7 +441,11 @@ impl TemplateMetrics {
     }
 }
 
-/// The Russian template the editor renders (147.5mm column, 54 lines).
+/// The Russian template the editor renders (147.5mm column, 58 lines).
+///
+/// 58 lines is what an A4 text area holds at the standard 1/6-inch (12 pt)
+/// screenplay leading with KIT's 25 mm top and bottom margins. Keeping the
+/// old 54-line count made the same script paginate 7% longer than KIT.
 pub const RUSSIAN: TemplateMetrics = TemplateMetrics {
     full: 58,
     cue: 31,
@@ -454,7 +458,7 @@ pub const RUSSIAN: TemplateMetrics = TemplateMetrics {
     char_space: 1,
     trans_space: 1,
     note_space: 1,
-    lines_per_page: 54,
+    lines_per_page: 58,
 };
 
 /// KIT's default export template `final_draft_a4.kitss`: 38/24/17/24mm

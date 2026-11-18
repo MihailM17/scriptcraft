@@ -18,15 +18,15 @@ Status legend: `[ ]` to do `[-]` in progress `[x]` done `[!]` blocked
 
 | Field | Value |
 |---|---|
-| Date | 2026-11-17 |
+| Date | 2026-11-18 |
 | Project | ScriptCraft — free, open-source, revision-first screenwriting studio |
 | Repo | `/Users/mihailmihaylov/Documents/Dev_work/scriptcraft` |
-| Branch / commit | `main` at **v0.8.7** (released 2026-11-17, tag at this commit, `v0.8.7` at `8ea4437`); tags `v0.7.0` at `9ce2e0e`, `v0.7.1` at `d8b17de`, `v0.7.2` at `8b75f9a`, `v0.8.0` at `0052bba`, `v0.8.1` at `0fa598e`, `v0.8.2` at `6bf1983`, `v0.8.3` at `69c0329`, `v0.8.4` at `b178e00`, `v0.8.5` at `a9394bc`, `v0.8.6` at `cf48880`, `v0.8.7` at `8ea4437`; M8/M9 progress at `a44ace0`, `1fe8c21`, `9d791a7`, `3b61227`; release prep at `d36ae4b`; assets/checksums at `aaad983`; M9 settings/export at `b284a78`; M9 research at `b9f9c21`; editor-input fixes at `6732bd0`; v0.8.5 release at `a9394bc`; writer-surface fixes at `cff996e`, `3db11fc`, `f774705`, `adf31c8`. |
+| Branch / commit | `main` at **v0.8.7**, with unreleased v0.8.8 work on top (released 2026-11-17, tag at this commit, `v0.8.7` at `8ea4437`); tags `v0.7.0` at `9ce2e0e`, `v0.7.1` at `d8b17de`, `v0.7.2` at `8b75f9a`, `v0.8.0` at `0052bba`, `v0.8.1` at `0fa598e`, `v0.8.2` at `6bf1983`, `v0.8.3` at `69c0329`, `v0.8.4` at `b178e00`, `v0.8.5` at `a9394bc`, `v0.8.6` at `cf48880`, `v0.8.7` at `8ea4437`; M8/M9 progress at `a44ace0`, `1fe8c21`, `9d791a7`, `3b61227`; release prep at `d36ae4b`; assets/checksums at `aaad983`; M9 settings/export at `b284a78`; M9 research at `b9f9c21`; editor-input fixes at `6732bd0`; v0.8.5 release at `a9394bc`; writer-surface fixes at `cff996e`, `3db11fc`, `f774705`, `adf31c8`. |
 | Rust workspace | `scriptcraft-core`, `scriptcraft-app`, `scriptcraft-layout` (`Cargo.toml`, resolver 2) |
-| App crate version | `scriptcraft-app 0.8.7` (`0.8.6` shipped the Windows fixes); `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
-| Distribution | **v0.8.7 released** — <https://github.com/MihailM17/scriptcraft/releases/tag/v0.8.7>. Assets: macOS arm64 DMG (ad-hoc signed, not notarised), Windows x64 zip and Linux x86_64 tar.gz, each with `.sha256`. No auto-update. |
-| Current one-liner | Free, open-source, revision-first studio: one screenplay engine (Editor 2.0), crash-safe saves + recovery, revision colours/marks/pages, compare/restore, revision summary with scene counts + CSV + printable PDF, omitted scenes, smart screenplay paste, KIT version write/import, changes-only compare with context gaps and template indentation, revision headers/title-page fields, production page locks with A/B page numbers and FDX revision metadata, dual dialogue side by side in editor/PDF with FDX interchange, a title-page editor whose A4 preview is the exporter's own layout, KIT-style editor/navigator settings, macOS standard selection keys, a compact file-focused Menu, OFL fonts, FDX/Fountain import/export; PDF export paginates exactly like the editor; eight contrast-tested themes with revision marks legible on every palette, and live spellchecking in English, Bulgarian and Russian with screenplay-aware ALL-CAPS skipping, right-click suggestions and per-language custom dictionaries; v0.8.5 corrected editor input with whitespace-aware caret mapping, press-point clicks, double-click word selection and press-anchored drag selection; v0.8.6 gives every typed space its own cell, sets IBM Plex Mono as the default page face with Courier Prime as a Latin-only alternative, adds monochrome paper under the theme picker, 28 theme palettes as swatches (KIT Scenarist plus all 23 base Omarchy themes), a Tab character picker and live script recognition in Research. |
-| Next release | Post-v0.8.7: Windows signing, optional release-binary/screenshot probe, Developer ID/notarisation and auto-update. |
+| App crate version | `scriptcraft-app 0.8.8` (unreleased; `0.8.7` shipped the Windows fixes); `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
+| Distribution | **v0.8.7 released** — <https://github.com/MihailM17/scriptcraft/releases/tag/v0.8.7>. Assets: macOS arm64 DMG (ad-hoc signed, not notarised), Windows x64 zip and Linux x86_64 tar.gz, each with `.sha256`. v0.8.8 adds an in-app installer (checksum-verified, post-exit helper) but remains unsigned/not notarised. |
+| Current one-liner | Free, open-source, revision-first studio: one screenplay engine (Editor 2.0), crash-safe saves + recovery, revision colours/marks/pages, compare/restore, revision summary with scene counts + CSV + printable PDF, omitted scenes, smart screenplay paste, KIT version write/import, changes-only compare with context gaps and template indentation, revision headers/title-page fields, production page locks with A/B page numbers and FDX revision metadata, dual dialogue side by side in editor/PDF with FDX interchange, a title-page editor whose A4 preview is the exporter's own layout, KIT-style editor/navigator settings, macOS standard selection keys, a compact file-focused Menu, OFL fonts, FDX/Fountain import/export; PDF export paginates exactly like the editor; eight contrast-tested themes with revision marks legible on every palette, and live spellchecking in English, Bulgarian and Russian with screenplay-aware ALL-CAPS skipping, right-click suggestions and per-language custom dictionaries; v0.8.5 corrected editor input with whitespace-aware caret mapping, press-point clicks, double-click word selection and press-anchored drag selection; v0.8.6 gives every typed space its own cell, sets IBM Plex Mono as the default page face with Courier Prime as a Latin-only alternative, adds monochrome paper under the theme picker, 28 theme palettes as swatches (KIT Scenarist plus all 23 base Omarchy themes), a Tab character picker and live script recognition in Research; v0.8.8 installs updates in place after checksum verification, moves the page grid to the standard 1/6-inch leading with 58 lines on A4, adopts KIT Scenarist's published light and dark palettes (29 total) and writes panics to `panic.log`. |
+| Next release | Post-v0.8.8: Linux typing-crash root cause (needs a reproduction and `panic.log`), Windows code signing, Developer ID/notarisation, and an optional release-binary/screenshot probe. |
 
 **Positioning (locked 2026-10-26):** the free, open-source, revision-first
 screenwriting studio. Moat = the production revision workflow (colours, locked
@@ -204,12 +204,12 @@ direct workspace dependencies. There is still no benchmark harness.
   ID signing + notarisation (ignored for now), Windows signing path,
   auto-update manifests (deferred to v0.8.1), and optional release/screenshot
   probe artifact.
-- [x] **Font metrics derived from the bundled font.** Fixed 2026-11-10:
-  `scriptcraft-layout/build.rs` parses Courier Prime's hhea metrics to generate
-  `ROW_MM`; `row_mm_for_face` and tests prove a different font (IBM Plex Mono)
-  produces a different pitch instead of silently misprinting pagination. Unknown
-  `scenario_data` rows are also preserved on save (`save_preserves_unknown_
-  scenario_data_rows`).
+- [x] **Screenplay line grid.** 2026-11-10 derived the pitch from the bundled
+  font's hhea metrics; 2026-11-18 replaced that with the standard 1/6-inch
+  leading (`ROW_MM = 25.4 / 6`, 58 lines on A4) so pagination matches KIT
+  Scenarist, and removed `scriptcraft-layout/build.rs` plus the `ttf-parser`
+  build dependency. Unknown `scenario_data` rows are still preserved on save
+  (`save_preserves_unknown_scenario_data_rows`).
 
 ---
 
@@ -218,9 +218,9 @@ direct workspace dependencies. There is still no benchmark harness.
 ### Phase 0 — Trust (week 1)
 
 - [x] Apache-2.0 `LICENSE`, `NOTICE`, font license files; remove `cour*.ttf`.
-- [x] Switch editor + PDF to Courier Prime (done); derive line metrics from the
-  font file (done 2026-11-10 — `ROW_MM` generated from Courier Prime hhea in
-  `scriptcraft-layout/build.rs`, with a second-font pitch test).
+- [x] Switch editor + PDF to Courier Prime (done). Line metrics came from the
+  font file at first (2026-11-10), then moved to the standard 1/6-inch
+  screenplay pitch in v0.8.8 so page counts match KIT.
 - [x] Fix metadata key aliases (accept both spellings); persist metadata in `do_save`.
 - [x] Atomic saves: write temp in same dir → fsync → rename; keep `.bak`.
 - [x] Recovery file + launch-time "restore unsaved changes" prompt.
@@ -2317,3 +2317,35 @@ Released after the Windows menu bar / title bar / icon fixes shipped on `main`
 - Known limitation: the Windows title bar and menu bar could not be exercised
   by the offline UI suite; only the menu-bar interaction test and the theme
   regression test cover them.
+
+### 2026-11-18 — v0.8.8: in-app installer, 1/6-inch grid, KIT palettes, panic log
+
+Built on top of the released v0.8.7. Unreleased on `main` at the time of
+writing.
+
+- **Installer:** `scriptcraft-app/src/update.rs` now parses release assets,
+  selects the archive for the running OS/arch, downloads it and its `.sha256`
+  with `curl`, verifies with `sha2`, stages it under
+  `config_dir()/updates/<version>/`, and launches a post-exit helper (macOS
+  DMG/`ditto`, Windows PowerShell/zip, Linux tar/copy) that waits on the PID,
+  replaces the app and relaunches it. The prompt has Install update / Later /
+  Release notes, a progress spinner, Cancel, and a reason plus Try again on
+  failure; unsaved work is saved first. Tests cover asset selection, checksum
+  parsing and verification, `sh -n` parsing of the generated helper, and the
+  offline prompt/cancel/retry paths. The checksum verifies the transfer, not
+  the publisher; unsigned builds still trigger OS warnings.
+- **Page grid:** `ROW_MM` is now the standard 1/6 inch (4.233 mm) instead of
+  Courier Prime's hhea pitch (4.754 mm); `scriptcraft-layout/build.rs` and the
+  `ttf-parser` dependencies are gone. `RUSSIAN.lines_per_page` is 58, matching
+  KIT's A4 page count. Parity goldens and the scale-test page range were
+  rebaselined deliberately; `FINAL_DRAFT_A4` and wrap hashes are unchanged.
+- **Palettes:** KIT Scenarist now uses the published light set (`#fefefe` /
+  `#000000`); new `kit-scenarist-dark` uses the dark set (`#3d3d3d` /
+  `#ebebeb`) with the purple folder accent lifted to `#c77cf0`. Theme count
+  28 → 29, plus `36_script_kit_scenarist_dark` snapshot.
+- **Linux crash mitigation:** `panic_log.rs` appends version, OS/arch,
+  payload, location and an optional backtrace to `panic.log` (64 KiB cap,
+  rotates). Root cause of the Linux typing crash is still unknown; no fix is
+  claimed.
+- README, `docs/releases/v0.8.8.md` and `docs/release-checklist.md` §6 updated.
+  Gate: fmt, clippy `-D warnings`, workspace tests, deny, `git diff --check`.

@@ -7,9 +7,9 @@
 //! through once the custom `ScriptView` widget lands.
 //!
 //! Everything here is in document units: `row` indexes the line grid
-//! ([`ROW_MM`] per row) and horizontal positions are millimetres from the left
-//! edge of the template's text column. Painters multiply by the current zoom;
-//! zoom can therefore never change a single line break.
+//! ([`ROW_MM`] = 1/6 inch per row) and horizontal positions are millimetres
+//! from the left edge of the template's text column. Painters multiply by the
+//! current zoom; zoom can therefore never change a single line break.
 
 use crate::dual;
 use crate::paginate;
@@ -25,18 +25,13 @@ pub const MM_PER_CELL: f32 = 2.54;
 /// Width of the Russian template's text column (A4 210 − 37.5 − 25 mm).
 pub const TEXT_W_MM: f32 = 147.5;
 
-include!(concat!(env!("OUT_DIR"), "/font_metrics.rs"));
-
-/// Line-grid pitch for an arbitrary font at 12 pt, from its hhea metrics
-/// (ascender − descender + line gap). Swapping the bundled font must change
-/// this value rather than silently misprint pagination.
-pub fn row_mm_for_face(data: &[u8]) -> Option<f32> {
-    let face = ttf_parser::Face::parse(data, 0).ok()?;
-    let upem = f32::from(face.units_per_em());
-    let height =
-        f32::from(face.ascender()) - f32::from(face.descender()) + f32::from(face.line_gap());
-    Some(12.0 * height / upem * (25.4 / 72.0))
-}
+/// Height of one 12 pt line-grid row: one sixth of an inch (4.233 mm), the
+/// standard screenplay leading. KIT Scenarist and Final Draft both print at
+/// six lines per inch, so an A4 page with 25 mm top and bottom margins holds
+/// 58 lines. The bundled font's hhea height (Courier Prime: 4.754 mm) is a
+/// font-design value, not a screenplay rhythm; using it made the same script
+/// paginate roughly 7% longer than KIT.
+pub const ROW_MM: f32 = 25.4 / 6.0;
 
 /// Horizontal columns of a template, in millimetres from the text-column
 /// left edge. Mirrors the editor's historical fractions of the column width
@@ -629,41 +624,25 @@ fn is_bold(t: ElementType) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use scriptcraft_core::editing::RUSSIAN;
 
-    fn font(name: &str) -> Vec<u8> {
-        std::fs::read(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../scriptcraft-app/assets/fonts")
-                .join(name),
-        )
-        .expect("bundled font")
+    #[test]
+    fn row_pitch_is_the_standard_one_sixth_inch() {
+        assert!(
+            (ROW_MM - 4.233_333).abs() < 1e-4,
+            "screenplay leading must stay at 1/6 inch, got {ROW_MM}"
+        );
+        // Six rows to the inch, twelve rows to 2 inches.
+        assert!((ROW_MM * 6.0 - 25.4).abs() < 1e-4);
     }
 
     #[test]
-    fn row_pitch_comes_from_the_bundled_font_metrics() {
-        let courier = row_mm_for_face(&font("CourierPrime-Regular.ttf")).expect("parse Courier");
-        assert!(
-            (courier - ROW_MM).abs() < 1e-6,
-            "generated ROW_MM {ROW_MM} drifted from live metrics {courier}"
-        );
-        // 12 pt × (1600 − −700) / 2048 × 25.4/72.
-        assert!(
-            (ROW_MM - 4.754_232).abs() < 1e-4,
-            "unexpected pitch {ROW_MM}"
-        );
-    }
-
-    #[test]
-    fn a_different_font_changes_the_pitch() {
-        let plex = row_mm_for_face(&font("IBMPlexMono-Regular.ttf")).expect("parse Plex");
-        assert!(
-            plex > ROW_MM,
-            "IBM Plex Mono is taller than Courier Prime: {plex} vs {ROW_MM}"
-        );
-        // 12 pt × 1300 / 1000 × 25.4/72.
-        assert!(
-            (plex - 5.503_333).abs() < 1e-4,
-            "unexpected Plex pitch {plex}"
-        );
+    fn the_grid_holds_the_kit_line_count() {
+        // A4 minus KIT's 25 mm top and bottom margins = 247 mm of text.
+        // 58 rows at 1/6 inch leave the last baseline inside that area.
+        let text_h = 297.0 - 25.0 - 25.0;
+        let rows = (text_h / ROW_MM).floor() as usize;
+        assert_eq!(rows, 58, "A4 text area must hold 58 rows");
+        assert!(RUSSIAN.lines_per_page <= rows);
     }
 }

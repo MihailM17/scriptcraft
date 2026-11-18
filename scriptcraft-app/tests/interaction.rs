@@ -2460,7 +2460,7 @@ fn omitted_scene_persists_with_page_locks_and_keeps_later_numbers() {
                 ElementType::SceneHeading,
                 format!("INT. OMIT TEST {scene} - DAY"),
             ));
-            for line in 0..40 {
+            for line in 0..60 {
                 blocks.push(ScriptBlock::new(
                     ElementType::Action,
                     format!("Omit test scene {scene} action line {line}."),
@@ -3207,8 +3207,8 @@ fn settings_reset_needs_a_second_explicit_click() {
     );
 }
 
-/// The theme list carries KIT Scenarist plus every Omarchy palette, and
-/// choosing KIT Scenarist paints the warm light chrome.
+/// The theme list carries KIT Scenarist in both light and dark plus every
+/// Omarchy palette, and choosing KIT Scenarist paints its near-white chrome.
 #[test]
 fn theme_picker_lists_kit_scenarist_and_omarchy_themes() {
     let mut h = harness(SideTab::Settings);
@@ -3216,11 +3216,12 @@ fn theme_picker_lists_kit_scenarist_and_omarchy_themes() {
 
     open_theme_menu(&mut h);
     // Both family headings and the palettes below them are in the menu; the
-    // long list is grouped so 28 entries stay navigable.
+    // long list is grouped so 29 entries stay navigable.
     for label in [
         "ScriptCraft",
         "Omarchy",
         "KIT Scenarist",
+        "KIT Scenarist Dark",
         "Catppuccin",
         "Catppuccin Latte",
         "Flexoki Light",
@@ -3241,7 +3242,7 @@ fn theme_picker_lists_kit_scenarist_and_omarchy_themes() {
     assert!(!v.dark_mode, "KIT Scenarist is a light palette");
     assert_eq!(
         v.panel_fill,
-        egui::Color32::from_rgb(0xF3, 0xF1, 0xEE),
+        egui::Color32::from_rgb(0xFE, 0xFE, 0xFE),
         "panel fill must come from the KIT Scenarist palette"
     );
 }
@@ -3467,7 +3468,7 @@ fn settings_shows_the_last_update_result() {
 /// Tests start with no prompt and no request, which is what keeps the suite
 /// offline.
 #[test]
-fn update_prompt_offers_download_and_later() {
+fn update_prompt_offers_install_and_later() {
     use scriptcraft_app::update::{Check, Release};
 
     let mut h = harness(SideTab::Script);
@@ -3482,10 +3483,10 @@ fn update_prompt_offers_download_and_later() {
     );
 
     h.state_mut()
-        .set_update_check_for_test(Check::Available(Release {
-            version: "0.8.7".to_string(),
-            url: "https://github.com/MihailM17/scriptcraft/releases/tag/v0.8.7".to_string(),
-        }));
+        .set_update_check_for_test(Check::Available(Release::without_assets(
+            "0.8.8",
+            "https://github.com/MihailM17/scriptcraft/releases/tag/v0.8.8",
+        )));
     h.run_steps(2);
 
     assert!(
@@ -3497,8 +3498,12 @@ fn update_prompt_offers_download_and_later() {
         "the prompt needs a title"
     );
     assert!(
-        h.query_by_label("Download update").is_some(),
-        "the prompt needs a download action"
+        h.query_by_label("Install update").is_some(),
+        "the prompt needs an install action"
+    );
+    assert!(
+        h.query_by_label("Release notes").is_some(),
+        "the browser link stays available as a secondary action"
     );
 
     h.get_by_label("Later").click();
@@ -3506,5 +3511,75 @@ fn update_prompt_offers_download_and_later() {
     assert!(
         !h.state().update_prompt_open_for_test(),
         "Later must dismiss the prompt"
+    );
+}
+
+/// The installer is staged and verified off the UI thread; the offline hook
+/// lets the prompt be exercised without curl or a download.
+#[test]
+fn update_prompt_starts_and_cancels_an_install_offline() {
+    use scriptcraft_app::update::{Check, Install, Release};
+
+    let mut h = harness(SideTab::Script);
+    h.run();
+    h.state_mut().set_offline_update_check_for_test();
+    h.state_mut()
+        .set_update_check_for_test(Check::Available(Release::without_assets(
+            "0.8.8",
+            "https://github.com/MihailM17/scriptcraft/releases/tag/v0.8.8",
+        )));
+    h.run_steps(2);
+
+    h.get_by_label("Install update").click();
+    h.run_steps(2);
+    assert_eq!(
+        h.state().update_install_for_test(),
+        &Install::Downloading,
+        "the prompt must show that the download started"
+    );
+    assert!(
+        h.query_by_label("Cancel").is_some(),
+        "a running download can be cancelled"
+    );
+    assert!(
+        h.query_by_label("Later").is_none(),
+        "the modal must not be dismissed while a download is running"
+    );
+
+    h.get_by_label("Cancel").click();
+    h.run_steps(2);
+    assert_eq!(h.state().update_install_for_test(), &Install::Idle);
+    assert!(h.state().update_prompt_open_for_test());
+}
+
+/// A failed checksum or download leaves the prompt up with a retry path and
+/// the reason, instead of pretending the app updated.
+#[test]
+fn update_prompt_reports_a_failed_install_and_retries() {
+    use scriptcraft_app::update::{Check, Install, Release};
+
+    let mut h = harness(SideTab::Script);
+    h.run();
+    h.state_mut().set_offline_update_check_for_test();
+    h.state_mut()
+        .set_update_check_for_test(Check::Available(Release::without_assets(
+            "0.8.8",
+            "https://github.com/MihailM17/scriptcraft/releases/tag/v0.8.8",
+        )));
+    h.state_mut()
+        .set_update_install_for_test(Install::Failed("checksum mismatch".into()));
+    h.run_steps(2);
+
+    assert!(
+        h.query_by_label("The update did not install: checksum mismatch")
+            .is_some(),
+        "the prompt must name the failure"
+    );
+    h.get_by_label("Try again").click();
+    h.run_steps(2);
+    assert_eq!(
+        h.state().update_install_for_test(),
+        &Install::Downloading,
+        "Try again restarts the download"
     );
 }

@@ -1574,8 +1574,10 @@ mod tests {
     }
 
     /// Everything on the title page must print inside the paper. The draft
-    /// date used to sit at slot 57 on the 4.754 mm pitch, which is -2.3 mm —
-    /// below the bottom edge — and the REVISED block was further out still.
+    /// date used to sit at slot 57 on the old font-derived 4.754 mm pitch,
+    /// which was below the bottom edge; the REVISED block was further out
+    /// still. The draft date stays bottom-anchored so it cannot drift with the
+    /// line grid again.
     #[test]
     fn title_page_lines_all_sit_on_the_page() {
         let set = RevisionSet {
@@ -1608,12 +1610,14 @@ mod tests {
         assert_eq!(year.text, "2026");
         assert_eq!(year.y_from_bottom_mm, Some(TITLE_YEAR_Y_MM));
         assert_eq!(title_page_line_y_mm(57, year), TITLE_YEAR_Y_MM);
-        // The slot grid would have placed it below the paper edge.
+        // The old Courier-hhea grid (4.754 mm) put slot 57 below the paper
+        // edge; the standard 1/6-inch grid keeps it on the page, which is why
+        // the bottom anchor still matters for taller title blocks.
+        let old_pitch = 4.754_232;
+        let old_slot = PAGE_H - MARGIN_T - BASELINE_OFF - 57.0 * old_pitch;
+        assert!(old_slot < 0.0, "old slot 57 sat at {old_slot} mm");
         let slot_baseline = PAGE_H - MARGIN_T - BASELINE_OFF - 57.0 * PITCH_MM;
-        assert!(
-            slot_baseline < 0.0,
-            "slot 57 used to sit at {slot_baseline} mm"
-        );
+        assert!(slot_baseline > 0.0, "slot 57 sits at {slot_baseline} mm");
     }
 
     #[test]

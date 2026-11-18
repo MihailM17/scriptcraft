@@ -56,22 +56,25 @@ Page A4, margins left 37.5 / top 25 / right 25 / bottom 12.5 mm
 
 Implemented as width fractions (`INDENT_*` in `main.rs`) so zoom stays exact.
 
-## Measured row height (no guessing)
+## Row height: standard 1/6 inch
 
-epaint computes row height as `ascent − descent + line_gap` (ab_glyph
-hhea metrics). For bundled Courier Prime: upm 2048, asc 1600, desc −700,
-gap 0 → factor 2300/2048 = 1.1230em (`ROW_FACTOR`). At 14pt a row is
-15.72px. Page geometry derives from it, so rendered pages hold exactly
-what the paginator promises.
+The line grid is a fixed screenplay pitch, not a font metric: `ROW_MM =
+25.4 / 6 = 4.2333 mm`, the standard 12 pt leading used by KIT Scenarist and
+Final Draft. The bundled font's hhea height (Courier Prime: 4.7542 mm) is a
+font-design value and made the same script paginate about 7% longer than KIT.
+Page geometry uses `ROW_MM` directly, so rendered pages hold exactly what the
+paginator promises. (Before v0.8.8 a build script derived the pitch from the
+bundled TTF; that build script is removed.)
 
-## Fixed A4 pages (`editing::paginate`, 54 lines/page)
+## Fixed A4 pages (`editing::paginate`, 58 lines/page)
 
-Derived, not guessed: floor(259.5/147.5 × 58×0.6×2048/2300) = 54 lines.
-Pixel geometry is built backwards from 58 chars/line, so render wrap
-points equal pagination wrap points at every zoom: zoom scales pages,
+A4 is 297 mm tall; KIT's top and bottom margins are 25 mm each, leaving 247 mm.
+floor(247 / 4.2333) = 58 rows. Pagination counts rows, and pixel geometry is
+built from the same pitch (including backwards from 58 chars/line), so render
+wrap points equal pagination wrap points at every zoom: zoom scales pages,
 never reflows them (Word-style). Headings and character cues are never
-stranded last on a page. Unit-tested, plus an A95 assertion (~20–35
-pages, anchors safe).
+stranded last on a page. Unit-tested, plus an A95 assertion (~20–35 pages,
+anchors safe).
 
 ## Chronometry (calibrated on A95 vs KIT's own scene times)
 

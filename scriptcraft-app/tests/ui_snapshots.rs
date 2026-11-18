@@ -578,7 +578,7 @@ fn snap_28_research_characters() {
     h.snapshot("28_research_characters");
 }
 
-/// KIT Scenarist: warm grey chrome, orange accent, light paper.
+/// KIT Scenarist: near-white chrome, black ink, light paper.
 #[test]
 fn snap_29_script_kit_scenarist() {
     use scriptcraft_app::theme::Theme;
@@ -617,6 +617,28 @@ fn snap_30_settings_theme_menu() {
     h.snapshot("30_settings_theme_menu");
 }
 
+/// KIT Scenarist Dark: #3d3d3d paper, #ebebeb ink, purple folder accent.
+#[test]
+fn snap_36_script_kit_scenarist_dark() {
+    use scriptcraft_app::theme::Theme;
+
+    let mut h = Harness::builder()
+        .with_size(egui::Vec2::new(1360.0, 880.0))
+        .build_eframe(|cc| {
+            app::apply_theme(&cc.egui_ctx);
+            app::install_fonts(&cc.egui_ctx);
+            let mut a = ScriptCraftApp::default();
+            assert!(a.open_fixture(), "A95 fixture not found");
+            a.pin_stats_generated("18.10.2026 16:03:47");
+            a.pin_backups_dir("/Users/test/Documents/ScriptCraft/backups");
+            a.set_theme(Theme::KitScenaristDark);
+            a.goto_tab(SideTab::Script);
+            a
+        });
+    h.run();
+    h.snapshot("36_script_kit_scenarist_dark");
+}
+
 /// The on-open update prompt, with the injected version (no network).
 #[test]
 fn snap_31_update_prompt() {
@@ -625,10 +647,10 @@ fn snap_31_update_prompt() {
     let mut h = harness(SideTab::Script, None);
     h.run();
     h.state_mut()
-        .set_update_check_for_test(Check::Available(Release {
-            version: "0.8.7".to_string(),
-            url: "https://github.com/MihailM17/scriptcraft/releases/tag/v0.8.7".to_string(),
-        }));
+        .set_update_check_for_test(Check::Available(Release::without_assets(
+            "0.8.9",
+            "https://github.com/MihailM17/scriptcraft/releases/tag/v0.8.9",
+        )));
     h.run_steps(2);
     h.snapshot("31_update_prompt");
 }

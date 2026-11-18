@@ -8,16 +8,18 @@ production revisions. Open KIT projects, exchange Final Draft files, lock
 pages, issue coloured revisions, and export page-exact PDFs — offline, on
 macOS, Windows and Linux.
 
-> **Status — v0.8.7.** Revision-complete for the core production workflow:
+> **Status — v0.8.8.** Revision-complete for the core production workflow:
 > stable block/scene identity, draft diff and compare, restore-as-copy, omitted
 > scenes, dual dialogue, title-page editor and revision summary (scene counts,
-> CSV and printable PDF). Layout metrics are derived from the bundled font,
+> CSV and printable PDF). The page grid uses the standard 1/6-inch screenplay
+> leading and 58 lines on A4, matching KIT Scenarist's page count,
 > `.kitsp` saves preserve unknown sidecar rows, and CI runs runtime interaction
 > smoke on macOS/Linux/Windows. v0.8.6 keeps every typed space on the page,
 > uses Courier New as the page face when the system has it (falling back to
 > IBM Plex Mono), adds
-> a monochrome-paper option directly under the theme picker, 28 theme palettes
-> in a grouped dropdown (KIT Scenarist plus every base Omarchy theme), a Tab
+> a monochrome-paper option directly under the theme picker, 29 theme palettes
+> in a grouped dropdown (KIT Scenarist light and dark plus every base Omarchy
+> theme), a Tab
 > character picker, live script recognition in Research, and a release check
 > that offers a newer version when the app opens.
 > **v0.8.7 fixes the Windows desktop**: a light-mode Windows desktop no longer
@@ -25,6 +27,12 @@ macOS, Windows and Linux.
 > View / Window / Help menu bar is drawn on Windows and Linux, the Windows title
 > bar follows the active palette instead of turning white, and the
 > `ScriptCraft.exe` now carries the app icon.
+> **v0.8.8 installs updates in place**: the update prompt downloads the
+> platform build, verifies the published SHA-256, replaces the app after it
+> quits and restarts it. The KIT Scenarist palette now uses KIT's published
+> light and dark colours, the page grid is the standard 1/6-inch leading, and
+> panics are written to `panic.log` so a crash can be reported without a
+> terminal.
 > v0.8.5 corrected editor input: clicks and carets map through whitespace,
 > double-click selects a word, triple-click the paragraph, and drag selections
 > start at the press. v0.8.4 added live
@@ -35,8 +43,9 @@ macOS, Windows and Linux.
 > v0.8.2 redesigned the workspace.
 >
 > **Distribution note:** macOS builds in this release are ad-hoc signed (no
-> Developer ID/notarisation), Windows packages are unsigned, and auto-update is
-> deferred. See [`docs/release-checklist.md`](docs/release-checklist.md) and
+> Developer ID/notarisation) and Windows/Linux packages are unsigned. The
+> in-app installer verifies the download's SHA-256 and replaces the app, but it
+> cannot bypass Gatekeeper/SmartScreen until those builds are signed. See [`docs/release-checklist.md`](docs/release-checklist.md) and
 > [`docs/v0.8-plan.md`](docs/v0.8-plan.md).
 
 ![ScriptCraft editor](scriptcraft-app/tests/snapshots/01_script_top.png)
@@ -80,14 +89,16 @@ app on day one.
   baseline, totals, deterministic UTF-8 CSV for Excel/Numbers and a printable
   A4 PDF; counts come from the same diff as compare.
 - **Release tooling:** ad-hoc macOS bundling script, Criterion benchmarks,
-  release checklist and migration notes. Signed/notarised distribution and
-  auto-update remain follow-up work.
+  release checklist and migration notes. In-app updates are staged, checksum-
+  verified and applied by a post-exit helper; signed/notarised distribution
+  remains follow-up work.
 
 ## The editor
 
 - Fixed A4 page editor with Courier New (system face, with IBM Plex Mono and
   Courier Prime as alternatives) for one type design across Latin and
-  Cyrillic, page-accurate pagination, scene
+  Cyrillic, 1/6-inch screenplay leading (58 lines per A4 page), page-accurate
+  pagination, scene
   numbers, `(MORE)` / `(CONT'D)` markers, and zoom that scales pages without
   reflowing text. Every space you type keeps its own cell, on screen and in the
   PDF.
@@ -107,11 +118,11 @@ app on day one.
   word for suggestions, **Add to dictionary** (saved per language) or
   **Ignore**; scene headings, cues and sound effects in ALL CAPS are skipped so
   screenplay formatting is not flagged as prose.
-- 28 theme palettes in one grouped Settings ▸ Appearance dropdown, with the
+- 29 theme palettes in one grouped Settings ▸ Appearance dropdown, with the
   ScriptCraft and Omarchy families as headings and a solid scrollbar so the
   long list is obvious. ScriptCraft's own are Midnight, Light, Sepia, High
-  Contrast and **KIT Scenarist** — a light imitation of KIT's warm-grey chrome
-  and orange mark. The rest are the base themes Omarchy ships, imported from
+  Contrast and **KIT Scenarist** in KIT's published light and dark colours.
+  The rest are the base themes Omarchy ships, imported from
   its palettes: Catppuccin, Catppuccin Latte, Ethereal, Everforest, Flexoki
   Light, Gruvbox, Hackerman, Jade Horse, Kanagawa, Last Horizon, Lumon, Lupine,
   Matte Black, Miasma, Nord, Retro 82, Ristretto, Rosé Pine, Solitude,
@@ -120,8 +131,10 @@ app on day one.
   edge so they remain locatable on white and cream pages).
 - **Check for updates.** Settings ▸ General shows the build version and a
   Check for updates button; the app also asks GitHub once at launch. When a
-  newer release exists it offers a download link instead of updating silently —
-  builds are ad-hoc signed, so there is no self-installer.
+  newer release exists the prompt downloads the right build, verifies the
+  published SHA-256, and a helper replaces the app and relaunches it after the
+  current window closes. Cancel, a checksum failure or a permission error
+  leaves the installed copy untouched and shows the reason.
 - Monochrome paper, directly under the theme picker, turns the page
   white-with-black-ink while the app keeps its theme; revision marks stay
   coloured.
@@ -178,8 +191,8 @@ It is not yet:
 - a DOCX/RTF converter;
 - a plugin platform;
 - fully signed and notarised on every platform. macOS builds are ad-hoc signed
-  (no Developer ID certificate in this build pipeline), Windows packages are
-  unsigned, and auto-update is deferred.
+  (no Developer ID certificate in this build pipeline) and Windows/Linux
+  packages are unsigned, so the in-app updater still triggers OS warnings.
 
 The scope is deliberate. If a feature is not needed for the revision workflow
 or the writing core, it is not in this release.

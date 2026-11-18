@@ -872,34 +872,78 @@ pub const KIT_HIGH_CONTRAST: KitColors = KitColors {
 
 // ---- ScriptCraft's KIT imitation ---------------------------------------------
 
-/// KIT Scenarist: Omarchy theme.
+// KIT Scenarist's own theme editor exposes five colours: Text, Background,
+// Folder Text, Folder Background and Non Printable Text. ScriptCraft has more
+// semantic roles than that, so the five values set the surfaces, ink and
+// accent; borders and raised surfaces are derived tones of the same hue.
+//
+// Light theme: background #fefefe, text #000000, folder text #fefefe, folder
+// background #cbc6c3. A grey folder chip cannot double as the accent (1.1:1
+// against the page), so the accent is a deepened, still-neutral tone of that
+// folder grey. Non-printable green (#00c509) is the scene-number/secondary
+// ink from KIT; it stays out of the palette fields because scene numbers must
+// keep the theme's contrast floor.
+
+/// KIT Scenarist, light: near-white paper, black ink, warm-neutral chrome.
 pub const KIT_SCENARIST: KitColors = KitColors {
-    window: hex(0xF3F1EE),
-    desk: hex(0xE2E0DD),
-    page: hex(0xFAF9F8),
-    page_edge: hex(0xDCDBDA),
-    start_tab_active: hex(0xF3F1EE),
-    rail: hex(0xEAE9E6),
-    text: hex(0x2A2A28),
-    button: hex(0xE1DFDC),
-    button_hover: hex(0xD5D3D0),
-    base: hex(0xFCFCFB),
-    faint: hex(0xFCFCFB),
-    accent: hex(0xC96A12),
-    disabled_text: hex(0x8B8B89),
-    stroke: hex(0xD9D7D4),
-    sep: hex(0xDFDDDA),
-    module_bg: hex(0xF9F8F6),
-    strip: hex(0xEEECE9),
-    field_stroke: hex(0xC7C5C2),
-    hover_light: hex(0xE4E2DF),
-    elt_bg: hex(0xE9E7E4),
-    elt_stroke: hex(0xD5D3D0),
-    heading_text: hex(0x171716),
-    surface: hex(0xE9E7E4),
-    accent_soft: Color32::from_rgba_premultiplied(44, 23, 4, 56),
-    accent_text: hex(0x643509),
+    window: hex(0xFEFEFE),
+    desk: hex(0xEEEDEB),
+    page: hex(0xFEFEFE),
+    page_edge: hex(0xD8D6D2),
+    start_tab_active: hex(0xFEFEFE),
+    rail: hex(0xF7F6F4),
+    text: hex(0x000000),
+    button: hex(0xF1F0EE),
+    button_hover: hex(0xE6E4E1),
+    base: hex(0xFFFFFF),
+    faint: hex(0xFFFFFF),
+    accent: hex(0x6F6A66),
+    disabled_text: hex(0x6F6C68),
+    stroke: hex(0xDEDCD9),
+    sep: hex(0xE5E3E0),
+    module_bg: hex(0xFEFEFE),
+    strip: hex(0xF4F3F1),
+    field_stroke: hex(0xCFCCC9),
+    hover_light: hex(0xF0EFED),
+    elt_bg: hex(0xF2F1EF),
+    elt_stroke: hex(0xDEDCD9),
+    heading_text: hex(0x000000),
+    surface: hex(0xF7F6F4),
+    accent_soft: Color32::from_rgba_premultiplied(24, 23, 22, 56),
+    accent_text: hex(0x5A5551),
     spell_error: hex(0xC62F2F),
+};
+
+/// KIT Scenarist, dark: #3d3d3d background, #ebebeb text, purple folder accent
+/// (#9922cb). The purple is lifted to #c77cf0 for UI accents so it clears the
+/// 3:1 floor on the dark page; the folder colour itself is unchanged in KIT.
+pub const KIT_SCENARIST_DARK: KitColors = KitColors {
+    window: hex(0x3D3D3D),
+    desk: hex(0x2E2E2E),
+    page: hex(0x3D3D3D),
+    page_edge: hex(0x555555),
+    start_tab_active: hex(0x3D3D3D),
+    rail: hex(0x353535),
+    text: hex(0xEBEBEB),
+    button: hex(0x4A4A4A),
+    button_hover: hex(0x555555),
+    base: hex(0x454545),
+    faint: hex(0x454545),
+    accent: hex(0xC77CF0),
+    disabled_text: hex(0xA8A8A8),
+    stroke: hex(0x4A4A4A),
+    sep: hex(0x454545),
+    module_bg: hex(0x414141),
+    strip: hex(0x383838),
+    field_stroke: hex(0x5A5A5A),
+    hover_light: hex(0x4D4D4D),
+    elt_bg: hex(0x454545),
+    elt_stroke: hex(0x555555),
+    heading_text: hex(0xEBEBEB),
+    surface: hex(0x454545),
+    accent_soft: Color32::from_rgba_premultiplied(47, 29, 56, 60),
+    accent_text: hex(0xD9A6F5),
+    spell_error: hex(0xFF6B6B),
 };
 
 /// User-selectable theme. Persisted by name in `settings.conf`; the old
@@ -915,6 +959,7 @@ pub enum Theme {
     Sepia,
     HighContrast,
     KitScenarist,
+    KitScenaristDark,
     Catppuccin,
     CatppuccinLatte,
     Ethereal,
@@ -969,13 +1014,14 @@ impl ThemeGroup {
 
 impl Theme {
     /// ScriptCraft's own palettes, including a light imitation of KIT
-    /// Scenarist's warm-grey chrome and orange mark.
-    pub const SCRIPT: [Theme; 5] = [
+    /// Scenarist's near-white paper and neutral chrome, plus its dark sibling.
+    pub const SCRIPT: [Theme; 6] = [
         Theme::Midnight,
         Theme::Light,
         Theme::Sepia,
         Theme::HighContrast,
         Theme::KitScenarist,
+        Theme::KitScenaristDark,
     ];
 
     /// The 23 base themes Omarchy ships in `themes/` (basecamp/omarchy).
@@ -1007,12 +1053,13 @@ impl Theme {
         Theme::White,
     ];
 
-    pub const ALL: [Theme; 28] = [
+    pub const ALL: [Theme; 29] = [
         Theme::Midnight,
         Theme::Light,
         Theme::Sepia,
         Theme::HighContrast,
         Theme::KitScenarist,
+        Theme::KitScenaristDark,
         Theme::Catppuccin,
         Theme::CatppuccinLatte,
         Theme::Ethereal,
@@ -1054,6 +1101,7 @@ impl Theme {
             Theme::Sepia => "Sepia",
             Theme::HighContrast => "High Contrast",
             Theme::KitScenarist => "KIT Scenarist",
+            Theme::KitScenaristDark => "KIT Scenarist Dark",
             Theme::Catppuccin => "Catppuccin",
             Theme::CatppuccinLatte => "Catppuccin Latte",
             Theme::Ethereal => "Ethereal",
@@ -1088,6 +1136,7 @@ impl Theme {
             Theme::Sepia => "sepia",
             Theme::HighContrast => "high-contrast",
             Theme::KitScenarist => "kit-scenarist",
+            Theme::KitScenaristDark => "kit-scenarist-dark",
             Theme::Catppuccin => "catppuccin",
             Theme::CatppuccinLatte => "catppuccin-latte",
             Theme::Ethereal => "ethereal",
@@ -1128,6 +1177,7 @@ impl Theme {
             Theme::Sepia => &KIT_SEPIA,
             Theme::HighContrast => &KIT_HIGH_CONTRAST,
             Theme::KitScenarist => &KIT_SCENARIST,
+            Theme::KitScenaristDark => &KIT_SCENARIST_DARK,
             Theme::Catppuccin => &KIT_CATPPUCCIN,
             Theme::CatppuccinLatte => &KIT_CATPPUCCIN_LATTE,
             Theme::Ethereal => &KIT_ETHEREAL,
@@ -1816,17 +1866,27 @@ mod tests {
             ]
         );
         assert_eq!(Theme::OMARCHY.len(), 23);
-        assert_eq!(Theme::SCRIPT.len(), 5);
-        assert_eq!(Theme::ALL.len(), 28);
+        assert_eq!(Theme::SCRIPT.len(), 6);
+        assert_eq!(Theme::ALL.len(), 29);
     }
 
-    /// KIT Scenarist's own palette: warm grey chrome, orange mark, light page.
+    /// KIT Scenarist's published colours: #fefefe/#000000 light,
+    /// #3d3d3d/#ebebeb dark, with the folder accent kept recognisable.
     #[test]
-    fn kit_scenarist_imitates_the_warm_orange_brand() {
-        let c = *Theme::KitScenarist.palette();
+    fn kit_scenarist_uses_the_published_colours() {
+        let light = *Theme::KitScenarist.palette();
         assert!(Theme::KitScenarist.is_light());
-        assert!(c.accent.r() > c.accent.g() && c.accent.g() > c.accent.b());
-        assert!(c.window.r() > c.window.b(), "chrome should stay warm");
+        assert_eq!(light.page, Color32::from_rgb(0xFE, 0xFE, 0xFE));
+        assert_eq!(light.text, Color32::BLACK);
+        assert_eq!(light.window, Color32::from_rgb(0xFE, 0xFE, 0xFE));
+
+        let dark = *Theme::KitScenaristDark.palette();
+        assert!(!Theme::KitScenaristDark.is_light());
+        assert_eq!(dark.page, Color32::from_rgb(0x3D, 0x3D, 0x3D));
+        assert_eq!(dark.text, Color32::from_rgb(0xEB, 0xEB, 0xEB));
+        assert_eq!(dark.window, Color32::from_rgb(0x3D, 0x3D, 0x3D));
+        // Folder purple #9922cb lifted for the accent floor.
+        assert!(dark.accent.b() > dark.accent.g() && dark.accent.r() > dark.accent.g());
     }
 
     #[test]
