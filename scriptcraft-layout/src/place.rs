@@ -23,7 +23,12 @@ pub use crate::dual::SourceSpan;
 /// Millimetres per character cell (0.6 em at 12 pt).
 pub const MM_PER_CELL: f32 = 2.54;
 /// Width of the Russian template's text column (A4 210 − 37.5 − 25 mm).
+/// Kept for the Russian-template parity tests; the editor and the PDF use
+/// [`FINAL_DRAFT_A4_TEXT_W_MM`].
 pub const TEXT_W_MM: f32 = 147.5;
+/// Width of KIT's default export column (A4 210 − 38 − 17 mm). This is the
+/// template KIT opens new projects with (`final_draft_a4.kitss`).
+pub const FINAL_DRAFT_A4_TEXT_W_MM: f32 = 155.0;
 
 /// Height of one 12 pt line-grid row: one sixth of an inch (4.233 mm), the
 /// standard screenplay leading. KIT Scenarist and Final Draft both print at
@@ -38,6 +43,8 @@ pub const ROW_MM: f32 = 25.4 / 6.0;
 /// (`FRAC_CHARACTER_OFF` etc.) with the KIT template's millimetre values.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TemplateGeometry {
+    /// Width of the text column, in millimetres.
+    pub text_w_mm: f32,
     pub cue_mm: f32,
     pub paren_mm: f32,
     pub paren_w_mm: f32,
@@ -51,6 +58,7 @@ pub struct TemplateGeometry {
 
 /// The Russian template's columns (`russian.kitss`).
 pub const RUSSIAN_GEOMETRY: TemplateGeometry = TemplateGeometry {
+    text_w_mm: TEXT_W_MM,
     cue_mm: 67.5,
     paren_mm: 55.0,
     paren_w_mm: 47.5,
@@ -58,6 +66,21 @@ pub const RUSSIAN_GEOMETRY: TemplateGeometry = TemplateGeometry {
     dialog_w_mm: 72.5,
     lyrics_mm: 37.5,
     lyrics_w_mm: 110.0,
+    scene_num_gap_mm: 4.0,
+};
+
+/// KIT's default export template (`final_draft_a4.kitss`): a 155 mm column
+/// with the block indents KIT stores in millimetres. Character 51, dialogue
+/// 26/40, parenthetical 36/52, lyrics 26/0.
+pub const FINAL_DRAFT_A4_GEOMETRY: TemplateGeometry = TemplateGeometry {
+    text_w_mm: FINAL_DRAFT_A4_TEXT_W_MM,
+    cue_mm: 51.0,
+    paren_mm: 36.0,
+    paren_w_mm: 67.0,
+    dialog_mm: 26.0,
+    dialog_w_mm: 89.0,
+    lyrics_mm: 26.0,
+    lyrics_w_mm: 129.0,
     scene_num_gap_mm: 4.0,
 };
 
@@ -400,7 +423,7 @@ fn layout_page(
                             x_mm: dual::cue_x_mm(&text, right),
                             text,
                             role: LineRole::ContdCue,
-                            bold: true,
+                            bold: false,
                             italic: false,
                             right_aligned: false,
                             span: None,
@@ -495,7 +518,7 @@ fn layout_page(
                     x_mm: geometry.cue_mm,
                     text: format!("{cue} (CONT'D)"),
                     role: LineRole::ContdCue,
-                    bold: true,
+                    bold: false,
                     italic: false,
                     right_aligned: false,
                     span: None,
@@ -510,7 +533,13 @@ fn layout_page(
         let first_row = row;
         let paras: Vec<&str> = block.text.split('\n').collect();
         let cpl = m.col_chars(t);
-        let x_mm = indent_mm(t, geometry);
+        // KIT's Final Draft template right-aligns transitions against the
+        // text column's right edge; every other block starts at its indent.
+        let (x_mm, right_aligned) = if t == ElementType::Transition {
+            (geometry.text_w_mm, true)
+        } else {
+            (indent_mm(t, geometry), false)
+        };
         let end = chunk.end.min(paras.len());
         for (para, text) in paras.iter().enumerate().take(end).skip(chunk.start) {
             for wl in wrap::wrap_paragraph(text, cpl) {
@@ -523,9 +552,9 @@ fn layout_page(
                     } else {
                         LineRole::Body
                     },
-                    bold: is_bold(t),
+                    bold: false,
                     italic: t == ElementType::Lyrics,
-                    right_aligned: false,
+                    right_aligned,
                     span: if omitted_here {
                         None
                     } else {
@@ -545,7 +574,7 @@ fn layout_page(
         if chunk.more {
             lines.push(PlacedLine {
                 row,
-                x_mm: TEXT_W_MM,
+                x_mm: geometry.text_w_mm,
                 text: "(MORE)".to_string(),
                 role: LineRole::More,
                 bold: false,
@@ -565,7 +594,7 @@ fn layout_page(
                         x_mm: -geometry.scene_num_gap_mm,
                         text: label.clone(),
                         role: LineRole::SceneNumber,
-                        bold: true,
+                        bold: false,
                         italic: false,
                         right_aligned: true,
                         span: None,
@@ -614,17 +643,10 @@ fn indent_mm(t: ElementType, g: &TemplateGeometry) -> f32 {
     }
 }
 
-fn is_bold(t: ElementType) -> bool {
-    matches!(
-        t,
-        ElementType::SceneHeading | ElementType::Character | ElementType::Transition
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use scriptcraft_core::editing::RUSSIAN;
+    use scriptcraft_core::editing::FINAL_DRAFT_A4;
 
     #[test]
     fn row_pitch_is_the_standard_one_sixth_inch() {
@@ -638,11 +660,11 @@ mod tests {
 
     #[test]
     fn the_grid_holds_the_kit_line_count() {
-        // A4 minus KIT's 25 mm top and bottom margins = 247 mm of text.
+        // A4 minus KIT's 24 mm top and bottom margins = 249 mm of text.
         // 58 rows at 1/6 inch leave the last baseline inside that area.
-        let text_h = 297.0 - 25.0 - 25.0;
+        let text_h = 297.0 - 24.0 - 24.0;
         let rows = (text_h / ROW_MM).floor() as usize;
         assert_eq!(rows, 58, "A4 text area must hold 58 rows");
-        assert!(RUSSIAN.lines_per_page <= rows);
+        assert!(FINAL_DRAFT_A4.lines_per_page <= rows);
     }
 }

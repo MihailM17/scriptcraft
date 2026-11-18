@@ -3242,7 +3242,7 @@ fn theme_picker_lists_kit_scenarist_and_omarchy_themes() {
     assert!(!v.dark_mode, "KIT Scenarist is a light palette");
     assert_eq!(
         v.panel_fill,
-        egui::Color32::from_rgb(0xFE, 0xFE, 0xFE),
+        egui::Color32::from_rgb(0xE4, 0xE4, 0xE4),
         "panel fill must come from the KIT Scenarist palette"
     );
 }

@@ -22,7 +22,7 @@ pub mod wrap;
 pub use paginate::{paginate, paginate_lines, Chunk, DualChunk, Page};
 pub use place::{
     layout, layout_document_view, layout_with_page_lock, relayout_from, DocLayout, LineRole,
-    PageLayout, PlacedLine, SourceSpan, TemplateGeometry, MM_PER_CELL, ROW_MM, RUSSIAN_GEOMETRY,
-    TEXT_W_MM,
+    PageLayout, PlacedLine, SourceSpan, TemplateGeometry, FINAL_DRAFT_A4_GEOMETRY,
+    FINAL_DRAFT_A4_TEXT_W_MM, MM_PER_CELL, ROW_MM, RUSSIAN_GEOMETRY, TEXT_W_MM,
 };
 pub use wrap::{wrap_lines, wrap_paragraph, wrap_rows, WrappedLine};

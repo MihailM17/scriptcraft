@@ -5,11 +5,11 @@
 //! was retired together with that engine; `parity.rs` freezes its exact
 //! output as golden hashes.)
 
-use scriptcraft_core::editing::RUSSIAN;
+use scriptcraft_core::editing::FINAL_DRAFT_A4;
 use scriptcraft_core::kitsp;
 use scriptcraft_core::model::{ElementType, ScriptBlock};
 use scriptcraft_core::page_lock::PageLock;
-use scriptcraft_layout::{layout, layout_with_page_lock, LineRole, RUSSIAN_GEOMETRY, TEXT_W_MM};
+use scriptcraft_layout::{layout, layout_with_page_lock, LineRole, FINAL_DRAFT_A4_GEOMETRY};
 use std::collections::HashMap;
 
 const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../fixtures/A95.kitsp");
@@ -26,7 +26,12 @@ fn scene_labels(blocks: &[ScriptBlock]) -> Vec<String> {
 fn a95_scene_numbers_align_with_headings() {
     let p = kitsp::load_file(FIXTURE).expect("fixture must load");
     let labels = scene_labels(&p.blocks);
-    let doc = layout(&p.blocks, &RUSSIAN, &RUSSIAN_GEOMETRY, &labels);
+    let doc = layout(
+        &p.blocks,
+        &FINAL_DRAFT_A4,
+        &FINAL_DRAFT_A4_GEOMETRY,
+        &labels,
+    );
     assert_eq!(doc.pages[0].number, None, "KIT leaves page one unnumbered");
     for (pi, page) in doc.pages.iter().enumerate() {
         assert_eq!(
@@ -48,8 +53,8 @@ fn a95_scene_numbers_align_with_headings() {
     assert_eq!(numbers.len(), labels.len(), "one number per scene");
     for (i, l) in numbers.iter().enumerate() {
         assert_eq!(l.text, format!("{}.", i + 1));
-        assert!(l.right_aligned && l.bold);
-        assert_eq!(l.x_mm, -RUSSIAN_GEOMETRY.scene_num_gap_mm);
+        assert!(l.right_aligned && !l.bold);
+        assert_eq!(l.x_mm, -FINAL_DRAFT_A4_GEOMETRY.scene_num_gap_mm);
         assert!(l.span.is_none());
     }
     // Each number sits on the same grid row as its heading's first body line.
@@ -69,7 +74,12 @@ fn a95_scene_numbers_align_with_headings() {
 fn body_spans_tile_paragraphs_and_reproduce_text() {
     let p = kitsp::load_file(FIXTURE).expect("fixture must load");
     let labels = scene_labels(&p.blocks);
-    let doc = layout(&p.blocks, &RUSSIAN, &RUSSIAN_GEOMETRY, &labels);
+    let doc = layout(
+        &p.blocks,
+        &FINAL_DRAFT_A4,
+        &FINAL_DRAFT_A4_GEOMETRY,
+        &labels,
+    );
 
     let mut spans: HashMap<(usize, usize), Vec<(usize, usize)>> = HashMap::new();
     for line in doc.pages.iter().flat_map(|pg| &pg.lines) {
@@ -129,7 +139,7 @@ fn split_dialogue_places_cues_and_more_rows() {
         ScriptBlock::new(ElementType::Character, "ИВАН".into()),
         ScriptBlock::new(ElementType::Dialogue, text),
     ];
-    let doc = layout(&blocks, &RUSSIAN, &RUSSIAN_GEOMETRY, &[]);
+    let doc = layout(&blocks, &FINAL_DRAFT_A4, &FINAL_DRAFT_A4_GEOMETRY, &[]);
     assert!(doc.pages.len() >= 3, "140 rows must span pages");
 
     let lines: Vec<_> = doc.pages.iter().flat_map(|pg| &pg.lines).collect();
@@ -146,12 +156,12 @@ fn split_dialogue_places_cues_and_more_rows() {
     for l in &more {
         assert_eq!(l.text, "(MORE)");
         assert!(l.right_aligned);
-        assert_eq!(l.x_mm, TEXT_W_MM);
+        assert_eq!(l.x_mm, FINAL_DRAFT_A4_GEOMETRY.text_w_mm);
     }
     for l in &contd {
         assert_eq!(l.text, "ИВАН (CONT'D)");
-        assert!(l.bold);
-        assert_eq!(l.x_mm, RUSSIAN_GEOMETRY.cue_mm);
+        assert!(!l.bold);
+        assert_eq!(l.x_mm, FINAL_DRAFT_A4_GEOMETRY.cue_mm);
     }
     // Uniform one-row paragraphs always fill whole pages, so each continued
     // chunk's (CONT'D) cue opens its page.
@@ -180,7 +190,7 @@ fn page_lock_labels_editor_pages_with_a_suffix() {
             format!("Original action {i}."),
         ));
     }
-    let starts = scriptcraft_layout::paginate::page_starts(&p.blocks, &RUSSIAN);
+    let starts = scriptcraft_layout::paginate::page_starts(&p.blocks, &FINAL_DRAFT_A4);
     assert!(starts.len() >= 2, "fixture needs multiple pages");
     let lock = PageLock::capture(&p.blocks, &starts);
     let at = starts[1].0;
@@ -191,7 +201,13 @@ fn page_lock_labels_editor_pages_with_a_suffix() {
         );
     }
     let labels = scene_labels(&p.blocks);
-    let doc = layout_with_page_lock(&p.blocks, &RUSSIAN, &RUSSIAN_GEOMETRY, &labels, Some(&lock));
+    let doc = layout_with_page_lock(
+        &p.blocks,
+        &FINAL_DRAFT_A4,
+        &FINAL_DRAFT_A4_GEOMETRY,
+        &labels,
+        Some(&lock),
+    );
     assert_eq!(doc.pages[0].number, None);
     assert_eq!(doc.pages[1].number.as_deref(), Some("1A"));
     assert!(doc.pages.iter().any(|p| p.number.as_deref() == Some("2")));

@@ -8,10 +8,10 @@
 //! incremental result against a full relayout of the mutated blocks.
 
 use scriptcraft_core::edit::{EditCommand, Pos};
-use scriptcraft_core::editing::RUSSIAN;
+use scriptcraft_core::editing::FINAL_DRAFT_A4;
 use scriptcraft_core::kitsp;
 use scriptcraft_core::model::{ElementType, ScriptBlock};
-use scriptcraft_layout::{layout, relayout_from, DocLayout, RUSSIAN_GEOMETRY};
+use scriptcraft_layout::{layout, relayout_from, DocLayout, FINAL_DRAFT_A4_GEOMETRY};
 
 const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../fixtures/A95.kitsp");
 
@@ -40,7 +40,12 @@ fn scene_labels(blocks: &[ScriptBlock]) -> Vec<String> {
 }
 
 fn full(blocks: &[ScriptBlock]) -> DocLayout {
-    layout(blocks, &RUSSIAN, &RUSSIAN_GEOMETRY, &scene_labels(blocks))
+    layout(
+        blocks,
+        &FINAL_DRAFT_A4,
+        &FINAL_DRAFT_A4_GEOMETRY,
+        &scene_labels(blocks),
+    )
 }
 
 /// The relayout hint `scriptcraft-app` would pass for this command.
@@ -272,8 +277,8 @@ fn assert_case(blocks: &mut Vec<ScriptBlock>, cmd: EditCommand, what: &str) {
     let expect = full(blocks);
     let got = relayout_from(
         blocks,
-        &RUSSIAN,
-        &RUSSIAN_GEOMETRY,
+        &FINAL_DRAFT_A4,
+        &FINAL_DRAFT_A4_GEOMETRY,
         &scene_labels(blocks),
         &old,
         first,

@@ -1,7 +1,7 @@
 use eframe::egui;
 use scriptcraft_core::{
     edit,
-    editing::{auto_upper, format_duration, RUSSIAN},
+    editing::{auto_upper, format_duration, FINAL_DRAFT_A4},
     format::{validate, Issue},
     kitsp::{self, Card, Metadata},
     model::{ElementType, Project, Scene, ScriptBlock},
@@ -2263,8 +2263,8 @@ impl ScriptCraftApp {
                     Some(scriptcraft_layout::place::layout_document_view(
                         &view,
                         &p.blocks,
-                        &RUSSIAN,
-                        &scriptcraft_layout::place::RUSSIAN_GEOMETRY,
+                        &FINAL_DRAFT_A4,
+                        &scriptcraft_layout::place::FINAL_DRAFT_A4_GEOMETRY,
                         &labels,
                         page_lock.as_ref(),
                     ))
@@ -2276,8 +2276,8 @@ impl ScriptCraftApp {
                             (Some((first, upto)), Some(prev)) => {
                                 scriptcraft_layout::place::relayout_from(
                                     &p.blocks,
-                                    &RUSSIAN,
-                                    &scriptcraft_layout::place::RUSSIAN_GEOMETRY,
+                                    &FINAL_DRAFT_A4,
+                                    &scriptcraft_layout::place::FINAL_DRAFT_A4_GEOMETRY,
                                     &labels,
                                     prev,
                                     first,
@@ -2290,7 +2290,7 @@ impl ScriptCraftApp {
                     incremental.or_else(|| {
                         Some(crate::script_view::document_layout_with_page_lock(
                             &p.blocks,
-                            &RUSSIAN,
+                            &FINAL_DRAFT_A4,
                             &labels,
                             page_lock.as_ref(),
                         ))
@@ -2371,7 +2371,7 @@ impl ScriptCraftApp {
         let starts = match &self.project {
             Some(p) if p.has_omitted_scenes() => {
                 let view = p.document_view();
-                scriptcraft_layout::paginate::page_starts(&view.blocks, &RUSSIAN)
+                scriptcraft_layout::paginate::page_starts(&view.blocks, &FINAL_DRAFT_A4)
                     .into_iter()
                     .filter_map(|(vi, para)| {
                         let bi = view.sources.get(vi).copied().flatten()?;
@@ -2379,7 +2379,7 @@ impl ScriptCraftApp {
                     })
                     .collect()
             }
-            Some(p) => scriptcraft_layout::paginate::page_starts(&p.blocks, &RUSSIAN),
+            Some(p) => scriptcraft_layout::paginate::page_starts(&p.blocks, &FINAL_DRAFT_A4),
             None => Vec::new(),
         };
         if starts.is_empty() {
@@ -6552,7 +6552,7 @@ impl ScriptCraftApp {
             .resizable(true)
             .frame(
                 egui::Frame::new()
-                    .fill(kit().window)
+                    .fill(kit().list_bg)
                     .inner_margin(egui::Margin::symmetric(0, 10)),
             )
             .show(ctx, |ui| {
@@ -7008,7 +7008,7 @@ impl ScriptCraftApp {
             .resizable(false)
             .frame(
                 egui::Frame::new()
-                    .fill(kit().window)
+                    .fill(kit().list_bg)
                     .inner_margin(egui::Margin::symmetric(10, 12)),
             )
             .show(ctx, |ui| {

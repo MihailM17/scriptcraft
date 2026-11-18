@@ -26,7 +26,7 @@ use scriptcraft_core::model::{ElementType, ScriptBlock};
 use scriptcraft_core::revision::RevisionColor;
 use scriptcraft_layout::pdf::{REVISION_BAR_W_MM, REVISION_BAR_X_MM};
 use scriptcraft_layout::place::{
-    self, DocLayout, LineRole, PageLayout, PlacedLine, MM_PER_CELL, ROW_MM, RUSSIAN_GEOMETRY,
+    self, DocLayout, LineRole, PageLayout, PlacedLine, FINAL_DRAFT_A4_GEOMETRY, MM_PER_CELL, ROW_MM,
 };
 
 use crate::app::{bold_mono, italic_mono, MONO};
@@ -36,10 +36,11 @@ use crate::theme::{kit, paint_page, paint_revision, KitColors};
 /// Russian template's text column exactly A4 width at 72 dpi.
 pub const PT_PER_MM: f32 = 72.0 / 25.4;
 
-/// Template margins in mm: left / top / right / bottom of the A4 page.
-const PAD_L_MM: f32 = 37.5;
-const PAD_T_MM: f32 = 25.0;
-const PAD_R_MM: f32 = 25.0;
+/// Template margins in mm: left / top / right / bottom of the A4 page, as
+/// KIT's default export template stores them.
+const PAD_L_MM: f32 = 38.0;
+const PAD_T_MM: f32 = 24.0;
+const PAD_R_MM: f32 = 17.0;
 
 /// Page size in egui points at the given zoom.
 pub fn page_size_pt(zoom: f32) -> egui::Vec2 {
@@ -70,7 +71,7 @@ pub fn document_layout(
     m: &TemplateMetrics,
     scene_labels: &[String],
 ) -> DocLayout {
-    place::layout(blocks, m, &RUSSIAN_GEOMETRY, scene_labels)
+    place::layout(blocks, m, &FINAL_DRAFT_A4_GEOMETRY, scene_labels)
 }
 
 /// [`document_layout`] with production page locks.
@@ -80,7 +81,7 @@ pub fn document_layout_with_page_lock(
     scene_labels: &[String],
     page_lock: Option<&scriptcraft_core::page_lock::PageLock>,
 ) -> DocLayout {
-    place::layout_with_page_lock(blocks, m, &RUSSIAN_GEOMETRY, scene_labels, page_lock)
+    place::layout_with_page_lock(blocks, m, &FINAL_DRAFT_A4_GEOMETRY, scene_labels, page_lock)
 }
 
 /// A selection between two document positions. Anchor is the fixed end a
@@ -2692,7 +2693,7 @@ fn line_color(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use scriptcraft_core::editing::RUSSIAN;
+    use scriptcraft_core::editing::FINAL_DRAFT_A4;
 
     fn sample() -> Vec<ScriptBlock> {
         vec![
@@ -2714,11 +2715,11 @@ mod tests {
     fn zoom_never_changes_breaks() {
         let blocks = sample();
         let labels = vec!["1.".to_string()];
-        let base = document_layout(&blocks, &RUSSIAN, &labels);
+        let base = document_layout(&blocks, &FINAL_DRAFT_A4, &labels);
         assert!(!base.pages.is_empty());
         // The painter consumes this exact layout at every zoom; zoom only
         // scales painted geometry (see `painted_geometry_scales_linearly`).
-        let again = document_layout(&blocks, &RUSSIAN, &labels);
+        let again = document_layout(&blocks, &FINAL_DRAFT_A4, &labels);
         assert_eq!(again, base, "layout must be deterministic");
     }
 
@@ -2885,10 +2886,10 @@ mod tests {
             ));
         }
         let labels = vec!["1.".to_string()];
-        let base = document_layout(&blocks, &RUSSIAN, &labels);
+        let base = document_layout(&blocks, &FINAL_DRAFT_A4, &labels);
         assert!(base.pages.len() > 1, "the document must span several pages");
         // Zoom only scales painted geometry; the layout is zoom-independent.
-        let again = document_layout(&blocks, &RUSSIAN, &labels);
+        let again = document_layout(&blocks, &FINAL_DRAFT_A4, &labels);
         assert_eq!(again, base, "layout must be deterministic");
     }
 
@@ -2973,7 +2974,7 @@ mod tests {
             ScriptBlock::new(ElementType::Action, "Кратък.".into()),
         ];
         let labels: Vec<String> = Vec::new();
-        let doc = document_layout(&blocks, &RUSSIAN, &labels);
+        let doc = document_layout(&blocks, &FINAL_DRAFT_A4, &labels);
         let lines = body_lines(&doc);
         assert!(lines.len() >= 3, "first block must wrap");
         let first = lines[0].span.unwrap();
@@ -3136,7 +3137,7 @@ mod tests {
     fn hit_test_maps_clicks_to_cells() {
         let blocks = sample();
         let labels: Vec<String> = Vec::new();
-        let doc = document_layout(&blocks, &RUSSIAN, &labels);
+        let doc = document_layout(&blocks, &FINAL_DRAFT_A4, &labels);
         let scale = PT_PER_MM;
         let row_h = ROW_MM * scale;
         let cell_w = MM_PER_CELL * scale;
@@ -3165,7 +3166,7 @@ mod tests {
     fn monochrome_paper_paints_black_ink() {
         let blocks = sample();
         let labels: Vec<String> = Vec::new();
-        let doc = document_layout(&blocks, &RUSSIAN, &labels);
+        let doc = document_layout(&blocks, &FINAL_DRAFT_A4, &labels);
         let line = body_lines(&doc)[0];
         let c = kit();
         assert_eq!(
@@ -3190,7 +3191,7 @@ mod tests {
             "alpha    beta gamma".into(),
         )];
         let labels: Vec<String> = Vec::new();
-        let doc = document_layout(&blocks, &RUSSIAN, &labels);
+        let doc = document_layout(&blocks, &FINAL_DRAFT_A4, &labels);
         let scale = PT_PER_MM;
         let row_h = ROW_MM * scale;
         let cell_w = MM_PER_CELL * scale;
@@ -3306,7 +3307,7 @@ mod tests {
     fn tab_cycles_element_types_and_shift_tab_reverses() {
         let blocks = sample();
         let labels: Vec<String> = Vec::new();
-        let doc = document_layout(&blocks, &RUSSIAN, &labels);
+        let doc = document_layout(&blocks, &FINAL_DRAFT_A4, &labels);
         let sel = Some(Selection::caret(Pos {
             bi: 1,
             para: 0,
@@ -3352,7 +3353,7 @@ mod tests {
     fn shift_arrow_extends_selection_from_anchor() {
         let blocks = sample();
         let labels: Vec<String> = Vec::new();
-        let doc = document_layout(&blocks, &RUSSIAN, &labels);
+        let doc = document_layout(&blocks, &FINAL_DRAFT_A4, &labels);
         let sel = Some(Selection::caret(Pos {
             bi: 1,
             para: 0,
@@ -3391,7 +3392,7 @@ mod tests {
     fn command_arrows_move_to_line_and_document_edges() {
         let blocks = sample();
         let labels: Vec<String> = Vec::new();
-        let doc = document_layout(&blocks, &RUSSIAN, &labels);
+        let doc = document_layout(&blocks, &FINAL_DRAFT_A4, &labels);
         let caret = |bi, ch| Some(Selection::caret(Pos { bi, para: 0, ch }));
 
         let end = key_action(
@@ -3506,7 +3507,7 @@ mod tests {
     fn option_arrows_move_and_select_words() {
         let blocks = sample();
         let labels: Vec<String> = Vec::new();
-        let doc = document_layout(&blocks, &RUSSIAN, &labels);
+        let doc = document_layout(&blocks, &FINAL_DRAFT_A4, &labels);
         let caret = |ch| Some(Selection::caret(Pos { bi: 0, para: 0, ch }));
 
         // "INT. СТАЯ - ДЕН" → "INT" ends at 3, "СТАЯ" spans 5..9.
@@ -3615,7 +3616,7 @@ mod tests {
     fn command_and_option_delete_remove_whole_units() {
         let blocks = sample();
         let labels: Vec<String> = Vec::new();
-        let doc = document_layout(&blocks, &RUSSIAN, &labels);
+        let doc = document_layout(&blocks, &FINAL_DRAFT_A4, &labels);
         let caret = |ch| Some(Selection::caret(Pos { bi: 0, para: 0, ch }));
         let mut edited = blocks.clone();
         let action = key_action(

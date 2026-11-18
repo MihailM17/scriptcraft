@@ -21,13 +21,14 @@ const DIFF_FONT_SIZE: f32 = 12.5;
 /// Unchanged blocks kept above and below each change in changes-only mode.
 const CONTEXT_BLOCKS: usize = 2;
 
-/// Left columns match the Russian screenplay template. The right padding is
+/// Left columns match the default screenplay template. The right padding is
 /// reduced from the printed column width so diff text stays readable.
-const CUE_INDENT: f32 = scriptcraft_layout::RUSSIAN_GEOMETRY.cue_mm / scriptcraft_layout::TEXT_W_MM;
-const PAREN_INDENT: f32 =
-    scriptcraft_layout::RUSSIAN_GEOMETRY.paren_mm / scriptcraft_layout::TEXT_W_MM;
-const DIALOGUE_INDENT: f32 =
-    scriptcraft_layout::RUSSIAN_GEOMETRY.dialog_mm / scriptcraft_layout::TEXT_W_MM;
+const CUE_INDENT: f32 = scriptcraft_layout::FINAL_DRAFT_A4_GEOMETRY.cue_mm
+    / scriptcraft_layout::FINAL_DRAFT_A4_TEXT_W_MM;
+const PAREN_INDENT: f32 = scriptcraft_layout::FINAL_DRAFT_A4_GEOMETRY.paren_mm
+    / scriptcraft_layout::FINAL_DRAFT_A4_TEXT_W_MM;
+const DIALOGUE_INDENT: f32 = scriptcraft_layout::FINAL_DRAFT_A4_GEOMETRY.dialog_mm
+    / scriptcraft_layout::FINAL_DRAFT_A4_TEXT_W_MM;
 const PAREN_RIGHT: f32 = 0.12;
 const DIALOGUE_RIGHT: f32 = 0.10;
 
@@ -1698,9 +1699,9 @@ mod tests {
     fn indentation_follows_the_screenplay_template() {
         // Ratios, not arbitrary percentages: the same millimetre columns the
         // PDF/editor use for cue, parenthetical and dialogue.
-        assert!((CUE_INDENT - 67.5 / 147.5).abs() < 1e-6);
-        assert!((PAREN_INDENT - 55.0 / 147.5).abs() < 1e-6);
-        assert!((DIALOGUE_INDENT - 37.5 / 147.5).abs() < 1e-6);
+        assert!((CUE_INDENT - 51.0 / 155.0).abs() < 1e-6);
+        assert!((PAREN_INDENT - 36.0 / 155.0).abs() < 1e-6);
+        assert!((DIALOGUE_INDENT - 26.0 / 155.0).abs() < 1e-6);
 
         let mut changed = entry(DiffKind::Changed, 0, "INT. ROOM - DAY");
         changed.current = Some(ScriptBlock::new(ElementType::Character, "IVAN".into()));

@@ -1,19 +1,21 @@
 //! Omitted-scene layout: retain heading + number, print one OMITTED row, drop
 //! the body and keep production page labels stable around the omission.
 
-use scriptcraft_core::editing::{TemplateMetrics, RUSSIAN};
+use scriptcraft_core::editing::{TemplateMetrics, FINAL_DRAFT_A4};
 use scriptcraft_core::kitsp::Metadata;
 use scriptcraft_core::model::{ElementType, Project, ScriptBlock};
 use scriptcraft_core::page_lock::PageLock;
 use scriptcraft_layout::paginate::page_starts;
 use scriptcraft_layout::pdf::{layout_pages, ExportOptions};
-use scriptcraft_layout::place::{layout_document_view, layout_with_page_lock, RUSSIAN_GEOMETRY};
+use scriptcraft_layout::place::{
+    layout_document_view, layout_with_page_lock, FINAL_DRAFT_A4_GEOMETRY,
+};
 use scriptcraft_layout::LineRole;
 
 fn metrics() -> TemplateMetrics {
     TemplateMetrics {
         lines_per_page: 10,
-        ..RUSSIAN
+        ..FINAL_DRAFT_A4
     }
 }
 
@@ -60,7 +62,13 @@ fn heading_pages(doc: &scriptcraft_layout::place::DocLayout) -> Vec<(String, Opt
 fn omitted_body_disappears_and_prints_one_marker() {
     let mut p = script();
     let full_labels = labels(&p);
-    let full = layout_with_page_lock(&p.blocks, &metrics(), &RUSSIAN_GEOMETRY, &full_labels, None);
+    let full = layout_with_page_lock(
+        &p.blocks,
+        &metrics(),
+        &FINAL_DRAFT_A4_GEOMETRY,
+        &full_labels,
+        None,
+    );
     let id = p.scenes()[1].id;
     p.set_scene_omitted(id, true);
     let view = p.document_view();
@@ -68,7 +76,7 @@ fn omitted_body_disappears_and_prints_one_marker() {
         &view,
         &p.blocks,
         &metrics(),
-        &RUSSIAN_GEOMETRY,
+        &FINAL_DRAFT_A4_GEOMETRY,
         &full_labels,
         None,
     );
@@ -134,7 +142,13 @@ fn page_locks_survive_omission_and_keep_heading_numbers() {
     let full_labels = labels(&p);
     let starts = page_starts(&p.blocks, &m);
     let lock = PageLock::capture(&p.blocks, &starts);
-    let full = layout_with_page_lock(&p.blocks, &m, &RUSSIAN_GEOMETRY, &full_labels, Some(&lock));
+    let full = layout_with_page_lock(
+        &p.blocks,
+        &m,
+        &FINAL_DRAFT_A4_GEOMETRY,
+        &full_labels,
+        Some(&lock),
+    );
     let before = heading_pages(&full);
 
     let id = p.scenes()[1].id;
@@ -144,7 +158,7 @@ fn page_locks_survive_omission_and_keep_heading_numbers() {
         &view,
         &p.blocks,
         &m,
-        &RUSSIAN_GEOMETRY,
+        &FINAL_DRAFT_A4_GEOMETRY,
         &full_labels,
         Some(&lock),
     );
@@ -213,7 +227,7 @@ fn pdf_keeps_locked_heading_pages_across_omission() {
             ));
         }
     }
-    let starts = page_starts(&p.blocks, &RUSSIAN);
+    let starts = page_starts(&p.blocks, &FINAL_DRAFT_A4);
     let lock = PageLock::capture(&p.blocks, &starts);
     let (before, pages_before) = pdf_heading_pages(&p, &lock);
     assert!(pages_before >= 8, "the PDF must span several pages");

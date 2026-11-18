@@ -125,11 +125,11 @@ fn a95_exports_valid_pdf() {
 /// rows, texts, weights and horizontal anchors must be identical.
 #[test]
 fn a95_pdf_matches_editor_layout() {
-    use scriptcraft_core::editing::RUSSIAN;
+    use scriptcraft_core::editing::FINAL_DRAFT_A4;
     use scriptcraft_layout::pdf;
-    use scriptcraft_layout::place::{layout, RUSSIAN_GEOMETRY, TEXT_W_MM};
+    use scriptcraft_layout::place::{layout, FINAL_DRAFT_A4_GEOMETRY, FINAL_DRAFT_A4_TEXT_W_MM};
 
-    const ML: f32 = 37.5;
+    const ML: f32 = 38.0;
     const CELL: f32 = 2.54;
 
     let p = kitsp::load_file(FIXTURE).expect("fixture must load");
@@ -137,7 +137,12 @@ fn a95_pdf_matches_editor_layout() {
     let labels: Vec<String> = (0..p.scenes().len())
         .map(|i| format!("{}.", i + 1))
         .collect();
-    let editor = layout(&p.blocks, &RUSSIAN, &RUSSIAN_GEOMETRY, &labels);
+    let editor = layout(
+        &p.blocks,
+        &FINAL_DRAFT_A4,
+        &FINAL_DRAFT_A4_GEOMETRY,
+        &labels,
+    );
     let pages = pdf::layout_pages(&p, &meta, &pdf::ExportOptions::default());
 
     assert_eq!(editor.pages.len(), pages.len(), "page count");
@@ -165,7 +170,7 @@ fn a95_pdf_matches_editor_layout() {
                 if !line.text.is_empty() {
                     let w = line.text.chars().count() as f32 * CELL;
                     let left = if line.right_aligned {
-                        ML + TEXT_W_MM - w
+                        ML + FINAL_DRAFT_A4_TEXT_W_MM - w
                     } else {
                         line.x_mm
                     };

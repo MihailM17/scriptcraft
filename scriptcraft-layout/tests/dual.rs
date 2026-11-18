@@ -2,12 +2,14 @@
 //! pages with `(MORE)`/`(CONT'D)`, and the editor and PDF must produce the
 //! same lines in the same order.
 
-use scriptcraft_core::editing::RUSSIAN;
+use scriptcraft_core::editing::FINAL_DRAFT_A4;
 use scriptcraft_core::kitsp::Metadata;
 use scriptcraft_core::model::{DualMark, DualSide, ElementType, Project, ScriptBlock};
 use scriptcraft_layout::dual::{DUAL_COL_W_MM, DUAL_GAP_MM};
 use scriptcraft_layout::pdf::{layout_pages, ExportOptions};
-use scriptcraft_layout::{layout, paginate, relayout_from, DocLayout, LineRole, RUSSIAN_GEOMETRY};
+use scriptcraft_layout::{
+    layout, paginate, relayout_from, DocLayout, LineRole, FINAL_DRAFT_A4_GEOMETRY,
+};
 use uuid::Uuid;
 
 fn block(t: ElementType, text: impl Into<String>) -> ScriptBlock {
@@ -71,7 +73,7 @@ fn side_by_side_rows_align_and_pdf_matches_editor() {
     ];
     pair(&mut blocks, 2, 5);
 
-    let pages = paginate::paginate(&blocks, &RUSSIAN);
+    let pages = paginate::paginate(&blocks, &FINAL_DRAFT_A4);
     let dual_chunks: Vec<_> = pages
         .iter()
         .flat_map(|p| &p.chunks)
@@ -83,7 +85,12 @@ fn side_by_side_rows_align_and_pdf_matches_editor() {
     assert!(!dual_chunks[0].contd_left && !dual_chunks[0].contd_right);
     assert!(!dual_chunks[0].more_left && !dual_chunks[0].more_right);
 
-    let doc = layout(&blocks, &RUSSIAN, &RUSSIAN_GEOMETRY, &["1.".to_string()]);
+    let doc = layout(
+        &blocks,
+        &FINAL_DRAFT_A4,
+        &FINAL_DRAFT_A4_GEOMETRY,
+        &["1.".to_string()],
+    );
     let lines = doc.pages[0].lines.iter().collect::<Vec<_>>();
     let ada = lines.iter().find(|l| l.text == "ADA").expect("left cue");
     let grace = lines.iter().find(|l| l.text == "GRACE").expect("right cue");
@@ -129,7 +136,7 @@ fn side_by_side_rows_align_and_pdf_matches_editor() {
     let actual: Vec<_> = body
         .iter()
         .filter(|l| !l.is_page_number && l.x_mm >= 37.5)
-        .map(|l| (l.text.clone(), l.x_mm - 37.5))
+        .map(|l| (l.text.clone(), l.x_mm - 38.0))
         .collect();
     assert_eq!(actual.len(), expected.len(), "PDF line count");
     for ((atext, ax), (etext, ex)) in actual.iter().zip(&expected) {
@@ -150,9 +157,9 @@ fn long_dual_pair_splits_with_more_and_contd_then_drops_finished_column() {
     ];
     pair(&mut blocks, 1, 3);
 
-    let pages = paginate::paginate(&blocks, &RUSSIAN);
+    let pages = paginate::paginate(&blocks, &FINAL_DRAFT_A4);
     assert!(pages.len() >= 3, "long pair must span pages");
-    let doc = layout(&blocks, &RUSSIAN, &RUSSIAN_GEOMETRY, &[]);
+    let doc = layout(&blocks, &FINAL_DRAFT_A4, &FINAL_DRAFT_A4_GEOMETRY, &[]);
     assert_eq!(doc.pages.len(), pages.len());
 
     let mut next_row = 0usize;
@@ -233,7 +240,7 @@ fn long_dual_pair_splits_with_more_and_contd_then_drops_finished_column() {
         let actual: Vec<_> = pdf[pi]
             .iter()
             .filter(|l| !l.text.is_empty() && !l.is_page_number)
-            .map(|l| (l.text.clone(), l.x_mm - 37.5))
+            .map(|l| (l.text.clone(), l.x_mm - 38.0))
             .collect();
         assert_eq!(actual.len(), expected.len(), "page {} line count", pi + 1);
         for ((atext, ax), (etext, ex)) in actual.iter().zip(&expected) {
@@ -262,22 +269,22 @@ fn incremental_relayout_of_the_block_after_a_split_pair_keeps_the_pair() {
     ];
     pair(&mut blocks, 2, 4);
     let labels = vec!["1.".to_string()];
-    let old = layout(&blocks, &RUSSIAN, &RUSSIAN_GEOMETRY, &labels);
+    let old = layout(&blocks, &FINAL_DRAFT_A4, &FINAL_DRAFT_A4_GEOMETRY, &labels);
     assert!(old.pages.len() >= 3);
 
     let last = blocks.len() - 1;
     blocks[last].text = "Final action, now edited.".to_string();
     let incremental = relayout_from(
         &blocks,
-        &RUSSIAN,
-        &RUSSIAN_GEOMETRY,
+        &FINAL_DRAFT_A4,
+        &FINAL_DRAFT_A4_GEOMETRY,
         &labels,
         &old,
         last,
         Some(last),
     )
     .expect("relayout after the pair must resume");
-    let full = layout(&blocks, &RUSSIAN, &RUSSIAN_GEOMETRY, &labels);
+    let full = layout(&blocks, &FINAL_DRAFT_A4, &FINAL_DRAFT_A4_GEOMETRY, &labels);
     assert_eq!(incremental, full);
     assert!(
         incremental
@@ -308,20 +315,20 @@ fn incremental_relayout_matches_a_full_layout_of_a_dual_edit() {
     pair(&mut blocks, left, left + 2);
 
     let labels = vec!["1.".to_string()];
-    let old = layout(&blocks, &RUSSIAN, &RUSSIAN_GEOMETRY, &labels);
+    let old = layout(&blocks, &FINAL_DRAFT_A4, &FINAL_DRAFT_A4_GEOMETRY, &labels);
     assert!(old.pages.len() >= 3, "pair must reach a page boundary");
 
     blocks[right_line].text = format!("{}\nAn inserted right line.", paragraphs("дясно", 35));
     let incremental = relayout_from(
         &blocks,
-        &RUSSIAN,
-        &RUSSIAN_GEOMETRY,
+        &FINAL_DRAFT_A4,
+        &FINAL_DRAFT_A4_GEOMETRY,
         &labels,
         &old,
         right_line,
         Some(right_line),
     )
     .expect("dual edit can be relaid out incrementally");
-    let full = layout(&blocks, &RUSSIAN, &RUSSIAN_GEOMETRY, &labels);
+    let full = layout(&blocks, &FINAL_DRAFT_A4, &FINAL_DRAFT_A4_GEOMETRY, &labels);
     assert_eq!(incremental, full);
 }

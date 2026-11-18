@@ -28,6 +28,10 @@ const fn hex(c: u32) -> Color32 {
 pub struct KitColors {
     /// Panels (navigator, toolbar, status bar).
     pub window: Color32,
+    /// Content panels that sit on top of the chrome: the scene navigator
+    /// list and the element reference list. Defaults to the panel colour; the
+    /// KIT palettes override it with the white / grey content ink.
+    pub list_bg: Color32,
     /// Canvas behind the script pages.
     pub desk: Color32,
     pub page: Color32,
@@ -70,6 +74,7 @@ pub const RAIL_WIDTH: f32 = 82.0;
 
 pub const KIT_MIDNIGHT: KitColors = KitColors {
     window: hex(0x16181D),
+    list_bg: hex(0x16181D),
     desk: hex(0x0F1114),
     page: hex(0x20232A),
     page_edge: hex(0x2D313A),
@@ -99,6 +104,7 @@ pub const KIT_MIDNIGHT: KitColors = KitColors {
 
 pub const KIT_LIGHT: KitColors = KitColors {
     window: hex(0xF8F9FB),
+    list_bg: hex(0xF8F9FB),
     desk: hex(0xE9EBEF),
     page: hex(0xFFFFFF),
     page_edge: hex(0xDCDFE5),
@@ -144,6 +150,7 @@ pub const KIT_LIGHT: KitColors = KitColors {
 /// Catppuccin: Omarchy theme.
 pub const KIT_CATPPUCCIN: KitColors = KitColors {
     window: hex(0x1E1E2E),
+    list_bg: hex(0x1E1E2E),
     desk: hex(0x14141E),
     page: hex(0x28293A),
     page_edge: hex(0x46485B),
@@ -173,6 +180,7 @@ pub const KIT_CATPPUCCIN: KitColors = KitColors {
 /// Catppuccin Latte: Omarchy theme.
 pub const KIT_CATPPUCCIN_LATTE: KitColors = KitColors {
     window: hex(0xEFF1F5),
+    list_bg: hex(0xEFF1F5),
     desk: hex(0xDEE0E4),
     page: hex(0xF9F9FB),
     page_edge: hex(0xDBDBDD),
@@ -202,6 +210,7 @@ pub const KIT_CATPPUCCIN_LATTE: KitColors = KitColors {
 /// Ethereal: Omarchy theme.
 pub const KIT_ETHEREAL: KitColors = KitColors {
     window: hex(0x060B1E),
+    list_bg: hex(0x060B1E),
     desk: hex(0x040714),
     page: hex(0x151727),
     page_edge: hex(0x3F383F),
@@ -231,6 +240,7 @@ pub const KIT_ETHEREAL: KitColors = KitColors {
 /// Everforest: Omarchy theme.
 pub const KIT_EVERFOREST: KitColors = KitColors {
     window: hex(0x2D353B),
+    list_bg: hex(0x2D353B),
     desk: hex(0x1D2226),
     page: hex(0x373E42),
     page_edge: hex(0x535655),
@@ -260,6 +270,7 @@ pub const KIT_EVERFOREST: KitColors = KitColors {
 /// Flexoki Light: Omarchy theme.
 pub const KIT_FLEXOKI_LIGHT: KitColors = KitColors {
     window: hex(0xFFFCF0),
+    list_bg: hex(0xFFFCF0),
     desk: hex(0xEDEADF),
     page: hex(0xFFFEF9),
     page_edge: hex(0xE0E0DB),
@@ -289,6 +300,7 @@ pub const KIT_FLEXOKI_LIGHT: KitColors = KitColors {
 /// Gruvbox: Omarchy theme.
 pub const KIT_GRUVBOX: KitColors = KitColors {
     window: hex(0x282828),
+    list_bg: hex(0x282828),
     desk: hex(0x1A1A1A),
     page: hex(0x32312F),
     page_edge: hex(0x4F4A42),
@@ -318,6 +330,7 @@ pub const KIT_GRUVBOX: KitColors = KitColors {
 /// Hackerman: Omarchy theme.
 pub const KIT_HACKERMAN: KitColors = KitColors {
     window: hex(0x0B0C16),
+    list_bg: hex(0x0B0C16),
     desk: hex(0x07080E),
     page: hex(0x181A24),
     page_edge: hex(0x3B424B),
@@ -347,6 +360,7 @@ pub const KIT_HACKERMAN: KitColors = KitColors {
 /// Jade Horse: Omarchy theme.
 pub const KIT_JADE_HORSE: KitColors = KitColors {
     window: hex(0x142620),
+    list_bg: hex(0x142620),
     desk: hex(0x0D1915),
     page: hex(0x20322C),
     page_edge: hex(0x42544D),
@@ -376,6 +390,7 @@ pub const KIT_JADE_HORSE: KitColors = KitColors {
 /// Kanagawa: Omarchy theme.
 pub const KIT_KANAGAWA: KitColors = KitColors {
     window: hex(0x1F1F28),
+    list_bg: hex(0x1F1F28),
     desk: hex(0x14141A),
     page: hex(0x2A2A31),
     page_edge: hex(0x4A494A),
@@ -405,6 +420,7 @@ pub const KIT_KANAGAWA: KitColors = KitColors {
 /// Last Horizon: Omarchy theme.
 pub const KIT_LAST_HORIZON: KitColors = KitColors {
     window: hex(0x0C0B0C),
+    list_bg: hex(0x0C0B0C),
     desk: hex(0x080708),
     page: hex(0x1A191A),
     page_edge: hex(0x424242),
@@ -434,6 +450,7 @@ pub const KIT_LAST_HORIZON: KitColors = KitColors {
 /// Lumon: Omarchy theme.
 pub const KIT_LUMON: KitColors = KitColors {
     window: hex(0x16242D),
+    list_bg: hex(0x16242D),
     desk: hex(0x0E171D),
     page: hex(0x222F39),
     page_edge: hex(0x424F5A),
@@ -463,6 +480,7 @@ pub const KIT_LUMON: KitColors = KitColors {
 /// Lupine: Omarchy theme.
 pub const KIT_LUPINE: KitColors = KitColors {
     window: hex(0xFAFAFA),
+    list_bg: hex(0xFAFAFA),
     desk: hex(0xE8E8E8),
     page: hex(0xFDFDFD),
     page_edge: hex(0xDFDFDF),
@@ -492,6 +510,7 @@ pub const KIT_LUPINE: KitColors = KitColors {
 /// Matte Black: Omarchy theme.
 pub const KIT_MATTE_BLACK: KitColors = KitColors {
     window: hex(0x121212),
+    list_bg: hex(0x121212),
     desk: hex(0x0C0C0C),
     page: hex(0x1C1C1C),
     page_edge: hex(0x393939),
@@ -521,6 +540,7 @@ pub const KIT_MATTE_BLACK: KitColors = KitColors {
 /// Miasma: Omarchy theme.
 pub const KIT_MIASMA: KitColors = KitColors {
     window: hex(0x222222),
+    list_bg: hex(0x222222),
     desk: hex(0x161616),
     page: hex(0x2C2C2B),
     page_edge: hex(0x474743),
@@ -550,6 +570,7 @@ pub const KIT_MIASMA: KitColors = KitColors {
 /// Nord: Omarchy theme.
 pub const KIT_NORD: KitColors = KitColors {
     window: hex(0x2E3440),
+    list_bg: hex(0x2E3440),
     desk: hex(0x1E222A),
     page: hex(0x383E4A),
     page_edge: hex(0x555B67),
@@ -579,6 +600,7 @@ pub const KIT_NORD: KitColors = KitColors {
 /// Retro 82: Omarchy theme.
 pub const KIT_RETRO_82: KitColors = KitColors {
     window: hex(0x05182E),
+    list_bg: hex(0x05182E),
     desk: hex(0x03101E),
     page: hex(0x132436),
     page_edge: hex(0x3C454B),
@@ -608,6 +630,7 @@ pub const KIT_RETRO_82: KitColors = KitColors {
 /// Ristretto: Omarchy theme.
 pub const KIT_RISTRETTO: KitColors = KitColors {
     window: hex(0x2C2525),
+    list_bg: hex(0x2C2525),
     desk: hex(0x1D1818),
     page: hex(0x373030),
     page_edge: hex(0x564E4F),
@@ -637,6 +660,7 @@ pub const KIT_RISTRETTO: KitColors = KitColors {
 /// Rosé Pine: Omarchy theme.
 pub const KIT_ROSE_PINE: KitColors = KitColors {
     window: hex(0xFAF4ED),
+    list_bg: hex(0xFAF4ED),
     desk: hex(0xE8E3DC),
     page: hex(0xFDFBF8),
     page_edge: hex(0xDFDDDA),
@@ -666,6 +690,7 @@ pub const KIT_ROSE_PINE: KitColors = KitColors {
 /// Solitude: Omarchy theme.
 pub const KIT_SOLITUDE: KitColors = KitColors {
     window: hex(0x101315),
+    list_bg: hex(0x101315),
     desk: hex(0x0A0C0E),
     page: hex(0x1B1E20),
     page_edge: hex(0x3A3D3F),
@@ -695,6 +720,7 @@ pub const KIT_SOLITUDE: KitColors = KitColors {
 /// Starship: Omarchy theme.
 pub const KIT_STARSHIP: KitColors = KitColors {
     window: hex(0x1C1C1E),
+    list_bg: hex(0x1C1C1E),
     desk: hex(0x121214),
     page: hex(0x29292B),
     page_edge: hex(0x4E4E50),
@@ -724,6 +750,7 @@ pub const KIT_STARSHIP: KitColors = KitColors {
 /// Tokyo Night: Omarchy theme.
 pub const KIT_TOKYO_NIGHT: KitColors = KitColors {
     window: hex(0x1A1B26),
+    list_bg: hex(0x1A1B26),
     desk: hex(0x111219),
     page: hex(0x232431),
     page_edge: hex(0x3B3D4F),
@@ -753,6 +780,7 @@ pub const KIT_TOKYO_NIGHT: KitColors = KitColors {
 /// Vantablack: Omarchy theme.
 pub const KIT_VANTABLACK: KitColors = KitColors {
     window: hex(0x000000),
+    list_bg: hex(0x000000),
     desk: hex(0x000000),
     page: hex(0x0F0F0F),
     page_edge: hex(0x3A3A3A),
@@ -782,6 +810,7 @@ pub const KIT_VANTABLACK: KitColors = KitColors {
 /// White: Omarchy theme.
 pub const KIT_WHITE: KitColors = KitColors {
     window: hex(0xFFFFFF),
+    list_bg: hex(0xFFFFFF),
     desk: hex(0xEDEDED),
     page: hex(0xFFFFFF),
     page_edge: hex(0xE0E0E0),
@@ -812,6 +841,7 @@ pub const KIT_WHITE: KitColors = KitColors {
 /// Sepia: warm paper for daylight writing, burnt-orange ink accent.
 pub const KIT_SEPIA: KitColors = KitColors {
     window: hex(0xF4EDDF),
+    list_bg: hex(0xF4EDDF),
     desk: hex(0xE6DCC8),
     page: hex(0xFDF8EC),
     page_edge: hex(0xE3D8C2),
@@ -843,6 +873,7 @@ pub const KIT_SEPIA: KitColors = KitColors {
 /// and for anyone who needs maximum separation.
 pub const KIT_HIGH_CONTRAST: KitColors = KitColors {
     window: hex(0x000000),
+    list_bg: hex(0x000000),
     desk: hex(0x000000),
     page: hex(0x111111),
     page_edge: hex(0x3A3A3A),
@@ -884,65 +915,74 @@ pub const KIT_HIGH_CONTRAST: KitColors = KitColors {
 // ink from KIT; it stays out of the palette fields because scene numbers must
 // keep the theme's contrast floor.
 
-/// KIT Scenarist, light: near-white paper, black ink, warm-neutral chrome.
+/// KIT Scenarist, light: grey chrome (#e4e4e4) with white content ink, KIT
+/// blue (#2b78da) accent and Courier Prime's paper-white page (#fefefe).
+/// Every value here is the KIT Scenarist look sampled from its own editor and
+/// PDF export: the toolbar, module rail and panels are grey, the navigator
+/// list and the script page are white, and the one accent is the box-blue
+/// KIT uses for selections.
 pub const KIT_SCENARIST: KitColors = KitColors {
-    window: hex(0xFEFEFE),
-    desk: hex(0xEEEDEB),
+    window: hex(0xE4E4E4),
+    list_bg: hex(0xFFFFFF),
+    desk: hex(0xF2F2F2),
     page: hex(0xFEFEFE),
-    page_edge: hex(0xD8D6D2),
-    start_tab_active: hex(0xFEFEFE),
-    rail: hex(0xF7F6F4),
+    page_edge: hex(0xBDBEBF),
+    start_tab_active: hex(0xE4E4E4),
+    rail: hex(0xE4E4E4),
     text: hex(0x000000),
-    button: hex(0xF1F0EE),
-    button_hover: hex(0xE6E4E1),
+    button: hex(0xE4E4E4),
+    button_hover: hex(0xD6D6D6),
     base: hex(0xFFFFFF),
-    faint: hex(0xFFFFFF),
-    accent: hex(0x6F6A66),
-    disabled_text: hex(0x6F6C68),
-    stroke: hex(0xDEDCD9),
-    sep: hex(0xE5E3E0),
+    faint: hex(0xF6F6F6),
+    accent: hex(0x2B78DA),
+    disabled_text: hex(0x6B6B6B),
+    stroke: hex(0xBDBEBF),
+    sep: hex(0xD0D0D0),
     module_bg: hex(0xFEFEFE),
-    strip: hex(0xF4F3F1),
-    field_stroke: hex(0xCFCCC9),
-    hover_light: hex(0xF0EFED),
-    elt_bg: hex(0xF2F1EF),
-    elt_stroke: hex(0xDEDCD9),
+    strip: hex(0xE4E4E4),
+    field_stroke: hex(0xBDBEBF),
+    hover_light: hex(0xDCDCDC),
+    elt_bg: hex(0xEFEFEF),
+    elt_stroke: hex(0xBDBEBF),
     heading_text: hex(0x000000),
-    surface: hex(0xF7F6F4),
-    accent_soft: Color32::from_rgba_premultiplied(24, 23, 22, 56),
-    accent_text: hex(0x5A5551),
+    surface: hex(0xF6F6F6),
+    accent_soft: Color32::from_rgba_premultiplied(8, 24, 43, 50),
+    accent_text: hex(0x1E5FA8),
     spell_error: hex(0xC62F2F),
 };
 
-/// KIT Scenarist, dark: #3d3d3d background, #ebebeb text, purple folder accent
-/// (#9922cb). The purple is lifted to #c77cf0 for UI accents so it clears the
-/// 3:1 floor on the dark page; the folder colour itself is unchanged in KIT.
+/// KIT Scenarist, dark: grey chrome (#414244) with dark content ink, KIT
+/// blue (#2b78da) selections and the paper-dark page (#3d3d3d). The blue is
+/// lifted to #4c9aff for UI accents — on the dark page #2b78da only clears
+/// the 3:1 accent floor barely at best — while the selected row keeps the
+/// box-blue KIT paints.
 pub const KIT_SCENARIST_DARK: KitColors = KitColors {
-    window: hex(0x3D3D3D),
-    desk: hex(0x2E2E2E),
+    window: hex(0x414244),
+    list_bg: hex(0x404040),
+    desk: hex(0x404040),
     page: hex(0x3D3D3D),
-    page_edge: hex(0x555555),
-    start_tab_active: hex(0x3D3D3D),
-    rail: hex(0x353535),
+    page_edge: hex(0x26282A),
+    start_tab_active: hex(0x414244),
+    rail: hex(0x414244),
     text: hex(0xEBEBEB),
-    button: hex(0x4A4A4A),
-    button_hover: hex(0x555555),
-    base: hex(0x454545),
-    faint: hex(0x454545),
-    accent: hex(0xC77CF0),
-    disabled_text: hex(0xA8A8A8),
-    stroke: hex(0x4A4A4A),
-    sep: hex(0x454545),
-    module_bg: hex(0x414141),
-    strip: hex(0x383838),
-    field_stroke: hex(0x5A5A5A),
-    hover_light: hex(0x4D4D4D),
-    elt_bg: hex(0x454545),
-    elt_stroke: hex(0x555555),
+    button: hex(0x414244),
+    button_hover: hex(0x4D4F52),
+    base: hex(0x3D3D3D),
+    faint: hex(0x38393B),
+    accent: hex(0x4C9AFF),
+    disabled_text: hex(0xA3A4A6),
+    stroke: hex(0x696765),
+    sep: hex(0x2A2C2E),
+    module_bg: hex(0x3D3D3D),
+    strip: hex(0x38393B),
+    field_stroke: hex(0x696765),
+    hover_light: hex(0x4A4C4E),
+    elt_bg: hex(0x414244),
+    elt_stroke: hex(0x696765),
     heading_text: hex(0xEBEBEB),
-    surface: hex(0x454545),
-    accent_soft: Color32::from_rgba_premultiplied(47, 29, 56, 60),
-    accent_text: hex(0xD9A6F5),
+    surface: hex(0x414244),
+    accent_soft: Color32::from_rgba_premultiplied(19, 39, 64, 64),
+    accent_text: hex(0x8FC0F7),
     spell_error: hex(0xFF6B6B),
 };
 
@@ -1870,23 +1910,40 @@ mod tests {
         assert_eq!(Theme::ALL.len(), 29);
     }
 
-    /// KIT Scenarist's published colours: #fefefe/#000000 light,
-    /// #3d3d3d/#ebebeb dark, with the folder accent kept recognisable.
+    /// KIT Scenarist colours, sampled from the reference editor/PDF:
+    /// light chrome #e4e4e4, white content ink, KIT blue #2b78da accent;
+    /// dark chrome #414244, dark content ink, same blue accent.
     #[test]
     fn kit_scenarist_uses_the_published_colours() {
         let light = *Theme::KitScenarist.palette();
         assert!(Theme::KitScenarist.is_light());
         assert_eq!(light.page, Color32::from_rgb(0xFE, 0xFE, 0xFE));
         assert_eq!(light.text, Color32::BLACK);
-        assert_eq!(light.window, Color32::from_rgb(0xFE, 0xFE, 0xFE));
+        assert_eq!(light.window, Color32::from_rgb(0xE4, 0xE4, 0xE4));
+        assert_eq!(light.list_bg, Color32::from_rgb(0xFF, 0xFF, 0xFF));
+        assert_eq!(light.accent, Color32::from_rgb(0x2B, 0x78, 0xDA));
 
         let dark = *Theme::KitScenaristDark.palette();
         assert!(!Theme::KitScenaristDark.is_light());
         assert_eq!(dark.page, Color32::from_rgb(0x3D, 0x3D, 0x3D));
         assert_eq!(dark.text, Color32::from_rgb(0xEB, 0xEB, 0xEB));
-        assert_eq!(dark.window, Color32::from_rgb(0x3D, 0x3D, 0x3D));
-        // Folder purple #9922cb lifted for the accent floor.
-        assert!(dark.accent.b() > dark.accent.g() && dark.accent.r() > dark.accent.g());
+        assert_eq!(dark.window, Color32::from_rgb(0x41, 0x42, 0x44));
+        assert_eq!(dark.list_bg, Color32::from_rgb(0x40, 0x40, 0x40));
+        assert_eq!(dark.accent, Color32::from_rgb(0x4C, 0x9A, 0xFF));
+        // The lifted dark accent must clear the 3:1 floor on the dark page.
+        assert!(contrast(dark.accent, dark.page) >= 3.0);
+    }
+
+    /// KIT Scenarist keeps one accent across light and dark: the box blue
+    /// #2b78da sampled from the reference, lifted only inside the dark theme
+    /// so it clears the contrast floor on the dark page.
+    #[test]
+    fn kit_scenarist_accent_is_the_kit_box_blue() {
+        let light = *Theme::KitScenarist.palette();
+        assert_eq!(light.accent, Color32::from_rgb(0x2B, 0x78, 0xDA));
+        let dark = *Theme::KitScenaristDark.palette();
+        assert_eq!(dark.accent, Color32::from_rgb(0x4C, 0x9A, 0xFF));
+        assert!(contrast(light.accent, light.page) >= 3.0);
     }
 
     #[test]
@@ -1895,6 +1952,7 @@ mod tests {
             set_kit_theme(theme);
             assert_eq!(current_theme(), theme);
             assert_eq!(kit().window, theme.palette().window, "{}", theme.label());
+            assert_eq!(kit().list_bg, theme.palette().list_bg, "{}", theme.label());
             assert_eq!(kit_is_light(), theme.is_light(), "{}", theme.label());
         }
     }

@@ -1,12 +1,12 @@
 use crate::dual;
 use crate::paginate::{page_labels, paginate, paginate_with_breaks};
-use crate::place::{ROW_MM, RUSSIAN_GEOMETRY, TEXT_W_MM};
+use crate::place::{FINAL_DRAFT_A4_GEOMETRY, FINAL_DRAFT_A4_TEXT_W_MM, ROW_MM};
 use crate::wrap::wrap_lines;
 use printpdf::{
     Color, Greyscale, Line, LinePoint, Mm, Op, ParsedFont, PdfDocument, PdfFontHandle, PdfPage,
     PdfSaveOptions, Point, Pt, Rect as PdfRect, Rgb, TextItem, TextMatrix,
 };
-use scriptcraft_core::editing::{cue_name_for, RUSSIAN};
+use scriptcraft_core::editing::{cue_name_for, FINAL_DRAFT_A4};
 use scriptcraft_core::kitsp::Metadata;
 use scriptcraft_core::model::{ElementType, Project};
 use scriptcraft_core::page_lock::PageLock;
@@ -25,12 +25,14 @@ pub enum PdfError {
     NoRevisionPages,
 }
 
-/// A4 page geometry (mm) for KIT's Russian editor/export template:
-/// margins 37.5/25/25/25, 147.5mm text column (58 chars at 10cpi Courier).
+/// A4 page geometry (mm) for KIT's default template,
+/// `final_draft_a4.kitss`: margins 38/24/17/24, 155 mm text column (61 chars
+/// at 10 cpi Courier).
 const PAGE_W: f32 = 210.0;
 const PAGE_H: f32 = 297.0;
-const MARGIN_L: f32 = 37.5;
-const MARGIN_T: f32 = 25.0;
+const MARGIN_L: f32 = 38.0;
+const MARGIN_T: f32 = 24.0;
+const MARGIN_R: f32 = 17.0;
 const FONT_PT: f32 = 12.0;
 /// 0.6em advance at 12pt = 7.2pt = 2.54mm per column.
 const CHAR_MM: f32 = 2.54;
@@ -44,18 +46,18 @@ const DESCENT_MM: f32 = 700.0 / 2048.0 * 12.0 / 72.0 * 25.4;
 /// Baseline offset below the slot top under the top margin.
 const BASELINE_OFF: f32 = ASCENT_MM;
 /// Right edge of the text column.
-const TEXT_RIGHT: f32 = MARGIN_L + TEXT_W_MM;
-/// Block columns in from the left margin: character 67.5mm, parenthetical
-/// 55mm, dialogue 37.5mm — the editor's grid.
-const X_CUE: f32 = MARGIN_L + RUSSIAN_GEOMETRY.cue_mm;
-const X_PAREN: f32 = MARGIN_L + RUSSIAN_GEOMETRY.paren_mm;
-const X_DLG: f32 = MARGIN_L + RUSSIAN_GEOMETRY.dialog_mm;
+const TEXT_RIGHT: f32 = PAGE_W - MARGIN_R;
+/// Block columns in from the left margin: character 51 mm, parenthetical
+/// 36 mm, dialogue 26 mm — KIT's Final Draft template.
+const X_CUE: f32 = MARGIN_L + FINAL_DRAFT_A4_GEOMETRY.cue_mm;
+const X_PAREN: f32 = MARGIN_L + FINAL_DRAFT_A4_GEOMETRY.paren_mm;
+const X_DLG: f32 = MARGIN_L + FINAL_DRAFT_A4_GEOMETRY.dialog_mm;
 /// Baseline of the top-right page number: the editor bottom-aligns it 0.4
 /// rows above the first content row.
 const PAGE_NUM_BASELINE: f32 = MARGIN_T - 0.4 * PITCH_MM - DESCENT_MM;
 /// Scene numbers sit 4mm left of the text margin (measured from KIT).
-const SCENE_NUM_GAP: f32 = RUSSIAN_GEOMETRY.scene_num_gap_mm;
-/// Footer baseline, inside the 25 mm bottom margin.
+const SCENE_NUM_GAP: f32 = FINAL_DRAFT_A4_GEOMETRY.scene_num_gap_mm;
+/// Footer baseline, inside the 24 mm bottom margin.
 const FOOTER_BASELINE_MM: f32 = 12.0;
 /// Revision margin bars shared with the editor (mm from the page edge).
 pub const REVISION_BAR_X_MM: f32 = 10.0;
@@ -252,7 +254,7 @@ fn expand_margin_text(text: &str, latest: Option<&RevisionSet>, page: &str) -> S
 }
 
 fn fit_margin_text(text: String, reserved: usize) -> Option<String> {
-    let max = ((TEXT_W_MM / CHAR_MM) as usize).saturating_sub(reserved);
+    let max = ((FINAL_DRAFT_A4_TEXT_W_MM / CHAR_MM) as usize).saturating_sub(reserved);
     let text = text.trim().to_string();
     if text.is_empty() {
         return None;
@@ -390,9 +392,9 @@ pub fn layout_pages_with_marks_and_latest(
     };
     let breaks: Vec<(usize, usize)> = page_anchors.iter().map(|a| (a.bi, a.para)).collect();
     let pages = if page_lock.is_some() {
-        paginate_with_breaks(&renum, &RUSSIAN, &breaks)
+        paginate_with_breaks(&renum, &FINAL_DRAFT_A4, &breaks)
     } else {
-        paginate(&renum, &RUSSIAN)
+        paginate(&renum, &FINAL_DRAFT_A4)
     };
     let page_labels = if page_lock.is_some() {
         page_labels(&pages, &page_anchors)
@@ -436,7 +438,7 @@ pub fn layout_pages_with_marks_and_latest(
                 lines.push(PrintLine::blank());
             }
             if let Some(dual_chunk) = &chunk.dual {
-                let rows = dual::build_rows(&renum, dual_chunk.pair, &RUSSIAN);
+                let rows = dual::build_rows(&renum, dual_chunk.pair, &FINAL_DRAFT_A4);
                 if dual_chunk.contd_left || dual_chunk.contd_right {
                     for (right, cue_bi, contd) in [
                         (false, dual_chunk.pair.left, dual_chunk.contd_left),
@@ -450,7 +452,7 @@ pub fn layout_pages_with_marks_and_latest(
                             let mut line = PrintLine::text_line(
                                 MARGIN_L + dual::cue_x_mm(&text, right),
                                 text,
-                                true,
+                                false,
                             );
                             line.revision = revisions[cue_bi];
                             lines.push(line);
@@ -487,20 +489,22 @@ pub fn layout_pages_with_marks_and_latest(
             }
             let b = &renum[chunk.bi];
             let revision = revisions[chunk.bi];
-            let (x, bold) = match b.element_type {
-                ElementType::SceneHeading => (MARGIN_L, true),
-                ElementType::SceneCharacters => (MARGIN_L, false),
-                ElementType::Action | ElementType::Shot => (MARGIN_L, false),
-                ElementType::Character => (X_CUE, true),
-                ElementType::Parenthetical => (X_PAREN, false),
-                ElementType::Dialogue => (X_DLG, false),
-                ElementType::Lyrics => (X_DLG, false),
-                ElementType::Transition => (MARGIN_L, true),
-                ElementType::NonPrintable => (X_CUE, false),
+            // `final_draft_a4.kitss` sets bold="false" on every block;
+            // transitions are the only block aligned to the right edge.
+            let (x, bold, right_aligned) = match b.element_type {
+                ElementType::SceneHeading => (MARGIN_L, false, false),
+                ElementType::SceneCharacters => (MARGIN_L, false, false),
+                ElementType::Action | ElementType::Shot => (MARGIN_L, false, false),
+                ElementType::Character => (X_CUE, false, false),
+                ElementType::Parenthetical => (X_PAREN, false, false),
+                ElementType::Dialogue => (X_DLG, false, false),
+                ElementType::Lyrics => (X_DLG, false, false),
+                ElementType::Transition => (TEXT_RIGHT, false, true),
+                ElementType::NonPrintable => (X_CUE, false, false),
             };
             if chunk.contd {
                 if let Some(cue) = cue_name_for(&renum, chunk.bi) {
-                    let mut line = PrintLine::text_line(X_CUE, format!("{cue} (CONT'D)"), true);
+                    let mut line = PrintLine::text_line(X_CUE, format!("{cue} (CONT'D)"), false);
                     line.revision = revision;
                     lines.push(line);
                 }
@@ -514,7 +518,7 @@ pub fn layout_pages_with_marks_and_latest(
                 lines.push(PrintLine::text_line(
                     MARGIN_L - SCENE_NUM_GAP - w,
                     label,
-                    true,
+                    false,
                 ));
                 number_pushed = true;
             }
@@ -534,9 +538,10 @@ pub fn layout_pages_with_marks_and_latest(
                 }
             }
             // Same wrap budget as the paginator: identical line breaks.
-            let wrapped = wrap_lines(&text, RUSSIAN.col_chars(b.element_type));
+            let wrapped = wrap_lines(&text, FINAL_DRAFT_A4.col_chars(b.element_type));
             for (li, line) in wrapped.into_iter().enumerate() {
                 let mut l = PrintLine::text_line(x, line, bold);
+                l.right_aligned = right_aligned;
                 l.share_row = li == 0 && number_pushed;
                 l.revision = revision;
                 lines.push(l);
@@ -630,7 +635,7 @@ pub fn layout_title_page_with_latest(
             y_from_bottom_mm: None,
         }
     }
-    let max_chars = (TEXT_W_MM / CHAR_MM) as usize;
+    let max_chars = (FINAL_DRAFT_A4_TEXT_W_MM / CHAR_MM) as usize;
     let mut lines: Vec<PrintLine> = Vec::new();
     while lines.len() < 16 {
         lines.push(PrintLine::blank());
@@ -1267,7 +1272,7 @@ mod tests {
     #[test]
     fn layout_matches_pagination_line_budget() {
         let p = sample();
-        let pages = paginate(&p.blocks, &RUSSIAN);
+        let pages = paginate(&p.blocks, &FINAL_DRAFT_A4);
         let laid = layout_pages(&p, &Default::default(), &default_opts());
         assert_eq!(laid.len(), pages.len());
         // One printed row per budgeted row, plus out-of-band lines:
@@ -1285,7 +1290,7 @@ mod tests {
                     .take(c.end - c.start)
                     .collect::<Vec<_>>()
                     .join("\n");
-                rows += wrap_lines(&slice, RUSSIAN.col_chars(b.element_type))
+                rows += wrap_lines(&slice, FINAL_DRAFT_A4.col_chars(b.element_type))
                     .len()
                     .max(1);
                 if c.contd {
@@ -1295,7 +1300,7 @@ mod tests {
                     rows += 1;
                 }
             }
-            assert!(rows <= RUSSIAN.lines_per_page, "page {pi} overflow");
+            assert!(rows <= FINAL_DRAFT_A4.lines_per_page, "page {pi} overflow");
             let share = lines.iter().filter(|l| l.share_row).count();
             let banded = lines
                 .iter()
@@ -1318,25 +1323,25 @@ mod tests {
         let num = page.iter().position(|l| l.text == "1.").unwrap();
         let w = 2.0 * CHAR_MM;
         assert!((page[num].x_mm - (MARGIN_L - SCENE_NUM_GAP - w)).abs() < 0.01);
-        assert!(page[num].bold && !page[num].share_row);
+        assert!(!page[num].bold && !page[num].share_row);
         let head = &page[num + 1];
         assert_eq!(head.text, "EXT. PARK - DAY");
         assert_eq!(head.x_mm, MARGIN_L);
-        assert!(head.bold && head.share_row);
-        // Character cue at 37.5 + 67.5.
+        assert!(!head.bold && head.share_row);
+        // Character cue at 38 + 51.
         let cue = page.iter().find(|l| l.text == "IVAN").unwrap();
         assert!((cue.x_mm - X_CUE).abs() < 0.01);
-        assert!(cue.bold);
-        // Dialogue at 37.5 + 37.5.
+        assert!(!cue.bold);
+        // Dialogue at 38 + 26.
         let dlg = page.iter().find(|l| l.text.starts_with("Hello")).unwrap();
         assert!((dlg.x_mm - X_DLG).abs() < 0.01);
         assert!(!dlg.bold);
-        // Parenthetical at 37.5 + 55.
+        // Parenthetical at 38 + 36.
         let par = page.iter().find(|l| l.text == "(softly)").unwrap();
         assert!((par.x_mm - X_PAREN).abs() < 0.01);
-        // Transition keeps the editor's left-aligned bold style.
+        // Transitions are right-aligned, regular weight, like the template.
         let tr = page.iter().find(|l| l.text == "FADE OUT:").unwrap();
-        assert!(!tr.right_aligned && tr.bold);
+        assert!(tr.right_aligned && !tr.bold);
     }
 
     #[test]
@@ -1651,7 +1656,7 @@ mod tests {
                 format!("Original action {i}."),
             ));
         }
-        let starts = crate::paginate::page_starts(&p.blocks, &RUSSIAN);
+        let starts = crate::paginate::page_starts(&p.blocks, &FINAL_DRAFT_A4);
         assert!(starts.len() >= 2, "need at least two pages");
         let lock = PageLock::capture(&p.blocks, &starts);
         let meta = Metadata {

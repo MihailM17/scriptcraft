@@ -12,9 +12,11 @@ macOS, Windows and Linux.
 > stable block/scene identity, draft diff and compare, restore-as-copy, omitted
 > scenes, dual dialogue, title-page editor and revision summary (scene counts,
 > CSV and printable PDF). The page grid uses the standard 1/6-inch screenplay
-> leading and 58 lines on A4, matching KIT Scenarist's page count,
-> `.kitsp` saves preserve unknown sidecar rows, and CI runs runtime interaction
-> smoke on macOS/Linux/Windows. v0.8.6 keeps every typed space on the page,
+> leading and 58 lines on A4, and the editor preview plus the PDF export now
+> follow KIT Scenistar's `final_draft_a4.kitss` (A4 margins 38/24/17/24 mm, 155
+> mm text column, no bold, right-aligned transitions), so an exported PDF
+> matches the writer-facing KIT Scenarist page. `.kitsp` saves preserve unknown
+> sidecar rows, and CI runs runtime interaction smoke on macOS/Linux/Windows. v0.8.6 keeps every typed space on the page,
 > uses Courier New as the page face when the system has it (falling back to
 > IBM Plex Mono), adds
 > a monochrome-paper option directly under the theme picker, 29 theme palettes
@@ -30,9 +32,10 @@ macOS, Windows and Linux.
 > **v0.8.8 installs updates in place**: the update prompt downloads the
 > platform build, verifies the published SHA-256, replaces the app after it
 > quits and restarts it. The KIT Scenarist palette now uses KIT's published
-> light and dark colours, the page grid is the standard 1/6-inch leading, and
-> panics are written to `panic.log` so a crash can be reported without a
-> terminal.
+> light and dark colours, the page grid is the standard 1/6-inch leading, the
+> editor preview and the PDF export follow KIT Scenistar's Final Draft A4
+> template (no bold, right-aligned transitions), and panics are written to
+> `panic.log` so a crash can be reported without a terminal.
 > v0.8.5 corrected editor input: clicks and carets map through whitespace,
 > double-click selects a word, triple-click the paragraph, and drag selections
 > start at the press. v0.8.4 added live

@@ -3,10 +3,10 @@
 //! Run with `cargo bench -p scriptcraft-layout`.
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use scriptcraft_core::editing::RUSSIAN;
+use scriptcraft_core::editing::FINAL_DRAFT_A4;
 use scriptcraft_core::kitsp;
 use scriptcraft_layout::pdf::{self, ExportFonts, ExportOptions};
-use scriptcraft_layout::{layout, relayout_from, RUSSIAN_GEOMETRY};
+use scriptcraft_layout::{layout, relayout_from, FINAL_DRAFT_A4_GEOMETRY};
 use std::path::{Path, PathBuf};
 
 fn fixture() -> PathBuf {
@@ -31,18 +31,30 @@ fn benches(c: &mut Criterion) {
         .collect();
 
     c.bench_function("layout_a95", |b| {
-        b.iter(|| layout(&project.blocks, &RUSSIAN, &RUSSIAN_GEOMETRY, &labels))
+        b.iter(|| {
+            layout(
+                &project.blocks,
+                &FINAL_DRAFT_A4,
+                &FINAL_DRAFT_A4_GEOMETRY,
+                &labels,
+            )
+        })
     });
 
-    let laid_out = layout(&project.blocks, &RUSSIAN, &RUSSIAN_GEOMETRY, &labels);
+    let laid_out = layout(
+        &project.blocks,
+        &FINAL_DRAFT_A4,
+        &FINAL_DRAFT_A4_GEOMETRY,
+        &labels,
+    );
     let mut edited = project.blocks.clone();
     edited[10].text.push_str(" — revised");
     c.bench_function("relayout_one_block_a95", |b| {
         b.iter(|| {
             relayout_from(
                 &edited,
-                &RUSSIAN,
-                &RUSSIAN_GEOMETRY,
+                &FINAL_DRAFT_A4,
+                &FINAL_DRAFT_A4_GEOMETRY,
                 &labels,
                 &laid_out,
                 10,

@@ -9,9 +9,9 @@ use crate::wrap;
 use scriptcraft_core::editing::TemplateMetrics;
 use scriptcraft_core::model::{DualPair, ElementType, ScriptBlock};
 
-/// Width of one dual-dialogue column. Two columns plus [`DUAL_GAP_MM`] equal
-/// the 147.5 mm Russian text column.
-pub const DUAL_COL_W_MM: f32 = 67.5;
+/// Width of one dual-dialogue column. Two columns plus [`DUAL_GAP_MM`] fill
+/// the default template's 155 mm text column.
+pub const DUAL_COL_W_MM: f32 = (crate::place::FINAL_DRAFT_A4_TEXT_W_MM - DUAL_GAP_MM) / 2.0;
 /// Gap between the columns.
 pub const DUAL_GAP_MM: f32 = 12.5;
 /// Left inset of dialogue text inside its column.
@@ -103,7 +103,7 @@ fn column_lines(
             _ => (DIALOGUE_INSET_MM, false),
         };
         let cpl = (((DUAL_COL_W_MM - inset) / DUAL_MM_PER_CELL).floor() as usize).max(1);
-        let bold = block.element_type == ElementType::Character;
+        let bold = false;
         for (para, text) in block.text.split('\n').enumerate() {
             for line in wrap::wrap_paragraph(text, cpl) {
                 let x_mm = if block.element_type == ElementType::Character {

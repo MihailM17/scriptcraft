@@ -385,14 +385,16 @@ pub const FRAC_DIALOG_OFF: f32 = (1.0 - FRAC_DIALOG_W) / 2.0;
 pub const FRAC_LYRICS_OFF: f32 = 37.5 / 147.5;
 pub const FRAC_LYRICS_W: f32 = 110.0 / 147.5;
 
-/// Column width in characters (58 = full 147.5mm line at 10cpi Courier).
+/// Column width in characters for the default export template (61 = full
+/// 155 mm line at 10 cpi Courier).
 pub fn col_chars(t: ElementType) -> usize {
-    RUSSIAN.col_chars(t)
+    FINAL_DRAFT_A4.col_chars(t)
 }
 
-/// Blank lines before a block (template `top_space`; suppressed at page top).
+/// Blank lines before a block in the default template (suppressed at page
+/// top).
 pub fn top_space_lines(t: ElementType) -> usize {
-    RUSSIAN.top_space_lines(t)
+    FINAL_DRAFT_A4.top_space_lines(t)
 }
 
 /// Pagination metrics of one KIT `.kitss` template: column budgets in
@@ -693,11 +695,11 @@ mod tests {
     #[test]
     fn column_widths_match_template() {
         use ElementType::*;
-        assert_eq!(col_chars(SceneHeading), 58);
-        assert_eq!(col_chars(Character), 31);
-        assert_eq!(col_chars(Parenthetical), 18);
-        assert_eq!(col_chars(Dialogue), 28);
-        assert_eq!(col_chars(Lyrics), 43);
+        assert_eq!(col_chars(SceneHeading), 61);
+        assert_eq!(col_chars(Character), 38);
+        assert_eq!(col_chars(Parenthetical), 26);
+        assert_eq!(col_chars(Dialogue), 35);
+        assert_eq!(col_chars(Lyrics), 50);
     }
 
     #[test]

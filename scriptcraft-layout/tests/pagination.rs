@@ -11,10 +11,11 @@ fn a95_paginates_into_stable_pages() {
     use scriptcraft_core::model::ElementType;
     use scriptcraft_layout::paginate;
     let p = kitsp::load_file(FIXTURE).expect("fixture must load");
-    let pages = paginate::paginate(&p.blocks, &scriptcraft_core::editing::RUSSIAN);
-    // ~27 screenplay pages expected for ~4900 words.
+    let pages = paginate::paginate(&p.blocks, &scriptcraft_core::editing::FINAL_DRAFT_A4);
+    // ~19 screenplay pages expected for the fixture at the wider Final Draft
+    // column (61 characters per row, 38 mm left / 17 mm right margins).
     assert!(
-        (20..=35).contains(&pages.len()),
+        (15..=35).contains(&pages.len()),
         "unexpected page count {}",
         pages.len()
     );

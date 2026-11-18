@@ -6,9 +6,9 @@
 //! low-millisecond range for feature-length scripts.
 
 use scriptcraft_core::edit::{EditCommand, Pos};
-use scriptcraft_core::editing::RUSSIAN;
+use scriptcraft_core::editing::FINAL_DRAFT_A4;
 use scriptcraft_core::model::{ElementType, Project, ScriptBlock};
-use scriptcraft_layout::{layout, paginate, relayout_from, LineRole, RUSSIAN_GEOMETRY};
+use scriptcraft_layout::{layout, paginate, relayout_from, LineRole, FINAL_DRAFT_A4_GEOMETRY};
 use std::time::Instant;
 
 /// Deterministic feature-length script: uniform scenes of one heading plus a
@@ -43,11 +43,11 @@ fn feature_length_script_paginates_and_places() {
     let labels = labels(&blocks);
 
     let t0 = Instant::now();
-    let pages = paginate(&blocks, &RUSSIAN);
+    let pages = paginate(&blocks, &FINAL_DRAFT_A4);
     let t_paginate = t0.elapsed();
 
     let t1 = Instant::now();
-    let doc = layout(&blocks, &RUSSIAN, &RUSSIAN_GEOMETRY, &labels);
+    let doc = layout(&blocks, &FINAL_DRAFT_A4, &FINAL_DRAFT_A4_GEOMETRY, &labels);
     let t_layout = t1.elapsed();
 
     let lines: usize = doc.pages.iter().map(|p| p.lines.len()).sum();
@@ -64,8 +64,8 @@ fn feature_length_script_paginates_and_places() {
     );
 
     assert!(
-        (440..=480).contains(&pages.len()),
-        "expected ~460 pages, got {}",
+        (460..=540).contains(&pages.len()),
+        "expected ~500 pages, got {}",
         pages.len()
     );
     assert_eq!(doc.pages.len(), pages.len(), "place must keep the pages");
@@ -73,7 +73,7 @@ fn feature_length_script_paginates_and_places() {
     for (pi, page) in doc.pages.iter().enumerate() {
         for line in &page.lines {
             assert!(
-                line.row < RUSSIAN.lines_per_page,
+                line.row < FINAL_DRAFT_A4.lines_per_page,
                 "page {pi}: row {} overflows the grid",
                 line.row
             );
@@ -95,7 +95,7 @@ fn typing_in_a_big_script_relayouts_incrementally() {
     let mut blocks = big_script(1750);
     let labels = labels(&blocks);
     let t_full = Instant::now();
-    let mut doc = layout(&blocks, &RUSSIAN, &RUSSIAN_GEOMETRY, &labels);
+    let mut doc = layout(&blocks, &FINAL_DRAFT_A4, &FINAL_DRAFT_A4_GEOMETRY, &labels);
     let full = t_full.elapsed();
 
     // Pairs are (heading, action), so odd indices are the action blocks.
@@ -116,8 +116,8 @@ fn typing_in_a_big_script_relayouts_incrementally() {
         let t = Instant::now();
         let new = relayout_from(
             &blocks,
-            &RUSSIAN,
-            &RUSSIAN_GEOMETRY,
+            &FINAL_DRAFT_A4,
+            &FINAL_DRAFT_A4_GEOMETRY,
             &labels,
             &doc,
             bi,
@@ -149,7 +149,7 @@ fn typing_in_a_big_script_relayouts_incrementally() {
     eprintln!("working-copy clone: {clone_per:?} per input frame");
 
     // Correctness at scale: the incremental result must equal a full relayout.
-    let expect = layout(&blocks, &RUSSIAN, &RUSSIAN_GEOMETRY, &labels);
+    let expect = layout(&blocks, &FINAL_DRAFT_A4, &FINAL_DRAFT_A4_GEOMETRY, &labels);
     assert_eq!(doc, expect, "incremental layout drifted at scale");
     // And it must actually be incremental (a page or two, not the whole doc).
     assert!(

@@ -5,21 +5,25 @@ submodule). Studied for look-and-feel tokens only; all code is clean-room.
 
 ## Theme: Qt Fusion, dark
 
-From `UIConfigurator` dark-palette defaults:
+From `UIConfigurator` dark-palette defaults, resampled onto the KIT Scenarist
+palette (`KIT_SCENARIST_DARK`):
 
 | Role | Hex |
 |---|---|
-| Window / panels | `#26282a` |
-| Draft desk (recessed well) | `#1b1c1e` |
-| Page face | `#404040` (KIT dark Base) |
-| Module rail | `#1e2022`, active fill `#26282a` + 3px `#2b78da` bar |
+| Window / panels / module rail | `#414244` |
+| Draft desk (recessed well) | `#404040` |
+| Page face | `#3d3d3d` |
+| Module rail | `#414244`, active fill `#414244` + 3px `#4c9aff` bar |
 | Window text | `#ebebeb` |
-| Buttons | `#414244`, hover `#4c4e51` |
-| Input base | `#333537` (KIT `#404040`, deepened one step for contrast) |
-| Alt background | `#2e3033` |
-| Accent / selection | `#2b78da`, selected text `#ffffff` |
-| Disabled text | `#a1a1a1` |
-| Window border | `#1c2023`, separators `#3a3d40` |
+| Buttons | `#414244`, hover `#4d4f52` |
+| Input base | `#3d3d3d` |
+| Alt background | `#38393b` |
+| Accent / selection | `#4c9aff` (lifted from KIT's `#2b78da` for the 3:1 accent floor on the dark page), selected row keeps the box blue |
+| Disabled text | `#a3a4a6` |
+| Window border | `#2a2c2e`, separators `#2a2c2e` |
+
+KIT Scenarist (light) mirrors the same roles in grey chrome (`#e4e4e4` panels,
+`#ffffff` content, `#fefefe` page, `#2b78da` accent).
 
 Corners: 2px windows/menus, 3px widgets (Fusion is near-square).
 Mapped onto `egui::Visuals` in `kit_visuals()`.
@@ -34,27 +38,30 @@ proprietary and is not redistributable:
 |---|---|---|
 | UI (Roboto-spirit) | PT Sans Regular/Bold | humanist, Latin + Cyrillic (Roboto itself ships variable-only now) |
 | Script body | Courier Prime Regular | OFL; 0.6em advance, Latin + Cyrillic |
-| Script bold | Courier Prime Bold | headings, cues, transitions |
 | Script italic | Courier Prime Italic | lyrics labels |
 | Script safety net | IBM Plex Mono Regular/Bold | same 0.6em advance, alignment preserved |
 
-License texts: `scriptcraft-app/assets/fonts/licenses/`.
+The KIT template keeps every script block at the regular weight
+(`bold="false"`); bold survives only for page numbers.
 
-## Screenplay metrics (KIT `russian.kitss` template)
+## Screenplay metrics (KIT `final_draft_a4.kitss` template)
 
-Page A4, margins left 37.5 / top 25 / right 25 / bottom 12.5 mm
-→ text width 147.5mm. Courier Prime 12, uppercase headings/characters/transitions.
+Page A4, margins left 38 / top 24 / right 17 / bottom 24 mm
+→ text width 155mm. Courier Prime 12, uppercase headings/characters/transitions.
 
 | Block | Left margin | Right | Top space |
 |---|---|---|---|
-| scene_heading | 0 | 0 | 1 line |
+| scene_heading | 0 | 0 | 2 lines |
+| scene_characters | 0 | 0 | 0 |
 | action | 0 | 0 | 1 line |
-| character | 67.5mm (45.8%) | 0 | 1 line |
-| parenthetical | 55mm (37.3%) | 45mm | 0 |
-| dialog | 37.5mm (25.4%) | 37.5mm | 0 |
+| character | 51mm | 5.5mm | 1 line |
+| parenthetical | 36mm | 52mm | 0 |
+| dialog | 26mm | 40mm | 0 |
+| lyrics | 26mm | 0 | 0 |
 | transition | right-aligned | 0 | 1 line |
 
-Implemented as width fractions (`INDENT_*` in `main.rs`) so zoom stays exact.
+Implemented as millimetre columns (`FINAL_DRAFT_A4_GEOMETRY` in
+`scriptcraft-layout`) so zoom stays exact.
 
 ## Row height: standard 1/6 inch
 
@@ -68,13 +75,13 @@ bundled TTF; that build script is removed.)
 
 ## Fixed A4 pages (`editing::paginate`, 58 lines/page)
 
-A4 is 297 mm tall; KIT's top and bottom margins are 25 mm each, leaving 247 mm.
-floor(247 / 4.2333) = 58 rows. Pagination counts rows, and pixel geometry is
-built from the same pitch (including backwards from 58 chars/line), so render
-wrap points equal pagination wrap points at every zoom: zoom scales pages,
-never reflows them (Word-style). Headings and character cues are never
-stranded last on a page. Unit-tested, plus an A95 assertion (~20–35 pages,
-anchors safe).
+A4 is 297 mm tall; KIT's final-draft margins are 24 mm top and bottom, leaving
+249 mm. floor(249 / 4.2333) = 58 rows. Pagination counts rows, and pixel geometry
+is built from the same pitch (including backwards from 58 characters/line, the
+final-draft column being 155 mm ≈ 61 characters), so render wrap points equal
+pagination wrap points at every zoom: zoom scales pages, never reflows them
+(Word-style). Headings and character cues are never stranded last on a page.
+Unit-tested, plus an A95 assertion (~19–35 pages, anchors safe).
 
 ## Chronometry (calibrated on A95 vs KIT's own scene times)
 
