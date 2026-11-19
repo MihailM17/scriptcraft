@@ -36,11 +36,13 @@ Most screenwriting software treats the production phase as an afterthought or a 
 </div>
 
 <details>
-<summary><b>🚀 What's New in v0.8.13 (Click to expand)</b></summary>
+<summary><b>🚀 What's New in v0.8.14 (Click to expand)</b></summary>
 <br>
 
-* **Writer Palettes Legibility:** Re-tuned contrast, surface elevation and secondary label readability across the six writer themes (*Midnight Ink*, *Amber Projector*, *Noir Emerald*, *Velvet Curtain*, *Red Light*, and *Paper and Rust*).
-* **macOS Dock Icon Sizing:** Fixed an issue where the Dock icon visibly enlarged on launch by preserving native Apple HIG margins.
+* **Highlighted Button & Selection Contrast:** Fixed an issue where selected sidebar navigation items and active button chips blended into glowing backgrounds on the six writer themes (*Midnight Ink*, *Amber Projector*, *Noir Emerald*, *Velvet Curtain*, *Red Light*, and *Paper and Rust*). Re-calibrated `accent_soft` to true premultiplied alpha (yielding 5.6:1 – 7.4:1 WCAG AAA contrast).
+* **Automatic High-Contrast Accent Ink:** Solid primary buttons (`Save`, `Update`, `Start`) dynamically select dark or white ink based on the palette's accent luminance.
+* **macOS Dock Icon Native Rendering:** Fixed an issue where the Dock icon reverted to the default framework `"e"` logo when opening the bundled application. Bundled runs now bypass runtime image overrides, cleanly preserving the multi-resolution `ScriptCraft.icns` with native Apple HIG squircle geometry.
+* **Writer Palettes Legibility (v0.8.13):** Re-tuned contrast, surface elevation and secondary label readability across the six writer themes.
 * **Six New Writer Themes (v0.8.12):** Added *Midnight Ink*, *Amber Projector*, *Noir Emerald*, *Velvet Curtain*, *Red Light*, and *Paper and Rust*, expanding the palette picker to 35 contrast-tested themes.
 * **Liberation Mono Bundled:** Added metric-compatible 0.6 em monospace typeface supporting Latin, Greek, and Cyrillic out of the box.
 * **Lossless Interchange:** Import and export native `.fadein` archives (ZIP + OSF) with dual dialogue and notes, plus Markdown export for reviews and wikis.
