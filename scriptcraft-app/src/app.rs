@@ -42,25 +42,51 @@ pub(crate) fn italic_mono() -> egui::FontFamily {
 
 pub fn run() -> eframe::Result<()> {
     crate::panic_log::install();
-    // The bundled PNG is the macOS artwork with its generous transparent
-    // margin; `ScriptCraft-app.png` is the same art cropped to a thin margin,
-    // which is what Windows taskbars and Linux launchers expect.
-    let app_icon =
-        eframe::icon_data::from_png_bytes(include_bytes!("../assets/ScriptCraft-app.png"))
-            .unwrap_or_default();
     let viewport_builder = egui::ViewportBuilder::default()
         .with_inner_size([1360.0, 880.0])
-        .with_maximized(true)
-        .with_icon(app_icon);
+        .with_maximized(true);
+
     // macOS: draw the toolbar behind a transparent native titlebar so the
     // app's dark surface continues to the window edge while the traffic
     // lights stay native (macOS owns their size and color).
     #[cfg(target_os = "macos")]
-    let viewport_builder = viewport_builder
-        .with_fullsize_content_view(true)
-        .with_titlebar_shown(false)
-        .with_title_shown(false)
-        .with_titlebar_buttons_shown(true);
+    let viewport_builder = {
+        let is_bundled = std::env::current_exe()
+            .map(|p| p.to_string_lossy().contains(".app/Contents/MacOS"))
+            .unwrap_or(false);
+
+        let mut vb = viewport_builder
+            .with_fullsize_content_view(true)
+            .with_titlebar_shown(false)
+            .with_title_shown(false)
+            .with_titlebar_buttons_shown(true);
+
+        // In a macOS .app bundle, macOS already loads `ScriptCraft.icns` from
+        // `Contents/Resources/` with Apple HIG standard margins (824px squircle).
+        // Calling `with_icon` causes winit to set `NSApp.applicationIconImage`,
+        // which overrides the bundle ICNS and causes the Dock icon to enlarge/jump.
+        // For unbundled development runs (`cargo run`), we set the HIG-compliant
+        // `ScriptCraft-1024.png` so the Dock icon stays at standard size.
+        if !is_bundled {
+            let app_icon = eframe::icon_data::from_png_bytes(include_bytes!(
+                "../assets/ScriptCraft-1024.png"
+            ))
+            .unwrap_or_default();
+            vb = vb.with_icon(app_icon);
+        }
+        vb
+    };
+
+    #[cfg(not(target_os = "macos"))]
+    let viewport_builder = {
+        // Windows taskbars and Linux launchers expect artwork cropped to a
+        // thin margin (`ScriptCraft-app.png`) so it fills the tile cleanly.
+        let app_icon = eframe::icon_data::from_png_bytes(include_bytes!(
+            "../assets/ScriptCraft-app.png"
+        ))
+        .unwrap_or_default();
+        viewport_builder.with_icon(app_icon)
+    };
     let options = eframe::NativeOptions {
         viewport: viewport_builder,
         ..Default::default()
