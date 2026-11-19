@@ -68,10 +68,9 @@ pub fn run() -> eframe::Result<()> {
         // For unbundled development runs (`cargo run`), we set the HIG-compliant
         // `ScriptCraft-1024.png` so the Dock icon stays at standard size.
         if !is_bundled {
-            let app_icon = eframe::icon_data::from_png_bytes(include_bytes!(
-                "../assets/ScriptCraft-1024.png"
-            ))
-            .unwrap_or_default();
+            let app_icon =
+                eframe::icon_data::from_png_bytes(include_bytes!("../assets/ScriptCraft-1024.png"))
+                    .unwrap_or_default();
             vb = vb.with_icon(app_icon);
         }
         vb
@@ -81,10 +80,9 @@ pub fn run() -> eframe::Result<()> {
     let viewport_builder = {
         // Windows taskbars and Linux launchers expect artwork cropped to a
         // thin margin (`ScriptCraft-app.png`) so it fills the tile cleanly.
-        let app_icon = eframe::icon_data::from_png_bytes(include_bytes!(
-            "../assets/ScriptCraft-app.png"
-        ))
-        .unwrap_or_default();
+        let app_icon =
+            eframe::icon_data::from_png_bytes(include_bytes!("../assets/ScriptCraft-app.png"))
+                .unwrap_or_default();
         viewport_builder.with_icon(app_icon)
     };
     let options = eframe::NativeOptions {

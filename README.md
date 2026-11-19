@@ -36,10 +36,12 @@ Most screenwriting software treats the production phase as an afterthought or a 
 </div>
 
 <details>
-<summary><b>🚀 What's New in v0.8.12 (Click to expand)</b></summary>
+<summary><b>🚀 What's New in v0.8.13 (Click to expand)</b></summary>
 <br>
 
-* **Six New Writer Themes:** Added *Midnight Ink*, *Amber Projector*, *Noir Emerald*, *Velvet Curtain*, *Red Light*, and *Paper and Rust*, expanding the palette picker to 35 contrast-tested themes.
+* **Writer Palettes Legibility:** Re-tuned contrast, surface elevation and secondary label readability across the six writer themes (*Midnight Ink*, *Amber Projector*, *Noir Emerald*, *Velvet Curtain*, *Red Light*, and *Paper and Rust*).
+* **macOS Dock Icon Sizing:** Fixed an issue where the Dock icon visibly enlarged on launch by preserving native Apple HIG margins.
+* **Six New Writer Themes (v0.8.12):** Added *Midnight Ink*, *Amber Projector*, *Noir Emerald*, *Velvet Curtain*, *Red Light*, and *Paper and Rust*, expanding the palette picker to 35 contrast-tested themes.
 * **Liberation Mono Bundled:** Added metric-compatible 0.6 em monospace typeface supporting Latin, Greek, and Cyrillic out of the box.
 * **Lossless Interchange:** Import and export native `.fadein` archives (ZIP + OSF) with dual dialogue and notes, plus Markdown export for reviews and wikis.
 * **Exact A4 Grid:** Uses the industry-standard 1/6-inch leading (58 lines on A4) matching KIT Scenarist's `final_draft_a4.kitss` (no bold body, right-aligned transitions).
