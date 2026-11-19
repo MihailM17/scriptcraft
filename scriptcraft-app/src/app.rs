@@ -55,25 +55,26 @@ pub fn run() -> eframe::Result<()> {
             .map(|p| p.to_string_lossy().contains(".app/Contents/MacOS"))
             .unwrap_or(false);
 
-        let mut vb = viewport_builder
+        let app_icon = if is_bundled {
+            // In a macOS .app bundle, macOS already loads `ScriptCraft.icns` from
+            // `Contents/Resources/` with Apple HIG standard margins (824px squircle).
+            // Setting `IconData::default()` explicitly tells eframe NOT to inject
+            // its fallback "e" logo and NOT to call `NSApp.setApplicationIconImage`,
+            // leaving macOS's native multi-resolution Dock icon completely untouched.
+            egui::IconData::default()
+        } else {
+            // For unbundled development runs (`cargo run`), we set the HIG-compliant
+            // `ScriptCraft-1024.png` so the Dock icon stays at standard size.
+            eframe::icon_data::from_png_bytes(include_bytes!("../assets/ScriptCraft-1024.png"))
+                .unwrap_or_default()
+        };
+
+        viewport_builder
             .with_fullsize_content_view(true)
             .with_titlebar_shown(false)
             .with_title_shown(false)
-            .with_titlebar_buttons_shown(true);
-
-        // In a macOS .app bundle, macOS already loads `ScriptCraft.icns` from
-        // `Contents/Resources/` with Apple HIG standard margins (824px squircle).
-        // Calling `with_icon` causes winit to set `NSApp.applicationIconImage`,
-        // which overrides the bundle ICNS and causes the Dock icon to enlarge/jump.
-        // For unbundled development runs (`cargo run`), we set the HIG-compliant
-        // `ScriptCraft-1024.png` so the Dock icon stays at standard size.
-        if !is_bundled {
-            let app_icon =
-                eframe::icon_data::from_png_bytes(include_bytes!("../assets/ScriptCraft-1024.png"))
-                    .unwrap_or_default();
-            vb = vb.with_icon(app_icon);
-        }
-        vb
+            .with_titlebar_buttons_shown(true)
+            .with_icon(app_icon)
     };
 
     #[cfg(not(target_os = "macos"))]
@@ -414,11 +415,13 @@ fn fmt_button(ui: &mut egui::Ui, label: &str, active: bool) -> bool {
     let (rect, resp) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 30.0), egui::Sense::click());
     let (bg, fg, muted) = if active {
-        (
-            c.accent,
-            egui::Color32::WHITE,
-            egui::Color32::from_white_alpha(170),
-        )
+        let text_ink = crate::theme::ink_on_accent(c.accent);
+        let muted_ink = if text_ink == egui::Color32::WHITE {
+            egui::Color32::from_white_alpha(170)
+        } else {
+            egui::Color32::from_black_alpha(170)
+        };
+        (c.accent, text_ink, muted_ink)
     } else if resp.hovered() {
         (c.button_hover, c.text, c.disabled_text)
     } else {
@@ -973,7 +976,7 @@ impl ScriptCraftApp {
                     egui::Button::new(
                         egui::RichText::new("Save")
                             .strong()
-                            .color(egui::Color32::WHITE),
+                            .color(crate::theme::ink_on_accent(kit().accent)),
                     )
                     .fill(kit().accent),
                 );
@@ -1169,7 +1172,7 @@ impl ScriptCraftApp {
                             egui::Button::new(
                                 egui::RichText::new(label)
                                     .strong()
-                                    .color(egui::Color32::WHITE),
+                                    .color(crate::theme::ink_on_accent(kit().accent)),
                             )
                             .fill(kit().accent),
                         );
@@ -4817,7 +4820,7 @@ fn start_button_styled(
         } else {
             c.accent
         };
-        (f, egui::Color32::WHITE)
+        (f, crate::theme::ink_on_accent(f))
     } else {
         (button_fill(&resp), c.text)
     };

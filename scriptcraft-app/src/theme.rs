@@ -982,7 +982,7 @@ pub const KIT_SCENARIST_DARK: KitColors = KitColors {
     heading_text: hex(0xEBEBEB),
     surface: hex(0x414244),
     accent_soft: Color32::from_rgba_premultiplied(19, 39, 64, 64),
-    accent_text: hex(0x8FC0F7),
+    accent_text: hex(0xA8D4FF),
     spell_error: hex(0xFF6B6B),
 };
 
@@ -1017,7 +1017,7 @@ pub const KIT_MIDNIGHT_INK: KitColors = KitColors {
     elt_stroke: hex(0x2A3448),
     heading_text: hex(0xF4F6FB),
     surface: hex(0x181E2A),
-    accent_soft: Color32::from_rgba_premultiplied(91, 140, 255, 51),
+    accent_soft: Color32::from_rgba_premultiplied(20, 31, 56, 56),
     accent_text: hex(0xA6C5FF),
     spell_error: hex(0xFF6B6B),
 };
@@ -1048,7 +1048,7 @@ pub const KIT_AMBER_PROJECTOR: KitColors = KitColors {
     elt_stroke: hex(0x362C23),
     heading_text: hex(0xFFF8F0),
     surface: hex(0x201B16),
-    accent_soft: Color32::from_rgba_premultiplied(242, 165, 65, 51),
+    accent_soft: Color32::from_rgba_premultiplied(53, 36, 14, 56),
     accent_text: hex(0xFFC67A),
     spell_error: hex(0xFF6B6B),
 };
@@ -1079,7 +1079,7 @@ pub const KIT_NOIR_EMERALD: KitColors = KitColors {
     elt_stroke: hex(0x263D35),
     heading_text: hex(0xF0F8F5),
     surface: hex(0x14201C),
-    accent_soft: Color32::from_rgba_premultiplied(61, 219, 164, 51),
+    accent_soft: Color32::from_rgba_premultiplied(13, 48, 36, 56),
     accent_text: hex(0x83F0C7),
     spell_error: hex(0xFF6B6B),
 };
@@ -1110,7 +1110,7 @@ pub const KIT_VELVET_CURTAIN: KitColors = KitColors {
     elt_stroke: hex(0x37263F),
     heading_text: hex(0xFCF5FF),
     surface: hex(0x1E1523),
-    accent_soft: Color32::from_rgba_premultiplied(229, 86, 109, 51),
+    accent_soft: Color32::from_rgba_premultiplied(50, 19, 24, 56),
     accent_text: hex(0xFFA8B6),
     spell_error: hex(0xFF6B6B),
 };
@@ -1141,7 +1141,7 @@ pub const KIT_REDLIGHT: KitColors = KitColors {
     elt_stroke: hex(0x32323A),
     heading_text: hex(0xFFFFFF),
     surface: hex(0x1C1C20),
-    accent_soft: Color32::from_rgba_premultiplied(255, 90, 79, 51),
+    accent_soft: Color32::from_rgba_premultiplied(56, 20, 17, 56),
     accent_text: hex(0xFFA199),
     spell_error: hex(0xFF6B6B),
 };
@@ -1172,7 +1172,7 @@ pub const KIT_PAPER_RUST: KitColors = KitColors {
     elt_stroke: hex(0xC7BDAB),
     heading_text: hex(0x0F0C09),
     surface: hex(0xF4EFE7),
-    accent_soft: Color32::from_rgba_premultiplied(181, 77, 34, 51),
+    accent_soft: Color32::from_rgba_premultiplied(28, 12, 5, 40),
     accent_text: hex(0x8C3714),
     spell_error: hex(0xC62F2F),
 };
@@ -1647,6 +1647,50 @@ pub fn apply_theme(ctx: &egui::Context) {
 
 // ---- helpers ---------------------------------------------------------------
 
+/// sRGB channel → linear light, per WCAG 2.1.
+pub fn linear_channel(c: u8) -> f32 {
+    let s = c as f32 / 255.0;
+    if s <= 0.04045 {
+        s / 12.92
+    } else {
+        ((s + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+/// Relative luminance of an sRGB color per WCAG 2.1.
+pub fn luminance(c: Color32) -> f32 {
+    0.2126 * linear_channel(c.r()) + 0.7152 * linear_channel(c.g()) + 0.0722 * linear_channel(c.b())
+}
+
+/// WCAG 2.1 contrast ratio between two colors (1.0 to 21.0).
+pub fn contrast(a: Color32, b: Color32) -> f32 {
+    let (la, lb) = (luminance(a), luminance(b));
+    let (hi, lo) = if la >= lb { (la, lb) } else { (lb, la) };
+    (hi + 0.05) / (lo + 0.05)
+}
+
+/// Composite a translucent foreground (`Color32` with premultiplied alpha)
+/// over an opaque background.
+pub fn over(fg: Color32, bg: Color32) -> Color32 {
+    let inv = 1.0 - fg.a() as f32 / 255.0;
+    let mix = |f: u8, b: u8| (f as f32 + b as f32 * inv).round().clamp(0.0, 255.0) as u8;
+    Color32::from_rgb(
+        mix(fg.r(), bg.r()),
+        mix(fg.g(), bg.g()),
+        mix(fg.b(), bg.b()),
+    )
+}
+
+/// Foreground text/icon ink (dark or light) that provides high contrast
+/// on an accent background.
+pub fn ink_on_accent(accent: Color32) -> Color32 {
+    if contrast(accent, Color32::WHITE) >= 4.5 {
+        Color32::WHITE
+    } else {
+        Color32::from_rgb(0x0E, 0x12, 0x17)
+    }
+}
+
 /// Fill for a flat button: rest / hover / pressed.
 pub fn button_fill(resp: &Response) -> Color32 {
     let c = kit();
@@ -2027,38 +2071,6 @@ pub fn project_card(ui: &mut Ui, name: &str, path: &str, when: &str) -> ProjectC
 mod tests {
     use super::*;
 
-    /// sRGB channel → linear light, per WCAG 2.1.
-    fn linear(c: u8) -> f32 {
-        let s = c as f32 / 255.0;
-        if s <= 0.04045 {
-            s / 12.92
-        } else {
-            ((s + 0.055) / 1.055).powf(2.4)
-        }
-    }
-
-    fn luminance(c: Color32) -> f32 {
-        0.2126 * linear(c.r()) + 0.7152 * linear(c.g()) + 0.0722 * linear(c.b())
-    }
-
-    fn contrast(a: Color32, b: Color32) -> f32 {
-        let (la, lb) = (luminance(a), luminance(b));
-        let (hi, lo) = if la >= lb { (la, lb) } else { (lb, la) };
-        (hi + 0.05) / (lo + 0.05)
-    }
-
-    /// `Color32` is premultiplied, so compositing a translucent foreground
-    /// means adding the background scaled by the remaining opacity.
-    fn over(fg: Color32, bg: Color32) -> Color32 {
-        let inv = 1.0 - fg.a() as f32 / 255.0;
-        let mix = |f: u8, b: u8| (f as f32 + b as f32 * inv).round().clamp(0.0, 255.0) as u8;
-        Color32::from_rgb(
-            mix(fg.r(), bg.r()),
-            mix(fg.g(), bg.g()),
-            mix(fg.b(), bg.b()),
-        )
-    }
-
     #[test]
     fn theme_keys_round_trip() {
         for theme in Theme::ALL {
@@ -2228,6 +2240,22 @@ mod tests {
             assert!(
                 accent_text >= 4.5,
                 "{name}: accent text is {accent_text:.2}:1 on the page"
+            );
+            // accent_soft must be valid premultiplied alpha (channels <= alpha).
+            assert!(
+                c.accent_soft.r() <= c.accent_soft.a()
+                    && c.accent_soft.g() <= c.accent_soft.a()
+                    && c.accent_soft.b() <= c.accent_soft.a(),
+                "{name}: accent_soft ({:?}) must be valid premultiplied alpha",
+                c.accent_soft
+            );
+            // Selected rows/chips: accent_text must clear 4.5:1 on accent_soft blended over surface.
+            let soft_surface = over(c.accent_soft, c.surface);
+            let chip = contrast(c.accent_text, soft_surface);
+            assert!(
+                chip >= 4.5,
+                "{name}: accent text ({:?}) must be at least 4.5:1 on selected rows (got {chip:.2}:1 on {soft_surface:?})",
+                c.accent_text
             );
             assert_ne!(
                 c.page, c.desk,
