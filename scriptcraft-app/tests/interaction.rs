@@ -413,6 +413,21 @@ fn settings_script_font_switches_the_page_face() {
         "the requested face must be the one installed, even when the OS lacks \
          the file; the drawing family falls back inside the font list"
     );
+
+    // Liberation Mono is bundled and must apply like the other faces.
+    h.get_all_by_role(egui::accesskit::Role::ComboBox)
+        .filter(|n| !n.accesskit_node().is_disabled())
+        .nth(1)
+        .expect("the page-face chooser must still be the second combo box")
+        .click();
+    h.run();
+    h.get_by_label("Liberation Mono (Latin + Cyrillic)").click();
+    h.run();
+    assert_eq!(
+        h.state().script_face_for_test(),
+        (ScriptFace::LiberationMono, Some(ScriptFace::LiberationMono)),
+        "choosing Liberation Mono must apply and install it"
+    );
 }
 
 /// Every script face exports a real PDF. Courier New is read from the OS at

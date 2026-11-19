@@ -21,17 +21,18 @@ Status legend: `[ ]` to do `[-]` in progress `[x]` done `[!]` blocked
 | Date | 2026-11-19 |
 | Project | ScriptCraft — free, open-source, revision-first screenwriting studio |
 | Repo | `/Users/mihailmihaylov/Documents/Dev_work/scriptcraft` |
-| Branch / commit | `main` at **v0.8.10** (released 2026-11-19); tags `v0.7.0` at `9ce2e0e`, `v0.7.1` at `d8b17de`, `v0.7.2` at `8b75f9a`, `v0.8.0` at `0052bba`, `v0.8.1` at `0fa598e`, `v0.8.2` at `6bf1983`, `v0.8.3` at `69c0329`, `v0.8.4` at `b178e00`, `v0.8.5` at `a9394bc`, `v0.8.6` at `cf48880`, `v0.8.7` at `8ea4437`, `v0.8.8` at `bbf90bd`, `v0.8.9` at `ba5458b`, `v0.8.10` at this release. |
+| Branch / commit | `main` at **v0.8.11** (released 2026-11-19); tags `v0.7.0` at `9ce2e0e`, `v0.7.1` at `d8b17de`, `v0.7.2` at `8b75f9a`, `v0.8.0` at `0052bba`, `v0.8.1` at `0fa598e`, `v0.8.2` at `6bf1983`, `v0.8.3` at `69c0329`, `v0.8.4` at `b178e00`, `v0.8.5` at `a9394bc`, `v0.8.6` at `cf48880`, `v0.8.7` at `8ea4437`, `v0.8.8` at `bbf90bd`, `v0.8.9` at `ba5458b`, `v0.8.10` at `2363789`, `v0.8.11` at this release. |
 | Rust workspace | `scriptcraft-core`, `scriptcraft-app`, `scriptcraft-layout` (`Cargo.toml`, resolver 2) |
-| App crate version | `scriptcraft-app 0.8.10` (released 2026-11-19); `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
+| App crate version | `scriptcraft-app 0.8.11` (released 2026-11-19); `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
 | Distribution | **v0.8.10 released** — <https://github.com/MihailM17/scriptcraft/releases/tag/v0.8.10>. Assets (unsigned/ad-hoc macOS, not notarised): `ScriptCraft-0.8.10-macos-arm64.dmg` 10,081,910 B sha256 `f3ebb5d3dc151c44a7ddbbd66fc647ed9a22eee83e1d38163a34cf861dfbd559`, `ScriptCraft-0.8.10-windows-x64.zip` 8,294,214 B sha256 `c0fdacbbca7f65eee441a80e0496cf10efe58e265855e1d686263aa91acb43d7`, `ScriptCraft-0.8.10-linux-x86_64.tar.gz` 12,528,011 B sha256 `fc201780f2c4bc932bec2c769d9c45afdc94206506b11311c5b4f13d5b77c2ba`, each with `.sha256`. Website: <https://mihailm17.github.io/scriptcraft/>. v0.8.9 remains published with a correction notice. |
 | Current one-liner | Free, open-source, revision-first studio: one screenplay engine (Editor 2.0), crash-safe saves + recovery, revision colours/marks/pages, compare/restore, revision summary with scene counts + CSV + printable PDF, omitted scenes, smart screenplay paste, KIT version write/import, changes-only compare with context gaps and template indentation, revision headers/title-page fields, production page locks with A/B page numbers and FDX revision metadata, dual dialogue side by side in editor/PDF with FDX interchange, a title-page editor whose A4 preview is the exporter's own layout, KIT-style editor/navigator settings, macOS standard selection keys, a compact file-focused Menu, OFL fonts, FDX/Fountain import/export; PDF export paginates exactly like the editor; eight contrast-tested themes with revision marks legible on every palette, and live spellchecking in English, Bulgarian and Russian with screenplay-aware ALL-CAPS skipping, right-click suggestions and per-language custom dictionaries; v0.8.5 corrected editor input with whitespace-aware caret mapping, press-point clicks, double-click word selection and press-anchored drag selection; v0.8.6 gives every typed space its own cell, sets IBM Plex Mono as the default page face with Courier Prime as a Latin-only alternative, adds monochrome paper under the theme picker, 28 theme palettes as swatches (KIT Scenarist plus all 23 base Omarchy themes), a Tab character picker and live script recognition in Research; v0.8.8 installs updates in place after checksum verification, moves the page grid to the standard 1/6-inch leading with 58 lines on A4, adopts KIT Scenarist's published light and dark palettes (29 total) and writes panics to `panic.log`. The editor preview and the PDF export now follow
 KIT Scenistar's `final_draft_a4.kitss` (A4 margins 38/24/17/24 mm, 155 mm text
 column, right-aligned transitions); v0.8.9 adds Fade In `.fadein`
 import/export, Markdown export and the `website/` GitHub Pages site, and
 v0.8.10 restores the regular PDF body (bold stays on the title-page title and
-page numbers, as KIT prints them). |
-| Next release | Post-v0.8.10: Linux typing-crash root cause (needs a reproduction and `panic.log`), Windows code signing, Developer ID/notarisation, Markdown import, Fade In revision colours, and an optional release-binary/screenshot probe. |
+page numbers, as KIT prints them), and v0.8.11 adds bundled Liberation Mono
+(Latin + Cyrillic) as a fourth page face. |
+| Next release | Post-v0.8.11: Linux typing-crash root cause (needs a reproduction and `panic.log`), Windows code signing, Developer ID/notarisation, Markdown import, Fade In revision colours, and an optional release-binary/screenshot probe. |
 
 **Positioning (locked 2026-10-26):** the free, open-source, revision-first
 screenwriting studio. Moat = the production revision workflow (colours, locked
@@ -2410,4 +2411,23 @@ Built on the released v0.8.8. Released 2026-11-19 as **v0.8.9** (tag `v0.8.9` at
   ROADMAP and the website FAQ now describe KIT's actual weights instead of the
   bold-body claim.
 - `07`, `31`, `34` and `35` snapshots regenerated for the version string.
+- Gate: fmt, clippy `-D warnings`, workspace tests, deny, `git diff --check`.
+
+### 2026-11-19 — v0.8.11: Liberation Mono page face
+
+- **Bundled Liberation Mono** Regular, Bold and Italic (SIL OFL 1.1, from
+  `liberationfonts/liberation-fonts` 2.1.5) under
+  `scriptcraft-app/assets/fonts/`, with the licence text and NOTICE entry.
+- **Settings ▸ Appearance ▸ Script font** lists it alongside Plex, Courier
+  Prime and Courier New. The key is `script_face=liberation`; Courier New
+  remains the default when installed.
+- **Editor and PDF** register the family immediately and embed Regular/Bold on
+  export. Liberation Mono is metric-compatible with Courier New (0.6 em), so
+  page breaks do not move, and its Latin, Greek and Cyrillic share one design.
+- **Tests:** the settings key round-trip loops `ALL`; the real UI selection
+  test now picks Liberation Mono; `every_script_face_exports_a_pdf` covers it;
+  `liberation_mono_exports_latin_and_cyrillic` checks page count, embedded
+  font and extracted Latin/Cyrillic text on A95.
+- Snapshots `16_settings_appearance` and `30_settings_theme_menu` regenerated
+  for the new face description; version-only snapshots refreshed.
 - Gate: fmt, clippy `-D warnings`, workspace tests, deny, `git diff --check`.

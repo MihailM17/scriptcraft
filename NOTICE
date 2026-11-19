@@ -30,6 +30,12 @@ scriptcraft-app/assets/fonts/licenses/ for full texts):
   (https://github.com/quoteunquoteapps/CourierPrime)
   License: scriptcraft-app/assets/fonts/licenses/OFL-CourierPrime.txt
 
+- Liberation Mono Regular, Bold and Italic
+  Digitized data copyright (c) 2010 Google Corporation, with Reserved Font
+  Arimo, Tinos and Cousine; Copyright (c) 2012 Red Hat, Inc., with Reserved
+  Font Name Liberation (https://github.com/liberationfonts/liberation-fonts)
+  License: scriptcraft-app/assets/fonts/licenses/OFL-LiberationMono.txt
+
 --------------------------------------------------------------------------------
 ScriptCraft is a clean-room implementation. It is inspired by the workflow and
 typography of KIT Scenarist and interoperates with the .kitsp file format, but

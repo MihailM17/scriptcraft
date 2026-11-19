@@ -198,6 +198,9 @@ pub enum ScriptFace {
     /// The fallback default: it is the only bundled face whose Latin and
     /// Cyrillic share proportions, so mixed-script pages stay level.
     PlexMono,
+    /// Liberation Mono: metric-compatible with Courier New, with Latin,
+    /// Greek and Cyrillic in one design. Bundled under the SIL OFL.
+    LiberationMono,
 }
 
 impl Default for ScriptFace {
@@ -215,13 +218,19 @@ impl Default for ScriptFace {
 }
 
 impl ScriptFace {
-    pub const ALL: [Self; 3] = [Self::PlexMono, Self::CourierPrime, Self::CourierNew];
+    pub const ALL: [Self; 4] = [
+        Self::PlexMono,
+        Self::CourierPrime,
+        Self::CourierNew,
+        Self::LiberationMono,
+    ];
 
     pub fn key(self) -> &'static str {
         match self {
             Self::CourierPrime => "courier",
             Self::CourierNew => "courier-new",
             Self::PlexMono => "plex",
+            Self::LiberationMono => "liberation",
         }
     }
 
@@ -230,6 +239,7 @@ impl ScriptFace {
             Self::CourierPrime => "Courier Prime (classic, Latin only)",
             Self::CourierNew => "Courier New (system font)",
             Self::PlexMono => "IBM Plex Mono (Latin + Cyrillic)",
+            Self::LiberationMono => "Liberation Mono (Latin + Cyrillic)",
         }
     }
 
@@ -238,6 +248,7 @@ impl ScriptFace {
             "courier" | "courier_prime" => Some(Self::CourierPrime),
             "courier-new" | "courier_new" => Some(Self::CourierNew),
             "plex" | "plex_mono" => Some(Self::PlexMono),
+            "liberation" | "liberation-mono" | "liberation_mono" => Some(Self::LiberationMono),
             _ => None,
         }
     }
@@ -813,10 +824,10 @@ fn settings_appearance(ui: &mut Ui, settings: &mut AppSettings) -> (bool, bool, 
         ui.add_space(16.0);
         ui.label(
             egui::RichText::new(
-                "Courier New and IBM Plex Mono both draw Latin and Cyrillic in one \
-                 design. Courier Prime is Latin only and borrows Plex for Cyrillic. All \
-                 three share 0.6 em advances, so pagination is identical whichever face \
-                 you pick.",
+                "Courier New, IBM Plex Mono and Liberation Mono draw Latin and Cyrillic \
+                 in one design. Courier Prime is Latin only and borrows Plex for Cyrillic. \
+                 All four share 0.6 em advances, so pagination is identical whichever \
+                 face you pick.",
             )
             .size(11.0)
             .color(kit().disabled_text),

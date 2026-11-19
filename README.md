@@ -8,7 +8,7 @@ production revisions. Open KIT projects, exchange Final Draft files, lock
 pages, issue coloured revisions, and export page-exact PDFs — offline, on
 macOS, Windows and Linux.
 
-> **Status — v0.8.10.** Revision-complete for the core production workflow:
+> **Status — v0.8.11.** Revision-complete for the core production workflow:
 > stable block/scene identity, draft diff and compare, restore-as-copy, omitted
 > scenes, dual dialogue, title-page editor and revision summary (scene counts,
 > CSV and printable PDF). The page grid uses the standard 1/6-inch screenplay
@@ -18,6 +18,8 @@ macOS, Windows and Linux.
 > writer-facing KIT Scenarist page: regular body text, bold title-page title
 > and page numbers. `.kitsp` saves preserve unknown sidecar rows, and CI runs
 > runtime interaction smoke on macOS/Linux/Windows.
+> **v0.8.11 adds Liberation Mono** as a bundled page face: a metric-compatible
+> 0.6 em monospace with Latin, Greek and Cyrillic in one design.
 > **v0.8.10 restores the regular PDF body**: v0.8.9 briefly set every line in
 > bold after reading the embedded Courier New Bold font, but KIT's rendered
 > pages keep the script regular and bold only the title and page numbers.
@@ -106,10 +108,10 @@ app on day one.
 
 ## The editor
 
-- Fixed A4 page editor with Courier New (system face, with IBM Plex Mono and
-  Courier Prime as alternatives) for one type design across Latin and
-  Cyrillic, 1/6-inch screenplay leading (58 lines per A4 page), page-accurate
-  pagination, scene
+- Fixed A4 page editor with Courier New (system face, with IBM Plex Mono,
+  Liberation Mono and Courier Prime as alternatives) for one type design across
+  Latin and Cyrillic, 1/6-inch screenplay leading (58 lines per A4 page),
+  page-accurate pagination, scene
   numbers, `(MORE)` / `(CONT'D)` markers, and zoom that scales pages without
   reflowing text. Every space you type keeps its own cell, on screen and in the
   PDF.

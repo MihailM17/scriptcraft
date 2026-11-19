@@ -14,7 +14,7 @@ pub fn about(ctx: &Context, open: &mut bool) {
             ui.separator();
             ui.label("Design language after KIT Scenarist 0.7.2:");
             ui.label("• Calm dark/light themes with the icon-blue accent #4294f8");
-            ui.label("• Courier Prime script face (OFL), PT Sans UI");
+            ui.label("• Courier Prime, IBM Plex Mono and Liberation Mono faces (OFL), PT Sans UI");
             ui.label("• Russian-template metrics, calibrated chronometry");
             ui.label("• Fixed A4 pages — zoom scales pages, never reflows");
             ui.separator();

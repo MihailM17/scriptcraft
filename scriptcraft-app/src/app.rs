@@ -164,8 +164,8 @@ pub fn install_script_fonts(ctx: &egui::Context, face: crate::settings::ScriptFa
         "ui_bold".to_owned(),
         egui::FontData::from_static(include_bytes!("../assets/fonts/PT_Sans-Web-Bold.ttf")).into(),
     );
-    // Bundled script faces: Courier Prime (OFL, screenplay metrics) and IBM
-    // Plex Mono (the only one with Cyrillic).
+    // Bundled script faces: Courier Prime (OFL, screenplay metrics), IBM Plex
+    // Mono and Liberation Mono (both Latin + Cyrillic).
     fonts.font_data.insert(
         "courier_prime".to_owned(),
         egui::FontData::from_static(include_bytes!("../assets/fonts/CourierPrime-Regular.ttf"))
@@ -178,6 +178,21 @@ pub fn install_script_fonts(ctx: &egui::Context, face: crate::settings::ScriptFa
     fonts.font_data.insert(
         "courier_prime_italic".to_owned(),
         egui::FontData::from_static(include_bytes!("../assets/fonts/CourierPrime-Italic.ttf"))
+            .into(),
+    );
+    fonts.font_data.insert(
+        "liberation_mono".to_owned(),
+        egui::FontData::from_static(include_bytes!("../assets/fonts/LiberationMono-Regular.ttf"))
+            .into(),
+    );
+    fonts.font_data.insert(
+        "liberation_mono_bold".to_owned(),
+        egui::FontData::from_static(include_bytes!("../assets/fonts/LiberationMono-Bold.ttf"))
+            .into(),
+    );
+    fonts.font_data.insert(
+        "liberation_mono_italic".to_owned(),
+        egui::FontData::from_static(include_bytes!("../assets/fonts/LiberationMono-Italic.ttf"))
             .into(),
     );
     fonts.font_data.insert(
@@ -220,6 +235,11 @@ pub fn install_script_fonts(ctx: &egui::Context, face: crate::settings::ScriptFa
             "courier_prime_bold",
             "courier_prime_italic",
         ),
+        ScriptFace::LiberationMono => (
+            "liberation_mono",
+            "liberation_mono_bold",
+            "liberation_mono_italic",
+        ),
         // Without the system files the page uses Courier Prime; the Settings
         // page says so, and the metrics are identical.
         ScriptFace::CourierNew if has_new => (
@@ -251,7 +271,9 @@ pub fn install_script_fonts(ctx: &egui::Context, face: crate::settings::ScriptFa
     for extra in [
         "courier_prime",
         "plex_mono",
+        "liberation_mono",
         "courier_prime_italic",
+        "liberation_mono_italic",
         "courier_new",
     ] {
         if extra != script_regular && fonts.font_data.contains_key(extra) {
@@ -265,9 +287,11 @@ pub fn install_script_fonts(ctx: &egui::Context, face: crate::settings::ScriptFa
     for extra in [
         "courier_prime_bold",
         "plex_mono_bold",
+        "liberation_mono_bold",
         "courier_new_bold",
         "courier_prime",
         "plex_mono",
+        "liberation_mono",
         "courier_new",
     ] {
         if !bold.iter().any(|f| f == extra) && fonts.font_data.contains_key(extra) {
@@ -282,8 +306,10 @@ pub fn install_script_fonts(ctx: &egui::Context, face: crate::settings::ScriptFa
     // how existing Cyrillic italics look.
     for extra in [
         "courier_prime_italic",
+        "liberation_mono_italic",
         "courier_prime",
         "plex_mono",
+        "liberation_mono",
         "courier_new_italic",
         "courier_new",
     ] {
@@ -3275,6 +3301,9 @@ impl ScriptCraftApp {
         const PLEX_BOLD: &[u8] = include_bytes!("../assets/fonts/IBMPlexMono-Bold.ttf");
         const COURIER_REGULAR: &[u8] = include_bytes!("../assets/fonts/CourierPrime-Regular.ttf");
         const COURIER_BOLD: &[u8] = include_bytes!("../assets/fonts/CourierPrime-Bold.ttf");
+        const LIBERATION_REGULAR: &[u8] =
+            include_bytes!("../assets/fonts/LiberationMono-Regular.ttf");
+        const LIBERATION_BOLD: &[u8] = include_bytes!("../assets/fonts/LiberationMono-Bold.ttf");
         let face = self.settings.script_face;
         // Courier New comes from the OS. When it isn't installed the PDF uses
         // Courier Prime, exactly like the editor does; the two share their
@@ -3282,6 +3311,7 @@ impl ScriptCraftApp {
         let (regular, bold): (&[u8], &[u8]) = match face {
             crate::settings::ScriptFace::PlexMono => (PLEX_REGULAR, PLEX_BOLD),
             crate::settings::ScriptFace::CourierPrime => (COURIER_REGULAR, COURIER_BOLD),
+            crate::settings::ScriptFace::LiberationMono => (LIBERATION_REGULAR, LIBERATION_BOLD),
             crate::settings::ScriptFace::CourierNew => match crate::system_font::courier_new() {
                 Some(system) => (
                     system.regular.as_slice(),
