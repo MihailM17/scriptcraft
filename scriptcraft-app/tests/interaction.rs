@@ -2909,7 +2909,7 @@ fn theme_picker_switches_between_dark_palettes() {
     );
     assert_eq!(
         h.ctx.style().visuals.panel_fill,
-        egui::Color32::from_rgb(0x0E, 0x11, 0x17),
+        scriptcraft_app::theme::Theme::MidnightInk.palette().window,
         "panel fill must come from the Midnight Ink palette"
     );
 
