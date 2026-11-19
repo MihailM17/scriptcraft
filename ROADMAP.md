@@ -21,16 +21,17 @@ Status legend: `[ ]` to do `[-]` in progress `[x]` done `[!]` blocked
 | Date | 2026-11-19 |
 | Project | ScriptCraft — free, open-source, revision-first screenwriting studio |
 | Repo | `/Users/mihailmihaylov/Documents/Dev_work/scriptcraft` |
-| Branch / commit | `main` at **v0.8.9** (released 2026-11-19, tag `v0.8.9` at `ba5458b`); tags `v0.7.0` at `9ce2e0e`, `v0.7.1` at `d8b17de`, `v0.7.2` at `8b75f9a`, `v0.8.0` at `0052bba`, `v0.8.1` at `0fa598e`, `v0.8.2` at `6bf1983`, `v0.8.3` at `69c0329`, `v0.8.4` at `b178e00`, `v0.8.5` at `a9394bc`, `v0.8.6` at `cf48880`, `v0.8.7` at `8ea4437`, `v0.8.8` at `bbf90bd`, `v0.8.9` at `ba5458b`. |
+| Branch / commit | `main` at **v0.8.10** (released 2026-11-19); tags `v0.7.0` at `9ce2e0e`, `v0.7.1` at `d8b17de`, `v0.7.2` at `8b75f9a`, `v0.8.0` at `0052bba`, `v0.8.1` at `0fa598e`, `v0.8.2` at `6bf1983`, `v0.8.3` at `69c0329`, `v0.8.4` at `b178e00`, `v0.8.5` at `a9394bc`, `v0.8.6` at `cf48880`, `v0.8.7` at `8ea4437`, `v0.8.8` at `bbf90bd`, `v0.8.9` at `ba5458b`, `v0.8.10` at this release. |
 | Rust workspace | `scriptcraft-core`, `scriptcraft-app`, `scriptcraft-layout` (`Cargo.toml`, resolver 2) |
-| App crate version | `scriptcraft-app 0.8.9` (released 2026-11-19, tag `v0.8.9` at `ba5458b`); `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
+| App crate version | `scriptcraft-app 0.8.10` (released 2026-11-19); `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
 | Distribution | **v0.8.9 released** — <https://github.com/MihailM17/scriptcraft/releases/tag/v0.8.9>. Assets (unsigned/ad-hoc macOS, not notarised): `ScriptCraft-0.8.9-macos-arm64.dmg` 10,081,596 B sha256 `560ed21c5d730138d41e538852f98b5cb2cd09015a601d2e10ca63055c5114e3`, `ScriptCraft-0.8.9-windows-x64.zip` 8,294,288 B sha256 `1cb70c4b086f55a0df1b3e3d87636480a8481503605b8ece577c8e9ae3a044f8`, `ScriptCraft-0.8.9-linux-x86_64.tar.gz` 12,528,119 B sha256 `27a2b6fa71ba96dfa250ec0ff5fff22e3839f9d805ea2368831b287f9934b1bb`, each with `.sha256`. Website: <https://mihailm17.github.io/scriptcraft/>. |
 | Current one-liner | Free, open-source, revision-first studio: one screenplay engine (Editor 2.0), crash-safe saves + recovery, revision colours/marks/pages, compare/restore, revision summary with scene counts + CSV + printable PDF, omitted scenes, smart screenplay paste, KIT version write/import, changes-only compare with context gaps and template indentation, revision headers/title-page fields, production page locks with A/B page numbers and FDX revision metadata, dual dialogue side by side in editor/PDF with FDX interchange, a title-page editor whose A4 preview is the exporter's own layout, KIT-style editor/navigator settings, macOS standard selection keys, a compact file-focused Menu, OFL fonts, FDX/Fountain import/export; PDF export paginates exactly like the editor; eight contrast-tested themes with revision marks legible on every palette, and live spellchecking in English, Bulgarian and Russian with screenplay-aware ALL-CAPS skipping, right-click suggestions and per-language custom dictionaries; v0.8.5 corrected editor input with whitespace-aware caret mapping, press-point clicks, double-click word selection and press-anchored drag selection; v0.8.6 gives every typed space its own cell, sets IBM Plex Mono as the default page face with Courier Prime as a Latin-only alternative, adds monochrome paper under the theme picker, 28 theme palettes as swatches (KIT Scenarist plus all 23 base Omarchy themes), a Tab character picker and live script recognition in Research; v0.8.8 installs updates in place after checksum verification, moves the page grid to the standard 1/6-inch leading with 58 lines on A4, adopts KIT Scenarist's published light and dark palettes (29 total) and writes panics to `panic.log`. The editor preview and the PDF export now follow
 KIT Scenistar's `final_draft_a4.kitss` (A4 margins 38/24/17/24 mm, 155 mm text
-column, right-aligned transitions); v0.8.9 prints the PDF body in bold to match
-KIT's own PDF, adds Fade In `.fadein` import/export, Markdown export and the
-`website/` GitHub Pages site. |
-| Next release | Post-v0.8.9: Linux typing-crash root cause (needs a reproduction and `panic.log`), Windows code signing, Developer ID/notarisation, Markdown import, Fade In revision colours, and an optional release-binary/screenshot probe. |
+column, right-aligned transitions); v0.8.9 adds Fade In `.fadein`
+import/export, Markdown export and the `website/` GitHub Pages site, and
+v0.8.10 restores the regular PDF body (bold stays on the title-page title and
+page numbers, as KIT prints them). |
+| Next release | Post-v0.8.10: Linux typing-crash root cause (needs a reproduction and `panic.log`), Windows code signing, Developer ID/notarisation, Markdown import, Fade In revision colours, and an optional release-binary/screenshot probe. |
 
 **Positioning (locked 2026-10-26):** the free, open-source, revision-first
 screenwriting studio. Moat = the production revision workflow (colours, locked
@@ -2394,4 +2395,19 @@ Built on the released v0.8.8. Released 2026-11-19 as **v0.8.9** (tag `v0.8.9` at
 - **Docs:** `docs/releases/v0.8.9.md`, README status/interchange and this
   roadmap updated; `08_export_dialog` snapshot regenerated for the extra
   format row.
+- Gate: fmt, clippy `-D warnings`, workspace tests, deny, `git diff --check`.
+
+### 2026-11-19 — v0.8.10: correct the PDF body weight
+
+- **Reverted the v0.8.9 bold body.** KIT's PDF embeds Courier New Bold, but
+  its rendered script pages show regular body text; only the title-page title
+  (underlined) and the `N.` page numbers are bold. `scriptcraft-layout` is
+  back to the v0.8.8 weight policy, and `a95_pdf_matches_editor_layout`
+  compares the editor and PDF bold flags line by line again.
+- **Verified visually** against KIT's A95 pages: regular body, bold page
+  number, bold underlined title on the title page.
+- **Docs and site corrected.** v0.8.9 notes carry a correction notice; README,
+  ROADMAP and the website FAQ now describe KIT's actual weights instead of the
+  bold-body claim.
+- `07`, `31`, `34` and `35` snapshots regenerated for the version string.
 - Gate: fmt, clippy `-D warnings`, workspace tests, deny, `git diff --check`.

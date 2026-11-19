@@ -147,7 +147,7 @@ fn a95_pdf_matches_editor_layout() {
 
     assert_eq!(editor.pages.len(), pages.len(), "page count");
     for (pi, (epage, plines)) in editor.pages.iter().zip(&pages).enumerate() {
-        let mut want: Vec<(usize, String, f32, f32)> = epage
+        let mut want: Vec<(usize, String, f32, f32, bool)> = epage
             .lines
             .iter()
             .map(|l| {
@@ -157,10 +157,10 @@ fn a95_pdf_matches_editor_layout() {
                 } else {
                     ML + l.x_mm
                 };
-                (l.row, l.text.clone(), left, w)
+                (l.row, l.text.clone(), left, w, l.bold)
             })
             .collect();
-        let mut got: Vec<(usize, String, f32, f32)> = Vec::new();
+        let mut got: Vec<(usize, String, f32, f32, bool)> = Vec::new();
         let mut row = 0usize;
         for line in plines {
             if line.share_row {
@@ -174,10 +174,7 @@ fn a95_pdf_matches_editor_layout() {
                     } else {
                         line.x_mm
                     };
-                    // KIT prints the PDF body in Courier New Bold; the editor
-                    // preview keeps the regular face for editing comfort.
-                    assert!(line.bold, "PDF body line must be bold: {:?}", line.text);
-                    got.push((row, line.text.clone(), left, w));
+                    got.push((row, line.text.clone(), left, w, line.bold));
                 }
                 row += 1;
             }

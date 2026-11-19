@@ -8,19 +8,19 @@ production revisions. Open KIT projects, exchange Final Draft files, lock
 pages, issue coloured revisions, and export page-exact PDFs — offline, on
 macOS, Windows and Linux.
 
-> **Status — v0.8.9.** Revision-complete for the core production workflow:
+> **Status — v0.8.10.** Revision-complete for the core production workflow:
 > stable block/scene identity, draft diff and compare, restore-as-copy, omitted
 > scenes, dual dialogue, title-page editor and revision summary (scene counts,
 > CSV and printable PDF). The page grid uses the standard 1/6-inch screenplay
 > leading and 58 lines on A4, and the editor preview plus the PDF export follow
 > KIT Scenistar's `final_draft_a4.kitss` (A4 margins 38/24/17/24 mm, 155 mm text
 > column, right-aligned transitions), so an exported PDF matches the
-> writer-facing KIT Scenarist page. The **PDF body prints in bold**, as KIT's
-> own PDF does (it embeds Courier New Bold even though the template stores
-> `bold="false"`); the editor stays regular because the bold face shares the
-> same advance width, so pagination does not move. `.kitsp` saves preserve
-> unknown sidecar rows, and CI runs runtime interaction smoke on
-> macOS/Linux/Windows.
+> writer-facing KIT Scenarist page: regular body text, bold title-page title
+> and page numbers. `.kitsp` saves preserve unknown sidecar rows, and CI runs
+> runtime interaction smoke on macOS/Linux/Windows.
+> **v0.8.10 restores the regular PDF body**: v0.8.9 briefly set every line in
+> bold after reading the embedded Courier New Bold font, but KIT's rendered
+> pages keep the script regular and bold only the title and page numbers.
 > **v0.8.9 adds Fade In and Markdown**: import and export real `.fadein`
 > archives (ZIP + OSF) with scene numbers, notes, title page and dual dialogue,
 > and export Markdown for notes, wikis and review. The website in `website/` is
@@ -181,7 +181,8 @@ app on day one.
 - **Fountain** — import/export.
 - **Markdown `.md`** — export a clean one-way copy for notes, wikis and review.
 - **PDF** — rendered from the same layout engine as the editor, not a second
-  paginator; the printed body uses bold Courier Prime to match KIT.
+  paginator; the body is regular and only the title-page title and page
+  numbers are bold, as KIT prints them.
 - **Planned** — conversion reports for lossy imports/exports, and DOCX/RTF only
   if real users need them.
 
