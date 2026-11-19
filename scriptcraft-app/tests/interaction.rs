@@ -2900,21 +2900,21 @@ fn theme_picker_switches_between_dark_palettes() {
     h.run();
 
     open_theme_menu(&mut h);
-    h.get_by_label("Catppuccin").click();
+    h.get_by_label("Midnight Ink").click();
     h.run_steps(2);
 
     assert!(
         h.ctx.style().visuals.dark_mode,
-        "Catppuccin is a dark palette"
+        "Midnight Ink is a dark palette"
     );
     assert_eq!(
         h.ctx.style().visuals.panel_fill,
-        egui::Color32::from_rgb(0x1E, 0x1E, 0x2E),
-        "panel fill must come from the Catppuccin palette"
+        egui::Color32::from_rgb(0x0E, 0x11, 0x17),
+        "panel fill must come from the Midnight Ink palette"
     );
 
-    // Same brightness class as Midnight: a dark_mode-only check would leave
-    // the previous palette painted, so this is the regression to catch.
+    // Same brightness class as Midnight Ink: a dark_mode-only check would
+    // leave the previous palette painted, so this is the regression to catch.
     open_theme_menu(&mut h);
     h.get_by_label("Midnight").click();
     h.run_steps(2);

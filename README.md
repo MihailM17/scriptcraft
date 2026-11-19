@@ -8,7 +8,7 @@ production revisions. Open KIT projects, exchange Final Draft files, lock
 pages, issue coloured revisions, and export page-exact PDFs — offline, on
 macOS, Windows and Linux.
 
-> **Status — v0.8.11.** Revision-complete for the core production workflow:
+> **Status — v0.8.12.** Revision-complete for the core production workflow:
 > stable block/scene identity, draft diff and compare, restore-as-copy, omitted
 > scenes, dual dialogue, title-page editor and revision summary (scene counts,
 > CSV and printable PDF). The page grid uses the standard 1/6-inch screenplay
@@ -18,6 +18,15 @@ macOS, Windows and Linux.
 > writer-facing KIT Scenarist page: regular body text, bold title-page title
 > and page numbers. `.kitsp` saves preserve unknown sidecar rows, and CI runs
 > runtime interaction smoke on macOS/Linux/Windows.
+> **v0.8.12 adds six writer themes** to the palette picker: Midnight Ink,
+> Amber Projector, Noir Emerald, Velvet Curtain, Red Light and Paper and Rust,
+> from the editor design brief's colour roles (window, panel, page, text, muted,
+> accent). The ScriptCraft palette set grows from six to twelve entries and the
+> Settings ▸ Appearance dropdown from 29 to 35 themes. Every new theme carries
+> the same semantic roles as Midnight and Light, so the widgets need no
+> per-theme branch and script page text stays monospace with colour changes
+> only; the light Paper and Rust theme keeps a readable page. All thirty-five
+> palettes are contrast-tested.
 > **v0.8.11 adds Liberation Mono** as a bundled page face: a metric-compatible
 > 0.6 em monospace with Latin, Greek and Cyrillic in one design.
 > **v0.8.10 restores the regular PDF body**: v0.8.9 briefly set every line in
@@ -29,9 +38,9 @@ macOS, Windows and Linux.
 > published to GitHub Pages. v0.8.6 keeps every typed space on the page,
 > uses Courier New as the page face when the system has it (falling back to
 > IBM Plex Mono), adds
-> a monochrome-paper option directly under the theme picker, 29 theme palettes
-> in a grouped dropdown (KIT Scenarist light and dark plus every base Omarchy
-> theme), a Tab
+> a monochrome-paper option directly under the theme picker, 35 theme palettes
+> in a grouped dropdown (KIT Scenarist light and dark, the six writer themes
+> added in v0.8.12, plus every base Omarchy theme), a Tab
 > character picker, live script recognition in Research, and a release check
 > that offers a newer version when the app opens.
 > **v0.8.7 fixes the Windows desktop**: a light-mode Windows desktop no longer
@@ -51,7 +60,7 @@ macOS, Windows and Linux.
 > start at the press. v0.8.4 added live
 > spellchecking in English, Bulgarian and Russian (Hunspell dictionaries shipped
 > as removable data files, ALL-CAPS screenplay lines ignored, right-click
-> suggestions, custom and session dictionaries) and eight contrast-tested
+> suggestions, custom and session dictionaries) and thirty-five contrast-tested
 > themes; v0.8.3 made Draft Comparison changes-only with clickable gaps, and
 > v0.8.2 redesigned the workspace.
 >
@@ -131,11 +140,13 @@ app on day one.
   word for suggestions, **Add to dictionary** (saved per language) or
   **Ignore**; scene headings, cues and sound effects in ALL CAPS are skipped so
   screenplay formatting is not flagged as prose.
-- 29 theme palettes in one grouped Settings ▸ Appearance dropdown, with the
+- 35 theme palettes in one grouped Settings ▸ Appearance dropdown, with the
   ScriptCraft and Omarchy families as headings and a solid scrollbar so the
   long list is obvious. ScriptCraft's own are Midnight, Light, Sepia, High
-  Contrast and **KIT Scenarist** in KIT's published light and dark colours.
-  The rest are the base themes Omarchy ships, imported from
+  Contrast, **KIT Scenarist** in KIT's published light and dark colours, plus
+  the writer themes added in v0.8.12: Midnight Ink, Amber Projector, Noir
+  Emerald, Velvet Curtain, Red Light and Paper and Rust. The rest are the base
+  themes Omarchy ships, imported from
   its palettes: Catppuccin, Catppuccin Latte, Ethereal, Everforest, Flexoki
   Light, Gruvbox, Hackerman, Jade Horse, Kanagawa, Last Horizon, Lumon, Lupine,
   Matte Black, Matcha, Nord, Retro 82, Ristretto, Rosé Pine, Solitude,

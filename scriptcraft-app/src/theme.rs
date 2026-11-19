@@ -986,6 +986,197 @@ pub const KIT_SCENARIST_DARK: KitColors = KitColors {
     spell_error: hex(0xFF6B6B),
 };
 
+/// ScriptCraft's own palette set grows with the writer-facing editor themes:
+/// Midnight Ink, Amber Projector, Noir Emerald, Velvet Curtain, Red Light and
+/// Paper and Rust, added from the design brief that ships with the app. Every
+/// value below follows the same semantic roles as Midnight / Light / the KIT
+/// imitation, so widgets need no per-theme branch.
+/// Midnight Ink: cool, calm, closest to the current Midnight look.
+pub const KIT_MIDNIGHT_INK: KitColors = KitColors {
+    window: hex(0x0E1117),
+    list_bg: hex(0x151A23),
+    desk: hex(0x151A23),
+    page: hex(0x1B212C),
+    page_edge: hex(0x2A3140),
+    start_tab_active: hex(0x0E1117),
+    rail: hex(0x0E1117),
+    text: hex(0xE6E9EF),
+    button: hex(0x1A1F28),
+    button_hover: hex(0x242B37),
+    base: hex(0x151A23),
+    faint: hex(0x151A23),
+    accent: hex(0x5B8CFF),
+    disabled_text: hex(0x7C8596),
+    stroke: hex(0x232936),
+    sep: hex(0x1B2029),
+    module_bg: hex(0x0E1117),
+    strip: hex(0x12161D),
+    field_stroke: hex(0x2A3140),
+    hover_light: hex(0x1A1F28),
+    elt_bg: hex(0x161B24),
+    elt_stroke: hex(0x2A3140),
+    heading_text: hex(0xE6E9EF),
+    surface: hex(0x161B24),
+    accent_soft: Color32::from_rgba_premultiplied(91, 140, 255, 51),
+    accent_text: hex(0xB9D0FF),
+    spell_error: hex(0xFF6B6B),
+};
+
+/// Amber Projector: warm, like light through a film gate.
+pub const KIT_AMBER_PROJECTOR: KitColors = KitColors {
+    window: hex(0x14110F),
+    list_bg: hex(0x1C1814),
+    desk: hex(0x1C1814),
+    page: hex(0x231E19),
+    page_edge: hex(0x332B20),
+    start_tab_active: hex(0x14110F),
+    rail: hex(0x14110F),
+    text: hex(0xEDE4D6),
+    button: hex(0x1E1A16),
+    button_hover: hex(0x2A241D),
+    base: hex(0x1C1814),
+    faint: hex(0x1C1814),
+    accent: hex(0xF2A541),
+    disabled_text: hex(0x8A7D6B),
+    stroke: hex(0x2E251D),
+    sep: hex(0x211B15),
+    module_bg: hex(0x14110F),
+    strip: hex(0x171210),
+    field_stroke: hex(0x332B20),
+    hover_light: hex(0x201B15),
+    elt_bg: hex(0x1B1712),
+    elt_stroke: hex(0x332B20),
+    heading_text: hex(0xEDE4D6),
+    surface: hex(0x1B1712),
+    accent_soft: Color32::from_rgba_premultiplied(242, 165, 65, 51),
+    accent_text: hex(0xFFC37A),
+    spell_error: hex(0xFF6B6B),
+};
+
+/// Noir Emerald: moody green, easy on the eyes at night.
+pub const KIT_NOIR_EMERALD: KitColors = KitColors {
+    window: hex(0x0B1210),
+    list_bg: hex(0x111A17),
+    desk: hex(0x111A17),
+    page: hex(0x16221E),
+    page_edge: hex(0x1F312C),
+    start_tab_active: hex(0x0B1210),
+    rail: hex(0x0B1210),
+    text: hex(0xDDEBE5),
+    button: hex(0x0F1815),
+    button_hover: hex(0x152019),
+    base: hex(0x111A17),
+    faint: hex(0x111A17),
+    accent: hex(0x3DDBA4),
+    disabled_text: hex(0x6F8A80),
+    stroke: hex(0x1B2925),
+    sep: hex(0x0E1714),
+    module_bg: hex(0x0B1210),
+    strip: hex(0x0D1412),
+    field_stroke: hex(0x1F312C),
+    hover_light: hex(0x101A17),
+    elt_bg: hex(0x0E1814),
+    elt_stroke: hex(0x1F312C),
+    heading_text: hex(0xDDEBE5),
+    surface: hex(0x0E1814),
+    accent_soft: Color32::from_rgba_premultiplied(61, 219, 164, 51),
+    accent_text: hex(0x8FE8CC),
+    spell_error: hex(0xFF6B6B),
+};
+
+/// Velvet Curtain: theatre plum with a crimson accent.
+pub const KIT_VELVET_CURTAIN: KitColors = KitColors {
+    window: hex(0x120D14),
+    list_bg: hex(0x1A1320),
+    desk: hex(0x1A1320),
+    page: hex(0x221829),
+    page_edge: hex(0x2F2140),
+    start_tab_active: hex(0x120D14),
+    rail: hex(0x120D14),
+    text: hex(0xEBDFF0),
+    button: hex(0x17101C),
+    button_hover: hex(0x211628),
+    base: hex(0x1A1320),
+    faint: hex(0x1A1320),
+    accent: hex(0xE5566D),
+    disabled_text: hex(0x8B7A95),
+    stroke: hex(0x2A1E30),
+    sep: hex(0x140E18),
+    module_bg: hex(0x120D14),
+    strip: hex(0x150E18),
+    field_stroke: hex(0x2F2140),
+    hover_light: hex(0x18111F),
+    elt_bg: hex(0x160F1B),
+    elt_stroke: hex(0x2F2140),
+    heading_text: hex(0xEBDFF0),
+    surface: hex(0x160F1B),
+    accent_soft: Color32::from_rgba_premultiplied(229, 86, 109, 51),
+    accent_text: hex(0xF2A7B4),
+    spell_error: hex(0xFF6B6B),
+};
+
+/// Red Light: neutral graphite with one REC red accent.
+pub const KIT_REDLIGHT: KitColors = KitColors {
+    window: hex(0x0F0F10),
+    list_bg: hex(0x171718),
+    desk: hex(0x171718),
+    page: hex(0x1E1E20),
+    page_edge: hex(0x2B2B30),
+    start_tab_active: hex(0x0F0F10),
+    rail: hex(0x0F0F10),
+    text: hex(0xECECEC),
+    button: hex(0x17171A),
+    button_hover: hex(0x202023),
+    base: hex(0x171718),
+    faint: hex(0x171718),
+    accent: hex(0xFF5A4F),
+    disabled_text: hex(0x85858A),
+    stroke: hex(0x2A2A30),
+    sep: hex(0x141416),
+    module_bg: hex(0x0F0F10),
+    strip: hex(0x121214),
+    field_stroke: hex(0x2B2B30),
+    hover_light: hex(0x17171A),
+    elt_bg: hex(0x161618),
+    elt_stroke: hex(0x2B2B30),
+    heading_text: hex(0xECECEC),
+    surface: hex(0x161618),
+    accent_soft: Color32::from_rgba_premultiplied(255, 90, 79, 51),
+    accent_text: hex(0xFF9B93),
+    spell_error: hex(0xFF6B6B),
+};
+
+/// Paper and Rust: light theme, like a printed script.
+pub const KIT_PAPER_RUST: KitColors = KitColors {
+    window: hex(0xE9E4DA),
+    list_bg: hex(0xF2EEE5),
+    desk: hex(0xF2EEE5),
+    page: hex(0xFBF9F4),
+    page_edge: hex(0xD8D0C0),
+    start_tab_active: hex(0xE9E4DA),
+    rail: hex(0xE9E4DA),
+    text: hex(0x2A2622),
+    button: hex(0xF2EEE5),
+    button_hover: hex(0xE7E1D6),
+    base: hex(0xFBF9F4),
+    faint: hex(0xF2EEE5),
+    accent: hex(0xB5532A),
+    disabled_text: hex(0x7E7669),
+    stroke: hex(0xD8D0C0),
+    sep: hex(0xDDD6C9),
+    module_bg: hex(0xFBF9F4),
+    strip: hex(0xF2EEE5),
+    field_stroke: hex(0xD8D0C0),
+    hover_light: hex(0xF2EEE5),
+    elt_bg: hex(0xF2EEE5),
+    elt_stroke: hex(0xD8D0C0),
+    heading_text: hex(0x2A2622),
+    surface: hex(0xFBF9F4),
+    accent_soft: Color32::from_rgba_premultiplied(181, 83, 42, 51),
+    accent_text: hex(0x8F3E1F),
+    spell_error: hex(0xC62F2F),
+};
+
 /// User-selectable theme. Persisted by name in `settings.conf`; the old
 /// `dark_mode` setting is still honoured as a fallback.
 ///
@@ -1000,6 +1191,12 @@ pub enum Theme {
     HighContrast,
     KitScenarist,
     KitScenaristDark,
+    MidnightInk,
+    AmberProjector,
+    NoirEmerald,
+    VelvetCurtain,
+    RedLight,
+    PaperAndRust,
     Catppuccin,
     CatppuccinLatte,
     Ethereal,
@@ -1055,13 +1252,19 @@ impl ThemeGroup {
 impl Theme {
     /// ScriptCraft's own palettes, including a light imitation of KIT
     /// Scenarist's near-white paper and neutral chrome, plus its dark sibling.
-    pub const SCRIPT: [Theme; 6] = [
+    pub const SCRIPT: [Theme; 12] = [
         Theme::Midnight,
         Theme::Light,
         Theme::Sepia,
         Theme::HighContrast,
         Theme::KitScenarist,
         Theme::KitScenaristDark,
+        Theme::MidnightInk,
+        Theme::AmberProjector,
+        Theme::NoirEmerald,
+        Theme::VelvetCurtain,
+        Theme::RedLight,
+        Theme::PaperAndRust,
     ];
 
     /// The 23 base themes Omarchy ships in `themes/` (basecamp/omarchy).
@@ -1093,13 +1296,19 @@ impl Theme {
         Theme::White,
     ];
 
-    pub const ALL: [Theme; 29] = [
+    pub const ALL: [Theme; 35] = [
         Theme::Midnight,
         Theme::Light,
         Theme::Sepia,
         Theme::HighContrast,
         Theme::KitScenarist,
         Theme::KitScenaristDark,
+        Theme::MidnightInk,
+        Theme::AmberProjector,
+        Theme::NoirEmerald,
+        Theme::VelvetCurtain,
+        Theme::RedLight,
+        Theme::PaperAndRust,
         Theme::Catppuccin,
         Theme::CatppuccinLatte,
         Theme::Ethereal,
@@ -1142,6 +1351,12 @@ impl Theme {
             Theme::HighContrast => "High Contrast",
             Theme::KitScenarist => "KIT Scenarist",
             Theme::KitScenaristDark => "KIT Scenarist Dark",
+            Theme::MidnightInk => "Midnight Ink",
+            Theme::AmberProjector => "Amber Projector",
+            Theme::NoirEmerald => "Noir Emerald",
+            Theme::VelvetCurtain => "Velvet Curtain",
+            Theme::RedLight => "Red Light",
+            Theme::PaperAndRust => "Paper and Rust",
             Theme::Catppuccin => "Catppuccin",
             Theme::CatppuccinLatte => "Catppuccin Latte",
             Theme::Ethereal => "Ethereal",
@@ -1177,6 +1392,12 @@ impl Theme {
             Theme::HighContrast => "high-contrast",
             Theme::KitScenarist => "kit-scenarist",
             Theme::KitScenaristDark => "kit-scenarist-dark",
+            Theme::MidnightInk => "midnight-ink",
+            Theme::AmberProjector => "amber-projector",
+            Theme::NoirEmerald => "noir-emerald",
+            Theme::VelvetCurtain => "velvet-curtain",
+            Theme::RedLight => "red-light",
+            Theme::PaperAndRust => "paper-and-rust",
             Theme::Catppuccin => "catppuccin",
             Theme::CatppuccinLatte => "catppuccin-latte",
             Theme::Ethereal => "ethereal",
@@ -1218,6 +1439,12 @@ impl Theme {
             Theme::HighContrast => &KIT_HIGH_CONTRAST,
             Theme::KitScenarist => &KIT_SCENARIST,
             Theme::KitScenaristDark => &KIT_SCENARIST_DARK,
+            Theme::MidnightInk => &KIT_MIDNIGHT_INK,
+            Theme::AmberProjector => &KIT_AMBER_PROJECTOR,
+            Theme::NoirEmerald => &KIT_NOIR_EMERALD,
+            Theme::VelvetCurtain => &KIT_VELVET_CURTAIN,
+            Theme::RedLight => &KIT_REDLIGHT,
+            Theme::PaperAndRust => &KIT_PAPER_RUST,
             Theme::Catppuccin => &KIT_CATPPUCCIN,
             Theme::CatppuccinLatte => &KIT_CATPPUCCIN_LATTE,
             Theme::Ethereal => &KIT_ETHEREAL,
@@ -1252,6 +1479,7 @@ impl Theme {
             Theme::Light
                 | Theme::Sepia
                 | Theme::KitScenarist
+                | Theme::PaperAndRust
                 | Theme::CatppuccinLatte
                 | Theme::FlexokiLight
                 | Theme::Lupine
@@ -1906,8 +2134,11 @@ mod tests {
             ]
         );
         assert_eq!(Theme::OMARCHY.len(), 23);
-        assert_eq!(Theme::SCRIPT.len(), 6);
-        assert_eq!(Theme::ALL.len(), 29);
+        // Twelve ScriptCraft palettes: the six original (Midnight, Light,
+        // Sepia, HighContrast, KitScenarist, KitScenaristDark) plus the six
+        // writer-facing editor themes from the design brief.
+        assert_eq!(Theme::SCRIPT.len(), 12);
+        assert_eq!(Theme::ALL.len(), 35);
     }
 
     /// KIT Scenarist colours, sampled from the reference editor/PDF:
