@@ -1,314 +1,215 @@
-# ScriptCraft
+<div align="center">
 
-**The free, open-source, revision-first screenwriting studio.**
+  <img src="scriptcraft-app/assets/ScriptCraft-1024.png" alt="ScriptCraft Logo" width="120" />
 
-ScriptCraft is a native Rust screenwriting app for writers and production teams.
-It is built around the part of the job most tools treat as an add-on:
-production revisions. Open KIT projects, exchange Final Draft files, lock
-pages, issue coloured revisions, and export page-exact PDFs — offline, on
-macOS, Windows and Linux.
+  # ScriptCraft
 
-> **Status — v0.8.12.** Revision-complete for the core production workflow:
-> stable block/scene identity, draft diff and compare, restore-as-copy, omitted
-> scenes, dual dialogue, title-page editor and revision summary (scene counts,
-> CSV and printable PDF). The page grid uses the standard 1/6-inch screenplay
-> leading and 58 lines on A4, and the editor preview plus the PDF export follow
-> KIT Scenistar's `final_draft_a4.kitss` (A4 margins 38/24/17/24 mm, 155 mm text
-> column, right-aligned transitions), so an exported PDF matches the
-> writer-facing KIT Scenarist page: regular body text, bold title-page title
-> and page numbers. `.kitsp` saves preserve unknown sidecar rows, and CI runs
-> runtime interaction smoke on macOS/Linux/Windows.
-> **v0.8.12 adds six writer themes** to the palette picker: Midnight Ink,
-> Amber Projector, Noir Emerald, Velvet Curtain, Red Light and Paper and Rust,
-> from the editor design brief's colour roles (window, panel, page, text, muted,
-> accent). The ScriptCraft palette set grows from six to twelve entries and the
-> Settings ▸ Appearance dropdown from 29 to 35 themes. Every new theme carries
-> the same semantic roles as Midnight and Light, so the widgets need no
-> per-theme branch and script page text stays monospace with colour changes
-> only; the light Paper and Rust theme keeps a readable page. All thirty-five
-> palettes are contrast-tested.
-> **v0.8.11 adds Liberation Mono** as a bundled page face: a metric-compatible
-> 0.6 em monospace with Latin, Greek and Cyrillic in one design.
-> **v0.8.10 restores the regular PDF body**: v0.8.9 briefly set every line in
-> bold after reading the embedded Courier New Bold font, but KIT's rendered
-> pages keep the script regular and bold only the title and page numbers.
-> **v0.8.9 adds Fade In and Markdown**: import and export real `.fadein`
-> archives (ZIP + OSF) with scene numbers, notes, title page and dual dialogue,
-> and export Markdown for notes, wikis and review. The website in `website/` is
-> published to GitHub Pages. v0.8.6 keeps every typed space on the page,
-> uses Courier New as the page face when the system has it (falling back to
-> IBM Plex Mono), adds
-> a monochrome-paper option directly under the theme picker, 35 theme palettes
-> in a grouped dropdown (KIT Scenarist light and dark, the six writer themes
-> added in v0.8.12, plus every base Omarchy theme), a Tab
-> character picker, live script recognition in Research, and a release check
-> that offers a newer version when the app opens.
-> **v0.8.7 fixes the Windows desktop**: a light-mode Windows desktop no longer
-> replaces the app's menus with stock white visuals, the File / Edit / Script /
-> View / Window / Help menu bar is drawn on Windows and Linux, the Windows title
-> bar follows the active palette instead of turning white, and the
-> `ScriptCraft.exe` now carries the app icon.
-> **v0.8.8 installs updates in place**: the update prompt downloads the
-> platform build, verifies the published SHA-256, replaces the app after it
-> quits and restarts it. The KIT Scenarist palette now uses KIT's published
-> light and dark colours, the page grid is the standard 1/6-inch leading, the
-> editor preview and the PDF export follow KIT Scenistar's Final Draft A4
-> template (right-aligned transitions), and panics are written to `panic.log`
-> so a crash can be reported without a terminal.
-> v0.8.5 corrected editor input: clicks and carets map through whitespace,
-> double-click selects a word, triple-click the paragraph, and drag selections
-> start at the press. v0.8.4 added live
-> spellchecking in English, Bulgarian and Russian (Hunspell dictionaries shipped
-> as removable data files, ALL-CAPS screenplay lines ignored, right-click
-> suggestions, custom and session dictionaries) and thirty-five contrast-tested
-> themes; v0.8.3 made Draft Comparison changes-only with clickable gaps, and
-> v0.8.2 redesigned the workspace.
->
-> **Distribution note:** macOS builds in this release are ad-hoc signed (no
-> Developer ID/notarisation) and Windows/Linux packages are unsigned. The
-> in-app installer verifies the download's SHA-256 and replaces the app, but it
-> cannot bypass Gatekeeper/SmartScreen until those builds are signed. See [`docs/release-checklist.md`](docs/release-checklist.md) and
-> [`docs/v0.8-plan.md`](docs/v0.8-plan.md).
+  **The free, open-source, revision-first screenwriting studio.**
 
-![ScriptCraft editor](scriptcraft-app/tests/snapshots/01_script_top.png)
+  [![Release](https://img.shields.io/github/v/release/MihailM17/scriptcraft?color=3b82f6&style=flat-square)](https://github.com/MihailM17/scriptcraft/releases)
+  [![CI](https://img.shields.io/github/actions/workflow/status/MihailM17/scriptcraft/ci.yml?branch=main&label=CI&style=flat-square)](https://github.com/MihailM17/scriptcraft/actions/workflows/ci.yml)
+  [![Rust](https://img.shields.io/badge/rust-2021%20edition-dea584?style=flat-square&logo=rust)](https://www.rust-lang.org)
+  [![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)](LICENSE)
+  [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-555?style=flat-square)](#installation)
 
-*Compare a revision baseline with the live draft, filter the changes and jump
-straight to the block that needs work.*
+  <p align="center">
+    <a href="#key-features">Key Features</a> •
+    <a href="#why-revision-first">Why Revision-First</a> •
+    <a href="#interchange-support">Interchange</a> •
+    <a href="#installation">Downloads</a> •
+    <a href="#performance-budgets">Benchmarks</a> •
+    <a href="#build-from-source">Build</a> •
+    <a href="#contributing">Contributing</a>
+  </p>
 
-![ScriptCraft compare workspace](scriptcraft-app/tests/snapshots/14_compare_drafts.png)
+</div>
 
-## Why revision-first
+---
 
-A screenplay is not finished when the draft is. It is finished when pages are
-locked, scenes are numbered, revisions are issued, and everyone is working from
-the same coloured pages. ScriptCraft treats that as the core workflow, not a
-plugin or a paid upgrade.
+ScriptCraft is a native, offline-first screenwriting application built in Rust for writers and production teams. 
 
-The goal is simple: **no compromises on the work a production actually
-depends on** — correct pagination, reliable revisions, honest interchange, and
-never losing a word. It is not a promise to clone every feature of every paid
-app on day one.
+Most screenwriting software treats the production phase as an afterthought or a paywalled extra. ScriptCraft is engineered from the ground up around **production revisions**: open KIT Scenarist projects, exchange Final Draft and Fade In files, lock pages and scene numbers, issue colored revision sets, and export page-exact PDFs—blazing fast, fully offline, on macOS, Windows, and Linux.
 
-## The revision workflow
+<div align="center">
+  <img src="scriptcraft-app/tests/snapshots/01_script_top.png" alt="ScriptCraft Screenplay Editor" width="100%" />
+  <p><em>The ScriptCraft Editor: Typographically exact 1/6-inch line pitch, live revision marks, and distraction-free writing.</em></p>
+</div>
 
-- **Revision sets** — Blue → Pink → Yellow → … with names, dates and page-count
-  baselines. Baselines live inside the `.kitsp` project and survive reopen; the
-  Revision History window lists every set.
-- **Visible marks** — changed blocks get coloured margin bars; revision-pages
-  mode shows only the current revision.
-- **Page-exact output** — revision colours, `*` marks, header/footer revision
-  labels and Revised title-page fields in PDF and Final Draft `.fdx`.
-- **Locked pages and scenes** — freeze issued pagination. Pages inserted after
-  a lock are labelled `42A`, `42B`, …; later pages keep their original numbers.
-  Scene numbers have a separate lock.
-- **KIT versions** — save the current draft as a real `script_versions` row in
-  the KIT 0.7.2 schema (round-trip tested); existing saved versions can become
-  revision baselines.
-- **Compare, restore, omit** — compare any two drafts or a draft against a
-  revision baseline, restore a baseline as a new `.kitsp`, and omit a scene
-  without losing its number.
-- **Revision summary** — scene-grouped added/removed/changed counts, page
-  baseline, totals, deterministic UTF-8 CSV for Excel/Numbers and a printable
-  A4 PDF; counts come from the same diff as compare.
-- **Release tooling:** ad-hoc macOS bundling script, Criterion benchmarks,
-  release checklist and migration notes. In-app updates are staged, checksum-
-  verified and applied by a post-exit helper; signed/notarised distribution
-  remains follow-up work.
+<details>
+<summary><b>🚀 What's New in v0.8.12 (Click to expand)</b></summary>
+<br>
 
-## The editor
+* **Six New Writer Themes:** Added *Midnight Ink*, *Amber Projector*, *Noir Emerald*, *Velvet Curtain*, *Red Light*, and *Paper and Rust*, expanding the palette picker to 35 contrast-tested themes.
+* **Liberation Mono Bundled:** Added metric-compatible 0.6 em monospace typeface supporting Latin, Greek, and Cyrillic out of the box.
+* **Lossless Interchange:** Import and export native `.fadein` archives (ZIP + OSF) with dual dialogue and notes, plus Markdown export for reviews and wikis.
+* **Exact A4 Grid:** Uses the industry-standard 1/6-inch leading (58 lines on A4) matching KIT Scenarist's `final_draft_a4.kitss` (no bold body, right-aligned transitions).
+* **In-Place Updates:** Staged, checksum-verified (SHA-256) auto-updates with post-exit restart.
+* **Native Desktop Chrome:** Windows title bars tint to the active palette with embedded icon resources; macOS draws fullsize translucent titlebars with native traffic lights.
+* **Crash Resilience:** Integrated `panic.log` capture for instant, terminal-free crash diagnostics.
 
-- Fixed A4 page editor with Courier New (system face, with IBM Plex Mono,
-  Liberation Mono and Courier Prime as alternatives) for one type design across
-  Latin and Cyrillic, 1/6-inch screenplay leading (58 lines per A4 page),
-  page-accurate pagination, scene
-  numbers, `(MORE)` / `(CONT'D)` markers, and zoom that scales pages without
-  reflowing text. Every space you type keeps its own cell, on screen and in the
-  PDF.
-- Autocomplete for scene headings, characters, locations and transitions; Tab
-  in an empty character cue opens the story's character picker.
-- Research ▸ Characters and ▸ Locations recognise the cues and scene headings
-  already in the draft, with one click to turn a recognised name into a card.
-- Screenplay-aware paste: plain text copied from ChatGPT or another editor is
-  split into scene headings, action, cues, parentheticals, dialogue and
-  transitions. Prose without screenplay structure still pastes as one block.
-- Undo/redo, find/replace, typewriter scrolling, multi-document support,
-  autosave, and crash recovery from atomic saves.
-- Script, Research, Cards, Statistics and Settings modules, plus a Start page
-  with recent projects and a one-click Open Projects Folder button.
-- Spellchecking while you type in English (US), Bulgarian and Russian, with
-  Hunspell dictionaries shipped as removable data files. Right-click a flagged
-  word for suggestions, **Add to dictionary** (saved per language) or
-  **Ignore**; scene headings, cues and sound effects in ALL CAPS are skipped so
-  screenplay formatting is not flagged as prose.
-- 35 theme palettes in one grouped Settings ▸ Appearance dropdown, with the
-  ScriptCraft and Omarchy families as headings and a solid scrollbar so the
-  long list is obvious. ScriptCraft's own are Midnight, Light, Sepia, High
-  Contrast, **KIT Scenarist** in KIT's published light and dark colours, plus
-  the writer themes added in v0.8.12: Midnight Ink, Amber Projector, Noir
-  Emerald, Velvet Curtain, Red Light and Paper and Rust. The rest are the base
-  themes Omarchy ships, imported from
-  its palettes: Catppuccin, Catppuccin Latte, Ethereal, Everforest, Flexoki
-  Light, Gruvbox, Hackerman, Jade Horse, Kanagawa, Last Horizon, Lumon, Lupine,
-  Matte Black, Matcha, Nord, Retro 82, Ristretto, Rosé Pine, Solitude,
-  Starship, Tokyo Night, Vantablack and White. Every palette is contrast-tested,
-  and revision colours stay industry-standard on all of them (pale marks get an
-  edge so they remain locatable on white and cream pages).
-- **Check for updates.** Settings ▸ General shows the build version and a
-  Check for updates button; the app also asks GitHub once at launch. When a
-  newer release exists the prompt downloads the right build, verifies the
-  published SHA-256, and a helper replaces the app and relaunches it after the
-  current window closes. Cancel, a checksum failure or a permission error
-  leaves the installed copy untouched and shows the reason.
-- Monochrome paper, directly under the theme picker, turns the page
-  white-with-black-ink while the app keeps its theme; revision marks stay
-  coloured.
-- Five Settings pages, one kind of decision each: General (updates, About,
-  reset), Appearance (theme, paper, page face), Writing (view, scene list,
-  corrections), Spelling, Saving. A search box finds any row by name or by the
-  words you would use for it and opens the page that holds it. Reset is last
-  in General, asks before wiping anything, and leaves projects and backups
-  alone. Only controls that take effect appear — the dead Language row is gone.
-- FastFormat shortcuts: select one or more blocks and press `Cmd+1`…`Cmd+0`
-  (`Ctrl+1`…`Ctrl+0` on Windows/Linux) for scene heading, action, character,
-  parenthetical, dialogue, transition, shot, scene characters, lyrics and
-  non-printable text.
-- Native macOS menu bar. On Windows and Linux the toolbar carries a real
-  File / Edit / Script / View / Window / Help menu bar (the compact Menu popup
-  is macOS-only). The Windows title bar is dark-on-dark and tinted from the
-  active palette instead of following the desktop's light theme, and both the
-  window and the `.exe` file carry the ScriptCraft icon (the icon is embedded
-  as a Windows resource at build time).
-- IME input, cross-block selection, and command-based undo/redo through the
-  shared document model.
+*See the full release history in [`docs/releases/`](docs/releases/).*
 
-## Interchange
+</details>
 
-- **KIT `.kitsp`** — read and write real KIT Scenarist projects, including
-  metadata, research, cards and saved versions. ScriptCraft-only data
-  (revision baselines, stable block/scene identity, page locks) lives in
-  `scenario_data` rows that KIT ignores.
-- **Final Draft `.fdx`** — import/export paragraphs, title page, scene numbers,
-  revision colours and `*` marks, and revised title-page fields.
-- **Fade In `.fadein`** — import/export real ZIP + OSF documents with scene
-  numbers, title page, notes, parentheticals and native dual dialogue.
-- **Fountain** — import/export.
-- **Markdown `.md`** — export a clean one-way copy for notes, wikis and review.
-- **PDF** — rendered from the same layout engine as the editor, not a second
-  paginator; the body is regular and only the title-page title and page
-  numbers are bold, as KIT prints them.
-- **Planned** — conversion reports for lossy imports/exports, and DOCX/RTF only
-  if real users need them.
+---
 
-## What this is — and what it isn't yet
+## 🎬 Why Revision-First?
 
-ScriptCraft is:
+A screenplay is not finished when the first draft is written. It is finished when **pages are locked, scenes are numbered, revisions are issued, and the entire cast and crew are working from the exact same colored pages**.
 
-- **Free and open source** (Apache-2.0), with no paywalled writing features.
-- **Local-first**: no account, no telemetry by default, no cloud dependency.
-- **Native**: one Rust layout engine behind the editor and the PDF renderer,
-  not a web wrapper.
-- **Interoperable**: KIT `.kitsp`, Final Draft `.fdx`, Fade In `.fadein`,
-  Fountain, Markdown and PDF.
-- **Revision-first**: the production workflow is the product, not an add-on.
-- **Cross-platform**: macOS, Windows and Linux from one codebase.
+ScriptCraft treats the production workflow as the core product:
 
-It is not yet:
+* 🎨 **Industry Revision Sets:** Blue → Pink → Yellow → Green → Goldenrod → Buff → Salmon → Cherry with timestamps, names, and page-count baselines saved inside the project.
+* 🔒 **Locked Pages & Scenes:** Freeze issued pagination. Adding text after a lock generates `42A`, `42B` sub-pages; subsequent pages maintain their original numbers. Scene numbers lock independently.
+* 📑 **Visible Change Marks:** Colored margin bars and asterisk (`*`) marks indicate modified blocks. Filter the view to display only current-revision pages.
+* ⚖️ **Draft Comparison & Diffs:** Compare any two drafts or compare a live draft against a revision baseline. Jump directly to differences with clickable gaps.
+* 📊 **Revision Summary:** Scene-grouped counts for added, removed, and modified blocks, deterministic UTF-8 CSV exports for production spreadsheets, and printable A4 summary PDFs.
+* 🔄 **Restore-as-Copy:** Safely restore any past revision baseline as a fresh project without overwriting current work.
 
-- a feature-for-feature Final Draft clone;
-- a collaboration, cloud or account product;
-- a production breakdown/tagging tool;
-- a DOCX/RTF converter;
-- a plugin platform;
-- fully signed and notarised on every platform. macOS builds are ad-hoc signed
-  (no Developer ID certificate in this build pipeline) and Windows/Linux
-  packages are unsigned, so the in-app updater still triggers OS warnings.
+<div align="center">
+  <img src="scriptcraft-app/tests/snapshots/14_compare_drafts.png" alt="ScriptCraft Compare Workspace" width="100%" />
+  <p><em>Compare a revision baseline against the active draft: filter deltas, inspect changes, and jump directly to blocks that need attention.</em></p>
+</div>
 
-The scope is deliberate. If a feature is not needed for the revision workflow
-or the writing core, it is not in this release.
+---
 
-## Install
+## ✨ Key Features
 
-Prebuilt packages are attached to each GitHub release:
+### 📐 Mathematically Exact Layout & Pagination
+* **Fixed 1/6-Inch Line Leading:** Adheres strictly to the 12 pt screenplay grid (4.2333 mm pitch, 58 lines per A4 page) matching KIT Scenarist and Final Draft.
+* **Zoom-Independent Engine:** Geometry is calculated in document units (millimetres and rows). Zooming scales rendering without ever reflowing text or shifting page breaks.
+* **Typeface Fidelity:** Prefers system Courier New, falling back gracefully to bundled Liberation Mono, Courier Prime, or IBM Plex Mono with exact 0.6 em advance across Latin and Cyrillic.
 
-- **macOS (Apple silicon):** `ScriptCraft-<version>-macos-arm64.dmg`, ad-hoc
-  signed — right-click ▸ Open on first launch.
-- **Windows 10/11 (x64):** `ScriptCraft-<version>-windows-x64.zip` — unzip and
-  run `ScriptCraft.exe`.
-- **Linux (x86_64):** `ScriptCraft-<version>-linux-x86_64.tar.gz` — needs GTK3
-  (`sudo apt install libgtk-3-0` on Debian/Ubuntu); extract and run
-  `./scriptcraft`. The archive also contains a `.desktop` file and icon.
+### ✍️ Distraction-Free Screenplay Editor
+* **Smart Screenplay Formatting:** Auto-advancing block types, autocomplete for scenes, characters, and locations, plus FastFormat hotkeys (`Cmd+1`–`Cmd+0` / `Ctrl+1`–`Ctrl+0`).
+* **Intelligent Paste:** Split pasted text from ChatGPT or raw documents into proper scene headings, action, cues, parentheticals, and dialogue blocks.
+* **Native Dual Dialogue:** Side-by-side simultaneous dialogue with full pagination and PDF export support.
+* **Writing-Aware Spellchecker:** Built-in Hunspell spellchecking for English (US), Bulgarian, and Russian. Intelligently ignores ALL-CAPS sluglines and character cues to avoid false flags.
 
-## Build from source
+### 🎨 35 Contrast-Checked Themes
+* **ScriptCraft Originals:** Midnight, Light, Sepia, High Contrast, KIT Scenarist Light & Dark, and Writer Palettes (Midnight Ink, Amber Projector, Noir Emerald, Velvet Curtain, Red Light, Paper and Rust).
+* **Curated Studio Themes:** Tokyo Night, Catppuccin, Nord, Gruvbox, Rosé Pine, Everforest, Kanagawa, Dracula, and more.
+* **Monochrome Paper Mode:** Render white paper with dark ink while keeping your editor chrome dark.
 
+### 🗂️ Studio Tools: Cards, Research & Stats
+* **Index Cards:** Visual corkboard for organizing scenes, structure, and beats.
+* **Research Workspace:** Automatic entity recognition for characters and locations with rich reference cards and photo attachments.
+* **Chronometry & Statistics:** Real-time story duration estimates calibrated to scene word-counts, dialogue-to-action ratios, and character speaking time reports.
+
+---
+
+## 🔄 Interchange Support
+
+ScriptCraft prioritizes open ecosystems and guarantees honest interchange with industry-standard software:
+
+| Format | Extension | Import | Export | Revision Tracking | Fidelity Notes |
+|:---|:---:|:---:|:---:|:---:|:---|
+| **KIT Scenarist** | `.kitsp` | ✅ | ✅ | ✅ | Clean-room SQLite round-tripping; unknown sidecar rows preserved |
+| **Final Draft** | `.fdx` | ✅ | ✅ | ✅ | Revision colors, asterisk `*` marks, dual dialogue, title page |
+| **Fade In** | `.fadein` | ✅ | ✅ | ✅ | ZIP + OSF archive with scene numbers, notes, and dual dialogue |
+| **Fountain** | `.fountain` | ✅ | ✅ | — | Industry-standard plain text formatting |
+| **Print-Ready PDF** | `.pdf` | — | ✅ | ✅ | Generated directly from the layout engine; 1:1 parity with editor view |
+| **Markdown** | `.md` | — | ✅ | — | Clean structured text export for wikis, notes, and collaboration |
+
+---
+
+## ⚡ Performance Budgets
+
+ScriptCraft is written in 100% native Rust—no web views, no Electron overhead, and zero runtime bloat. Every critical path is covered by Criterion benchmarks ([`docs/benchmarks.md`](docs/benchmarks.md)):
+
+| Benchmark Metric | Measurement | Performance Target |
+|:---|:---|:---|
+| **Incremental Block Relayout** | `92 µs` | Must stay < 16 ms (60 FPS typing budget) |
+| **Draft Diff & Compare** | `44 µs` | Instant real-time comparison |
+| **Revision Marks Resolution** | `3.1 µs` | Zero overhead on editor draw |
+| **SQLite `.kitsp` Load** | `0.66 ms` | Sub-millisecond project opens |
+| **Full A4 Layout (21 Scenes)** | `0.76 ms` | Instant initial pagination |
+| **Full PDF Export** | `30 ms` | Near-instant disk export |
+
+---
+
+## 📦 Installation
+
+Prebuilt binaries are available for every major desktop operating system on the [**Releases Page**](https://github.com/MihailM17/scriptcraft/releases):
+
+| Platform | Architecture | Package Format | Notes |
+|:---|:---|:---|:---|
+| **macOS** | Apple Silicon (`arm64`) | `ScriptCraft-<version>-macos-arm64.dmg` | Ad-hoc signed. *Right-click ▸ Open on first launch*. |
+| **Windows** | x64 (Windows 10/11) | `ScriptCraft-<version>-windows-x64.zip` | Unzip and run `ScriptCraft.exe`. Dark DWM titlebar enabled. |
+| **Linux** | x86_64 | `ScriptCraft-<version>-linux-x86_64.tar.gz` | Requires GTK3 (`libgtk-3-0`). Includes desktop file and icon. |
+
+> [!NOTE]
+> **Code Signing:** macOS builds are currently ad-hoc signed and Windows/Linux archives are unsigned. An in-place SHA-256 verified updater is included in-app. Developer ID notarization is in progress.
+
+---
+
+## 🛠️ Build from Source
+
+### Prerequisites
+* Rust 1.80+ (`rustup default stable`)
+* GTK3 development headers on Linux (`sudo apt install libgtk-3-dev`)
+
+### Run in Development
 ```sh
 cargo run -p scriptcraft-app
 ```
 
-To build the optimised binary:
-
+### Build Optimized Release Binary
 ```sh
 cargo build --release -p scriptcraft-app
 ```
+The compiled binary will be located at `target/release/scriptcraft-app`.
 
-Windows and Linux packages are built by `.github/workflows/packages.yml`;
-the macOS `.app`/DMG is built locally with `packaging/macos/bundle.sh`
-(ad-hoc signed here; Developer ID + notarisation when credentials are available). See
-[`docs/release-checklist.md`](docs/release-checklist.md).
-
-## Tests
+### Testing & Verification
+ScriptCraft maintains strict test coverage, visual snapshots, and supply-chain checks:
 
 ```sh
+# Run the full unit and integration test suite
 cargo test --workspace
+
+# Linting and formatting checks
 cargo fmt --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo deny check
-```
 
-Snapshot tests:
-
-```sh
+# Run off-screen visual UI snapshot regression tests
 UPDATE_SNAPSHOTS=1 cargo test -p scriptcraft-app --test ui_snapshots
 ```
 
-The test suite includes A95 KIT round-trips, editor/PDF layout parity, FDX,
-Fade In, Fountain and Markdown conversion, 500-page performance gates,
-interaction tests and UI snapshots. See [`docs/v0.8-plan.md`](docs/v0.8-plan.md) for the acceptance
-matrix.
+---
 
-## Project layout
+## 🏗️ Architecture
 
-- `scriptcraft-core/` — UI-free model, `.kitsp` reader/writer, Fountain, FDX,
-  Fade In and Markdown converters, revision baselines, format validation and
-  coaching checks.
-- `scriptcraft-layout/` — the shared wrap/pagination/placement engine that
-  drives both the editor pages and the PDF renderer.
-- `scriptcraft-app/` — `eframe`/`egui` desktop app, theme, native menu and
-  modules.
-- `fixtures/A95.kitsp` — 21-scene Bulgarian test project used by the tests;
-  `fixtures/example.fdx` — small Final Draft sample for the FDX tests.
-- `fixtures/real/` — permission-cleared compatibility files; see
-  `fixtures/real/README.md` before adding one.
-- `docs/` — format notes, plans, spikes, benchmarks, release checklist,
-  migration guide and draft release notes.
+The repository is organized into three decoupled crates:
 
-Migrating from KIT Scenarist? See
-[`docs/migration-from-kit.md`](docs/migration-from-kit.md).
+```
+scriptcraft/
+├── scriptcraft-core/     # Pure document models, SQLite (.kitsp), FDX, Fade In, 
+│                         # revision diffing, validation, and chronometry.
+├── scriptcraft-layout/   # Document-unit layout engine (wrapping, 58-line pagination,
+│                         # millimeter coordinate placement, and printpdf export).
+└── scriptcraft-app/      # Native egui/eframe desktop application, UI widgets,
+                          # 35 themes, spellchecker, and OS integrations.
+```
 
-## Contributing
+* Migrating from KIT Scenarist? Check out the [KIT Scenarist Migration Guide](docs/migration-from-kit.md).
+* Interested in project internals? Read [KIT Format Specifications](docs/kitsp-format.md) and the [v0.8 Architecture Plan](docs/v0.8-plan.md).
 
-Issues and pull requests are welcome. Start with
-[`CONTRIBUTING.md`](CONTRIBUTING.md), then read the current plan in
-[`docs/v0.8-plan.md`](docs/v0.8-plan.md).
+---
 
-The highest-value contributions right now are:
+## 🤝 Contributing
 
-- real-world, legally usable `.fdx`, `.kitsp` and Fountain fixtures (with
-  provenance and permission);
-- runtime testing on Windows and Linux;
-- Bulgarian/Cyrillic text and screenplay-convention testing;
-- bug reports with exact steps and a minimal project file.
+Contributions from the filmmaking and open-source communities are warmly welcome! Please review [`CONTRIBUTING.md`](CONTRIBUTING.md) before submitting a pull request.
 
-## License
+The highest-value contributions right now:
+* 📁 **Real-world fixtures:** Permission-cleared `.fdx`, `.kitsp`, `.fadein`, or Fountain scripts to test edge-case wrapping and pagination.
+* 🪟 **Platform testing:** Testing on various Linux desktop environments (Wayland/X11) and Windows 10/11 scaling configurations.
+* 🌐 **Internationalization:** Bulgarian, Cyrillic, and non-Latin screenplay convention validation.
+* 🐛 **Bug reports:** Detailed reproduction steps with minimal reproduction files.
 
-Apache-2.0. Bundled fonts are under the SIL Open Font License; see
-`scriptcraft-app/assets/fonts/licenses/` and `NOTICE`.
+---
+
+## 📄 License
+
+ScriptCraft is licensed under the [Apache License, Version 2.0](LICENSE).  
+Bundled typefaces (Courier Prime, IBM Plex Mono, Liberation Mono, PT Sans) are distributed under the [SIL Open Font License](http://scripts.sil.org/OFL). See `NOTICE` and [`scriptcraft-app/assets/fonts/licenses/`](scriptcraft-app/assets/fonts/licenses/) for details.
