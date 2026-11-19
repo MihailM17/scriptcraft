@@ -25,6 +25,8 @@ pub enum ExportFormat {
     Pdf,
     Fdx,
     Fountain,
+    FadeIn,
+    Markdown,
 }
 
 impl ExportFormat {
@@ -33,6 +35,8 @@ impl ExportFormat {
             Self::Pdf => "PDF",
             Self::Fdx => "FDX",
             Self::Fountain => "Fountain",
+            Self::FadeIn => "Fade In",
+            Self::Markdown => "Markdown",
         }
     }
 }
@@ -133,7 +137,13 @@ pub fn dialog(ctx: &Context, state: &mut ExportDialog<'_>) -> ExportAction {
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
                         ui.label("Format:");
-                        for fmt in [ExportFormat::Pdf, ExportFormat::Fdx, ExportFormat::Fountain] {
+                        for fmt in [
+                            ExportFormat::Pdf,
+                            ExportFormat::Fdx,
+                            ExportFormat::Fountain,
+                            ExportFormat::FadeIn,
+                            ExportFormat::Markdown,
+                        ] {
                             ui.radio_value(state.format, fmt, fmt.label());
                         }
                     });
@@ -232,7 +242,11 @@ pub fn dialog(ctx: &Context, state: &mut ExportDialog<'_>) -> ExportAction {
                     && !state.path.is_empty()
                     && matches!(
                         *state.format,
-                        ExportFormat::Pdf | ExportFormat::Fdx | ExportFormat::Fountain
+                        ExportFormat::Pdf
+                            | ExportFormat::Fdx
+                            | ExportFormat::Fountain
+                            | ExportFormat::FadeIn
+                            | ExportFormat::Markdown
                     );
                 let label = if file_exists { "Rewrite" } else { "Export" };
                 if ui
@@ -266,6 +280,24 @@ pub fn dialog(ctx: &Context, state: &mut ExportDialog<'_>) -> ExportAction {
                 "Fountain",
             ),
             ExportFormat::Fdx => ("script.fdx".to_string(), "fdx", "FDX"),
+            ExportFormat::FadeIn => (
+                if state.title.is_empty() {
+                    "script.fadein".to_string()
+                } else {
+                    format!("{}.fadein", state.title)
+                },
+                "fadein",
+                "Fade In",
+            ),
+            ExportFormat::Markdown => (
+                if state.title.is_empty() {
+                    "script.md".to_string()
+                } else {
+                    format!("{}.md", state.title)
+                },
+                "md",
+                "Markdown",
+            ),
         };
         dlg = dlg.add_filter(filter, &[ext]).set_file_name(&name);
         if let Some(dst) = dlg.save_file() {

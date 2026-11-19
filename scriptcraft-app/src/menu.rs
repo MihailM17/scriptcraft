@@ -17,6 +17,7 @@ pub const ID_SAVE: &str = "kit.save";
 pub const ID_SAVE_AS: &str = "kit.save_as";
 pub const ID_IMPORT: &str = "kit.import";
 pub const ID_IMPORT_FDX: &str = "kit.import_fdx";
+pub const ID_IMPORT_FADEIN: &str = "kit.import_fadein";
 pub const ID_EXPORT: &str = "kit.export";
 pub const ID_PREVIEW: &str = "kit.preview";
 pub const ID_UNDO: &str = "kit.undo";
@@ -57,6 +58,7 @@ impl NativeMenu {
         let save_as = MenuItem::with_id(ID_SAVE_AS, "Save as...", true, acc("Shift+CmdOrCtrl+S"));
         let import = MenuItem::with_id(ID_IMPORT, "Import Fountain...", true, None);
         let import_fdx = MenuItem::with_id(ID_IMPORT_FDX, "Import Final Draft...", true, None);
+        let import_fadein = MenuItem::with_id(ID_IMPORT_FADEIN, "Import Fade In...", true, None);
         let export = MenuItem::with_id(ID_EXPORT, "Export to...", true, None);
         let preview = MenuItem::with_id(ID_PREVIEW, "Print preview script", true, acc("F12"));
 
@@ -101,6 +103,7 @@ impl NativeMenu {
                 &sep_a,
                 &import,
                 &import_fdx,
+                &import_fadein,
                 &export,
                 &preview,
                 &sep_b,

@@ -36,6 +36,12 @@ const MARGIN_R: f32 = 17.0;
 const FONT_PT: f32 = 12.0;
 /// 0.6em advance at 12pt = 7.2pt = 2.54mm per column.
 const CHAR_MM: f32 = 2.54;
+
+/// KIT Scenarist's PDF export renders the whole screenplay in Courier New
+/// Bold, even though its template stores `bold="false"` for every block. We
+/// match that printed look with Courier Prime Bold; the advance width is the
+/// same, so pagination and the editor's geometry are unchanged.
+const BODY_BOLD: bool = true;
 /// Template line pitch, shared with the editor's row grid.
 const PITCH_MM: f32 = ROW_MM;
 /// Millimetres per PDF point (TextMatrix offsets are in points).
@@ -452,7 +458,7 @@ pub fn layout_pages_with_marks_and_latest(
                             let mut line = PrintLine::text_line(
                                 MARGIN_L + dual::cue_x_mm(&text, right),
                                 text,
-                                false,
+                                BODY_BOLD,
                             );
                             line.revision = revisions[cue_bi];
                             lines.push(line);
@@ -466,7 +472,7 @@ pub fn layout_pages_with_marks_and_latest(
                         let mut line = PrintLine::text_line(
                             MARGIN_L + cell.x_mm,
                             cell.text.clone(),
-                            cell.bold,
+                            BODY_BOLD,
                         );
                         line.revision = cell.span.map(|span| revisions[span.bi]).unwrap_or(None);
                         lines.push(line);
@@ -475,7 +481,7 @@ pub fn layout_pages_with_marks_and_latest(
                 let mut more = |right: bool, cue_bi: usize| {
                     let text = "(MORE)".to_string();
                     let x = MARGIN_L + dual::more_x_mm(right) - 6.0 * CHAR_MM;
-                    let mut line = PrintLine::text_line(x, text, false);
+                    let mut line = PrintLine::text_line(x, text, BODY_BOLD);
                     line.revision = revisions[cue_bi];
                     lines.push(line);
                 };
@@ -489,22 +495,24 @@ pub fn layout_pages_with_marks_and_latest(
             }
             let b = &renum[chunk.bi];
             let revision = revisions[chunk.bi];
-            // `final_draft_a4.kitss` sets bold="false" on every block;
-            // transitions are the only block aligned to the right edge.
+            // KIT's template stores bold="false" but its PDF renderer prints
+            // the whole body in Courier New Bold; transitions are the only
+            // block aligned to the right edge.
             let (x, bold, right_aligned) = match b.element_type {
-                ElementType::SceneHeading => (MARGIN_L, false, false),
-                ElementType::SceneCharacters => (MARGIN_L, false, false),
-                ElementType::Action | ElementType::Shot => (MARGIN_L, false, false),
-                ElementType::Character => (X_CUE, false, false),
-                ElementType::Parenthetical => (X_PAREN, false, false),
-                ElementType::Dialogue => (X_DLG, false, false),
-                ElementType::Lyrics => (X_DLG, false, false),
-                ElementType::Transition => (TEXT_RIGHT, false, true),
-                ElementType::NonPrintable => (X_CUE, false, false),
+                ElementType::SceneHeading => (MARGIN_L, BODY_BOLD, false),
+                ElementType::SceneCharacters => (MARGIN_L, BODY_BOLD, false),
+                ElementType::Action | ElementType::Shot => (MARGIN_L, BODY_BOLD, false),
+                ElementType::Character => (X_CUE, BODY_BOLD, false),
+                ElementType::Parenthetical => (X_PAREN, BODY_BOLD, false),
+                ElementType::Dialogue => (X_DLG, BODY_BOLD, false),
+                ElementType::Lyrics => (X_DLG, BODY_BOLD, false),
+                ElementType::Transition => (TEXT_RIGHT, BODY_BOLD, true),
+                ElementType::NonPrintable => (X_CUE, BODY_BOLD, false),
             };
             if chunk.contd {
                 if let Some(cue) = cue_name_for(&renum, chunk.bi) {
-                    let mut line = PrintLine::text_line(X_CUE, format!("{cue} (CONT'D)"), false);
+                    let mut line =
+                        PrintLine::text_line(X_CUE, format!("{cue} (CONT'D)"), BODY_BOLD);
                     line.revision = revision;
                     lines.push(line);
                 }
@@ -518,7 +526,7 @@ pub fn layout_pages_with_marks_and_latest(
                 lines.push(PrintLine::text_line(
                     MARGIN_L - SCENE_NUM_GAP - w,
                     label,
-                    false,
+                    BODY_BOLD,
                 ));
                 number_pushed = true;
             }
@@ -549,7 +557,7 @@ pub fn layout_pages_with_marks_and_latest(
             if chunk.more {
                 let mut line = PrintLine {
                     right_aligned: true,
-                    ..PrintLine::text_line(0.0, "(MORE)".to_string(), false)
+                    ..PrintLine::text_line(0.0, "(MORE)".to_string(), BODY_BOLD)
                 };
                 line.revision = revision;
                 lines.push(line);
@@ -1323,25 +1331,25 @@ mod tests {
         let num = page.iter().position(|l| l.text == "1.").unwrap();
         let w = 2.0 * CHAR_MM;
         assert!((page[num].x_mm - (MARGIN_L - SCENE_NUM_GAP - w)).abs() < 0.01);
-        assert!(!page[num].bold && !page[num].share_row);
+        assert!(page[num].bold && !page[num].share_row);
         let head = &page[num + 1];
         assert_eq!(head.text, "EXT. PARK - DAY");
         assert_eq!(head.x_mm, MARGIN_L);
-        assert!(!head.bold && head.share_row);
+        assert!(head.bold && head.share_row);
         // Character cue at 38 + 51.
         let cue = page.iter().find(|l| l.text == "IVAN").unwrap();
         assert!((cue.x_mm - X_CUE).abs() < 0.01);
-        assert!(!cue.bold);
+        assert!(cue.bold);
         // Dialogue at 38 + 26.
         let dlg = page.iter().find(|l| l.text.starts_with("Hello")).unwrap();
         assert!((dlg.x_mm - X_DLG).abs() < 0.01);
-        assert!(!dlg.bold);
+        assert!(dlg.bold);
         // Parenthetical at 38 + 36.
         let par = page.iter().find(|l| l.text == "(softly)").unwrap();
         assert!((par.x_mm - X_PAREN).abs() < 0.01);
-        // Transitions are right-aligned, regular weight, like the template.
+        // Transitions are right-aligned and bold, like KIT's PDF.
         let tr = page.iter().find(|l| l.text == "FADE OUT:").unwrap();
-        assert!(tr.right_aligned && !tr.bold);
+        assert!(tr.right_aligned && tr.bold);
     }
 
     #[test]

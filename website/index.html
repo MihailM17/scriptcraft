@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ScriptCraft — the revision-first screenwriting studio</title>
+<meta name="description" content="ScriptCraft is a free, open-source screenwriting studio for macOS, Windows and Linux. Production revisions, KIT Scenarist projects, Final Draft, Fade In, Fountain and Markdown exchange — all local-first.">
+<meta name="theme-color" content="#f6f4ef" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0b0e14" media="(prefers-color-scheme: dark)">
+<link rel="icon" type="image/png" href="assets/icon.png">
+<link rel="apple-touch-icon" href="assets/icon.png">
+<link rel="stylesheet" href="styles.css">
+<meta property="og:type" content="website">
+<meta property="og:title" content="ScriptCraft — the revision-first screenwriting studio">
+<meta property="og:description" content="Free and open source. Production revisions, page-exact PDFs, and real exchanges with KIT Scenarist, Final Draft and Fade In.">
+<meta property="og:image" content="assets/icon.png">
+<meta name="twitter:card" content="summary">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap header-inner">
+    <a class="brand" href="#top" aria-label="ScriptCraft home">
+      <img src="assets/icon.png" alt="" width="36" height="36">
+      <span>ScriptCraft</span>
+    </a>
+    <nav class="nav" aria-label="Main">
+      <a href="#features">Features</a>
+      <a href="#formats">Formats</a>
+      <a href="#screenshots">Screenshots</a>
+      <a href="#faq">FAQ</a>
+      <a class="nav-github" href="https://github.com/MihailM17/scriptcraft">GitHub</a>
+    </nav>
+    <div class="header-actions">
+      <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Switch colour theme" title="Switch colour theme">
+        <svg class="icon-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M18.7 5.3l-1.6 1.6M6.9 17.1l-1.6 1.6"/></svg>
+        <svg class="icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.4A8.4 8.4 0 0 1 9.6 4 8.4 8.4 0 1 0 20 14.4Z"/></svg>
+      </button>
+      <a class="btn btn-small" href="https://github.com/MihailM17/scriptcraft/releases/latest">Download</a>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+  <section class="hero" id="top">
+    <div class="wrap hero-grid">
+      <div class="hero-copy">
+        <p class="eyebrow"><span class="dot"></span> Free &amp; open source · v0.8.9</p>
+        <h1>Write the script.<br><em>Track every revision.</em></h1>
+        <p class="lede">ScriptCraft is a local-first screenwriting studio built around the part of the job most tools treat as an add-on: production revisions.</p>
+        <div class="cta-row">
+          <a class="btn" href="https://github.com/MihailM17/scriptcraft/releases/latest">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5M4 20h16"/></svg>
+            Download for your platform
+          </a>
+          <a class="btn btn-ghost" href="https://github.com/MihailM17/scriptcraft">View the source</a>
+        </div>
+        <p class="fineprint">macOS, Windows and Linux · Apache-2.0 · no account · your files stay on your disk</p>
+      </div>
+      <figure class="hero-shot">
+        <div class="browser">
+          <div class="browser-bar" aria-hidden="true"><span></span><span></span><span></span></div>
+          <img src="assets/scriptcraft-dark.webp" alt="ScriptCraft's dark editor, showing a screenplay page with the navigator and tool panels." width="1360" height="880">
+        </div>
+        <figcaption>The editor, revision tools and production pagination in one window.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="strip" aria-label="Principles">
+    <div class="wrap strip-grid">
+      <div><strong>Revision-first</strong><span>Coloured revisions, locked pages, honest page counts.</span></div>
+      <div><strong>Real interchange</strong><span>KIT Scenarist, Final Draft, Fade In, Fountain, Markdown.</span></div>
+      <div><strong>Local by design</strong><span>No cloud account. No subscription. No lock-in.</span></div>
+    </div>
+  </section>
+
+  <section class="section" id="features">
+    <div class="wrap">
+      <p class="kicker">Why ScriptCraft</p>
+      <h2>The work a production actually depends on.</h2>
+      <p class="section-lede">A screenplay is not finished when the draft is. It is finished when pages are locked, scenes are numbered, revisions are issued, and everyone is working from the same coloured pages.</p>
+
+      <div class="cards">
+        <article class="card">
+          <div class="card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M4 5h16v14H4zM8 5v14M16 5v14M4 9h4M4 15h4M16 9h4M16 15h4"/></svg>
+          </div>
+          <h3>Revisions that behave like production</h3>
+          <p>Blue → Pink → Yellow → … with dated sets and page-count baselines. Changed blocks get coloured margin bars; revision-pages mode shows only the current issue.</p>
+        </article>
+        <article class="card">
+          <div class="card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M4 7h7v10H4zM13 7h7v10h-7zM7.5 12h.01M16.5 12h.01"/></svg>
+          </div>
+          <h3>Speaks your tools</h3>
+          <p>Open <code>.kitsp</code> projects directly. Import Final Draft <code>.fdx</code>, Fade In <code>.fadein</code> and Fountain. Export PDF, FDX, Fade In, Fountain or Markdown.</p>
+        </article>
+        <article class="card">
+          <div class="card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6zM15 3v4h4M9 12h7M9 16h7"/></svg>
+          </div>
+          <h3>Page-exact output</h3>
+          <p>KIT's Final Draft A4 geometry, 12&nbsp;pt Courier, title page, scene numbers, <code>(MORE)</code>/<code>(CONT'D)</code>, and locked pages that keep their issued numbers.</p>
+        </article>
+        <article class="card">
+          <div class="card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/><circle cx="19" cy="18" r="2"/></svg>
+          </div>
+          <h3>Built for long days</h3>
+          <p>Typewriter scrolling, focus mode, find and replace, a scene navigator, spellcheck in English, Bulgarian and Russian, and 29 themes — including KIT light and dark.</p>
+        </article>
+        <article class="card">
+          <div class="card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M12 3 4 7v6c0 4.5 3.4 7.3 8 8 4.6-.7 8-3.5 8-8V7z"/><path d="m9 12 2 2 4-4"/></svg>
+          </div>
+          <h3>Your files, not a subscription</h3>
+          <p>Projects live on your disk as KIT-compatible files. Autosave and crash recovery are built in. Nothing is uploaded, and there is no account to create.</p>
+        </article>
+        <article class="card">
+          <div class="card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="m8 6-5 6 5 6M16 6l5 6-5 6M13 4l-2 16"/></svg>
+          </div>
+          <h3>Open source, end to end</h3>
+          <p>Apache-2.0 Rust source. Read it, build it, audit it, or send a patch. The app has no telemetry and no hidden service dependency.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section section-alt" id="formats">
+    <div class="wrap formats-grid">
+      <div>
+        <p class="kicker">Interchange</p>
+        <h2>Move between apps without rewriting the script.</h2>
+        <p class="section-lede">ScriptCraft keeps your scene structure, title page and scene numbers when it can, and tells you when a format cannot carry something.</p>
+        <ul class="checks">
+          <li>KIT Scenarist projects open and save in the same schema.</li>
+          <li>Final Draft exports carry revision colours, marks and the title page.</li>
+          <li>Fade In exports are real ZIP + OSF documents, not renamed XML.</li>
+          <li>Markdown is a clean one-way copy for notes, wikis and review.</li>
+        </ul>
+      </div>
+      <div class="table-wrap">
+        <table class="formats">
+          <caption class="sr-only">Supported file formats</caption>
+          <thead>
+            <tr><th scope="col">Format</th><th scope="col">Open</th><th scope="col">Save</th></tr>
+          </thead>
+          <tbody>
+            <tr><th scope="row">KIT Scenarist <code>.kitsp</code></th><td class="yes">Yes</td><td class="yes">Yes</td></tr>
+            <tr><th scope="row">Final Draft <code>.fdx</code></th><td class="yes">Yes</td><td class="yes">Yes</td></tr>
+            <tr><th scope="row">Fade In <code>.fadein</code></th><td class="yes">Yes</td><td class="yes">Yes</td></tr>
+            <tr><th scope="row">Fountain <code>.fountain</code></th><td class="yes">Yes</td><td class="yes">Yes</td></tr>
+            <tr><th scope="row">Markdown <code>.md</code></th><td class="muted">—</td><td class="yes">Yes</td></tr>
+            <tr><th scope="row">PDF</th><td class="muted">—</td><td class="yes">Yes</td></tr>
+          </tbody>
+        </table>
+        <p class="table-note">Dual dialogue is native in FDX and Fade In. Fountain and Markdown exports mark it as consecutive dialogue and say so in the status line.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="screenshots">
+    <div class="wrap">
+      <p class="kicker">A look inside</p>
+      <h2>Dark room, paper page, same script.</h2>
+      <p class="section-lede">Pick a palette and keep the page you are writing. The editor and the PDF use the same line grid, so what you see is what prints.</p>
+      <div class="shot-grid">
+        <figure class="shot">
+          <div class="browser">
+            <div class="browser-bar" aria-hidden="true"><span></span><span></span><span></span></div>
+            <img src="assets/scriptcraft-dark.webp" alt="The ScriptCraft editor in a dark theme with the scene navigator and revision toolbar." width="1360" height="880" loading="lazy">
+          </div>
+          <figcaption><strong>Focused drafting.</strong> Scene navigator, revision tools and a page that stays a page.</figcaption>
+        </figure>
+        <figure class="shot">
+          <div class="browser">
+            <div class="browser-bar" aria-hidden="true"><span></span><span></span><span></span></div>
+            <img src="assets/scriptcraft-light.webp" alt="The ScriptCraft editor in the KIT Scenarist light theme, showing a formatted screenplay page." width="1360" height="880" loading="lazy">
+          </div>
+          <figcaption><strong>KIT light.</strong> The published KIT palette, with the familiar screenplay page in the middle.</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="section section-alt" id="download">
+    <div class="wrap">
+      <div class="download-head">
+        <div>
+          <p class="kicker">Get ScriptCraft</p>
+          <h2>Free on every desktop you write on.</h2>
+          <p class="section-lede">Every build is published on GitHub Releases with a SHA-256 checksum. The in-app updater verifies the download before it replaces the app.</p>
+        </div>
+        <a class="btn" href="https://github.com/MihailM17/scriptcraft/releases/latest">Open the latest release</a>
+      </div>
+      <div class="os-grid">
+        <a class="os-card" href="https://github.com/MihailM17/scriptcraft/releases/latest">
+          <span class="os-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M16.4 12.8c0-2 1.7-3 1.8-3.1a3.9 3.9 0 0 0-3.1-1.7c-1.3-.1-2.6.8-3.2.8s-1.7-.8-2.8-.8A4.1 4.1 0 0 0 5.6 10c-1.5 2.6-.4 6.4 1 8.5.7 1 1.5 2.1 2.6 2.1s1.4-.7 2.7-.7 1.6.7 2.7.7 1.8-1 2.5-2a9 9 0 0 0 1.1-2.3 3.6 3.6 0 0 1-2.3-3.5ZM14.2 6.3a3.7 3.7 0 0 0 .8-2.6 3.8 3.8 0 0 0-2.5 1.3 3.6 3.6 0 0 0-.9 2.5 3.2 3.2 0 0 0 2.6-1.2Z"/></svg>
+          </span>
+          <span><strong>macOS</strong><small>.dmg · Apple silicon &amp; Intel</small></span>
+          <span class="os-arrow" aria-hidden="true">→</span>
+        </a>
+        <a class="os-card" href="https://github.com/MihailM17/scriptcraft/releases/latest">
+          <span class="os-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M3 5.5 10.5 4v7H3zM12 3.7 21 2.5v8.7h-9zM3 12.5h7.5v7L3 18.2zM12 12.5h9v8.8l-9-1.2z"/></svg>
+          </span>
+          <span><strong>Windows</strong><small>.zip · Windows 10 &amp; 11</small></span>
+          <span class="os-arrow" aria-hidden="true">→</span>
+        </a>
+        <a class="os-card" href="https://github.com/MihailM17/scriptcraft/releases/latest">
+          <span class="os-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M12 2.6c-1.7 0-3 .9-4 1.6-.7-.3-2-1.2-3.2-1.2C2.9 3 2 5.1 2 7.3c0 4 3.4 9.5 5 9.5.7 0 1.2-.5 2.1-.5s1.3.5 2.1.5c1.7 0 4.9-5.2 4.9-9.3 0-3.2-2.1-4.6-4.1-4.9ZM11 1.4c.1-1 .9-1.9 1.9-1.9.1 1-.9 2-1.9 1.9Z" transform="translate(1 1)"/></svg>
+          </span>
+          <span><strong>Linux</strong><small>.tar.gz · x86_64</small></span>
+          <span class="os-arrow" aria-hidden="true">→</span>
+        </a>
+      </div>
+      <p class="fineprint">The macOS build is ad-hoc signed, and Windows/Linux builds are unsigned. On first launch, macOS may ask you to right-click → Open. There is no Developer ID or notarisation yet.</p>
+    </div>
+  </section>
+
+  <section class="section" id="faq">
+    <div class="wrap faq-wrap">
+      <div>
+        <p class="kicker">Questions</p>
+        <h2>Before you download.</h2>
+      </div>
+      <div class="faq">
+        <details>
+          <summary>Is ScriptCraft really free?</summary>
+          <p>Yes. It is Apache-2.0 open source. There is no account, no trial timer, no subscription and no telemetry.</p>
+        </details>
+        <details>
+          <summary>Will it open my KIT Scenarist project?</summary>
+          <p>Yes. <code>.kitsp</code> is the native project format. ScriptCraft preserves unknown sidecar rows, so opening and saving a KIT project does not throw away data it does not understand.</p>
+        </details>
+        <details>
+          <summary>Can I exchange files with Final Draft or Fade In?</summary>
+          <p>Import and export both work for Final Draft <code>.fdx</code> and Fade In <code>.fadein</code>. Scene numbers, the title page, notes and — where the format supports it — dual dialogue are carried across.</p>
+        </details>
+        <details>
+          <summary>Why is the PDF in bold Courier?</summary>
+          <p>KIT Scenarist prints the screenplay body in Courier New Bold even when its template stores a regular weight. ScriptCraft's PDF export matches that printed look with bundled Courier Prime Bold, while the editor keeps a regular face for comfortable typing.</p>
+        </details>
+        <details>
+          <summary>Does it update itself?</summary>
+          <p>The app checks GitHub Releases and can download, verify and install a newer build in place. Because the builds are not signed yet, Gatekeeper or SmartScreen may still ask you to confirm the first launch.</p>
+        </details>
+        <details>
+          <summary>Where do I report a bug?</summary>
+          <p>Open an issue on <a href="https://github.com/MihailM17/scriptcraft/issues">GitHub</a>. Include your platform, the app version and, if the app crashed, the <code>panic.log</code> written next to your configuration.</p>
+        </details>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap footer-inner">
+    <div class="brand">
+      <img src="assets/icon.png" alt="" width="28" height="28">
+      <span>ScriptCraft</span>
+    </div>
+    <p>Built for writers who revise. Apache-2.0.</p>
+    <nav aria-label="Footer">
+      <a href="https://github.com/MihailM17/scriptcraft">Source</a>
+      <a href="https://github.com/MihailM17/scriptcraft/releases">Releases</a>
+      <a href="https://github.com/MihailM17/scriptcraft/blob/main/LICENSE">License</a>
+      <a href="https://github.com/MihailM17/scriptcraft/issues">Issues</a>
+    </nav>
+    <p class="copyright">© <span id="year">2026</span> ScriptCraft contributors</p>
+  </div>
+</footer>
+
+<script src="script.js"></script>
+</body>
+</html>

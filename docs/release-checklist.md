@@ -23,8 +23,8 @@ cargo deny check
 git diff --check
 ```
 
-Expected v0.8.8 counts (2026-11-18): app 89 lib + 79 interaction + 35
-snapshots, core 101 lib + 50 integration, layout 30 lib + 26 integration.
+Expected v0.8.9 counts (2026-11-19): app 89 lib + 81 interaction + 35
+snapshots, core 113 lib + 50 integration, layout 30 lib + 26 integration.
 Counts grow; what matters is zero failures.
 
 Timing gates use best-of-five samples and a CI-tolerant unit threshold; the

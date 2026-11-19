@@ -8,15 +8,23 @@ production revisions. Open KIT projects, exchange Final Draft files, lock
 pages, issue coloured revisions, and export page-exact PDFs — offline, on
 macOS, Windows and Linux.
 
-> **Status — v0.8.8.** Revision-complete for the core production workflow:
+> **Status — v0.8.9.** Revision-complete for the core production workflow:
 > stable block/scene identity, draft diff and compare, restore-as-copy, omitted
 > scenes, dual dialogue, title-page editor and revision summary (scene counts,
 > CSV and printable PDF). The page grid uses the standard 1/6-inch screenplay
-> leading and 58 lines on A4, and the editor preview plus the PDF export now
-> follow KIT Scenistar's `final_draft_a4.kitss` (A4 margins 38/24/17/24 mm, 155
-> mm text column, no bold, right-aligned transitions), so an exported PDF
-> matches the writer-facing KIT Scenarist page. `.kitsp` saves preserve unknown
-> sidecar rows, and CI runs runtime interaction smoke on macOS/Linux/Windows. v0.8.6 keeps every typed space on the page,
+> leading and 58 lines on A4, and the editor preview plus the PDF export follow
+> KIT Scenistar's `final_draft_a4.kitss` (A4 margins 38/24/17/24 mm, 155 mm text
+> column, right-aligned transitions), so an exported PDF matches the
+> writer-facing KIT Scenarist page. The **PDF body prints in bold**, as KIT's
+> own PDF does (it embeds Courier New Bold even though the template stores
+> `bold="false"`); the editor stays regular because the bold face shares the
+> same advance width, so pagination does not move. `.kitsp` saves preserve
+> unknown sidecar rows, and CI runs runtime interaction smoke on
+> macOS/Linux/Windows.
+> **v0.8.9 adds Fade In and Markdown**: import and export real `.fadein`
+> archives (ZIP + OSF) with scene numbers, notes, title page and dual dialogue,
+> and export Markdown for notes, wikis and review. The website in `website/` is
+> published to GitHub Pages. v0.8.6 keeps every typed space on the page,
 > uses Courier New as the page face when the system has it (falling back to
 > IBM Plex Mono), adds
 > a monochrome-paper option directly under the theme picker, 29 theme palettes
@@ -34,8 +42,8 @@ macOS, Windows and Linux.
 > quits and restarts it. The KIT Scenarist palette now uses KIT's published
 > light and dark colours, the page grid is the standard 1/6-inch leading, the
 > editor preview and the PDF export follow KIT Scenistar's Final Draft A4
-> template (no bold, right-aligned transitions), and panics are written to
-> `panic.log` so a crash can be reported without a terminal.
+> template (right-aligned transitions), and panics are written to `panic.log`
+> so a crash can be reported without a terminal.
 > v0.8.5 corrected editor input: clicks and carets map through whitespace,
 > double-click selects a word, triple-click the paragraph, and drag selections
 > start at the press. v0.8.4 added live
@@ -168,9 +176,12 @@ app on day one.
   `scenario_data` rows that KIT ignores.
 - **Final Draft `.fdx`** — import/export paragraphs, title page, scene numbers,
   revision colours and `*` marks, and revised title-page fields.
+- **Fade In `.fadein`** — import/export real ZIP + OSF documents with scene
+  numbers, title page, notes, parentheticals and native dual dialogue.
 - **Fountain** — import/export.
+- **Markdown `.md`** — export a clean one-way copy for notes, wikis and review.
 - **PDF** — rendered from the same layout engine as the editor, not a second
-  paginator.
+  paginator; the printed body uses bold Courier Prime to match KIT.
 - **Planned** — conversion reports for lossy imports/exports, and DOCX/RTF only
   if real users need them.
 
@@ -182,7 +193,8 @@ ScriptCraft is:
 - **Local-first**: no account, no telemetry by default, no cloud dependency.
 - **Native**: one Rust layout engine behind the editor and the PDF renderer,
   not a web wrapper.
-- **Interoperable**: KIT `.kitsp`, Final Draft `.fdx`, Fountain and PDF.
+- **Interoperable**: KIT `.kitsp`, Final Draft `.fdx`, Fade In `.fadein`,
+  Fountain, Markdown and PDF.
 - **Revision-first**: the production workflow is the product, not an add-on.
 - **Cross-platform**: macOS, Windows and Linux from one codebase.
 
@@ -244,15 +256,16 @@ Snapshot tests:
 UPDATE_SNAPSHOTS=1 cargo test -p scriptcraft-app --test ui_snapshots
 ```
 
-The test suite includes A95 KIT round-trips, editor/PDF layout parity, FDX and
-Fountain conversion, 500-page performance gates, interaction tests and UI
-snapshots. See [`docs/v0.8-plan.md`](docs/v0.8-plan.md) for the acceptance
+The test suite includes A95 KIT round-trips, editor/PDF layout parity, FDX,
+Fade In, Fountain and Markdown conversion, 500-page performance gates,
+interaction tests and UI snapshots. See [`docs/v0.8-plan.md`](docs/v0.8-plan.md) for the acceptance
 matrix.
 
 ## Project layout
 
-- `scriptcraft-core/` — UI-free model, `.kitsp` reader/writer, Fountain and FDX
-  converters, revision baselines, format validation and coaching checks.
+- `scriptcraft-core/` — UI-free model, `.kitsp` reader/writer, Fountain, FDX,
+  Fade In and Markdown converters, revision baselines, format validation and
+  coaching checks.
 - `scriptcraft-layout/` — the shared wrap/pagination/placement engine that
   drives both the editor pages and the PDF renderer.
 - `scriptcraft-app/` — `eframe`/`egui` desktop app, theme, native menu and

@@ -500,6 +500,7 @@ enum MenuCommand {
     SaveAs,
     ImportFountain,
     ImportFdx,
+    ImportFadeIn,
     Export,
     Preview,
     Quit,
@@ -3183,6 +3184,36 @@ impl ScriptCraftApp {
         }
     }
 
+    /// Import a Fade In `.fadein` file into a new in-memory project.
+    fn do_import_fadein(&mut self) {
+        let Some(src) = rfd::FileDialog::new()
+            .add_filter("Fade In", &["fadein"])
+            .pick_file()
+        else {
+            return;
+        };
+        let bytes = match std::fs::read(&src) {
+            Ok(b) => b,
+            Err(e) => {
+                self.status = format!("Import failed: {e}");
+                return;
+            }
+        };
+        match scriptcraft_core::fadein::from_fadein_bytes(&bytes) {
+            Ok((p, meta)) => self.adopt_imported(p, meta, &src.to_string_lossy()),
+            Err(e) => self.status = format!("Import failed: {e}"),
+        }
+    }
+
+    /// Parse Fade In bytes directly (tests).
+    #[doc(hidden)]
+    pub fn import_fadein_bytes(&mut self, bytes: &[u8]) -> Result<(), String> {
+        let (p, meta) =
+            scriptcraft_core::fadein::from_fadein_bytes(bytes).map_err(|e| e.to_string())?;
+        self.adopt_imported(p, meta, "Fade In document");
+        Ok(())
+    }
+
     /// Parse FDX text directly (tests; also the future FDX clipboard path).
     #[doc(hidden)]
     pub fn import_fdx_str(&mut self, text: &str) -> Result<(), String> {
@@ -3320,6 +3351,42 @@ impl ScriptCraftApp {
             scriptcraft_core::fdx::to_fdx_with_revisions_and_latest(p, &self.meta, &marks, latest);
         let note = self.omission_export_note("FDX");
         match std::fs::write(dst, xml) {
+            Ok(()) => self.status = format!("Exported to {}{note}", dst.to_string_lossy()),
+            Err(e) => self.status = format!("Export failed: {e}"),
+        }
+    }
+
+    /// Write a Fade In `.fadein` archive to `dst`.
+    fn save_fadein(&mut self, dst: &std::path::Path) {
+        let Some(p) = &self.project else { return };
+        let bytes = match scriptcraft_core::fadein::to_fadein_bytes(p, &self.meta) {
+            Ok(b) => b,
+            Err(e) => {
+                self.status = format!("Export failed: {e}");
+                return;
+            }
+        };
+        let note = format!(
+            "{}{}",
+            self.omission_export_note("Fade In"),
+            self.dual_export_note("Fade In")
+        );
+        match std::fs::write(dst, bytes) {
+            Ok(()) => self.status = format!("Exported to {}{note}", dst.to_string_lossy()),
+            Err(e) => self.status = format!("Export failed: {e}"),
+        }
+    }
+
+    /// Write a Markdown document to `dst`.
+    fn save_markdown(&mut self, dst: &std::path::Path) {
+        let Some(p) = &self.project else { return };
+        let text = scriptcraft_core::markdown::to_markdown(p, &self.meta);
+        let note = format!(
+            "{}{}",
+            self.omission_export_note("Markdown"),
+            self.dual_export_note("Markdown")
+        );
+        match std::fs::write(dst, text) {
             Ok(()) => self.status = format!("Exported to {}{note}", dst.to_string_lossy()),
             Err(e) => self.status = format!("Export failed: {e}"),
         }
@@ -3805,9 +3872,10 @@ impl ScriptCraftApp {
         }
     }
 
-    /// FDX carries dual dialogue natively; Fountain has no pairing syntax.
+    /// FDX and Fade In carry dual dialogue natively; Fountain and Markdown
+    /// have no pairing syntax.
     fn dual_export_note(&self, target: &str) -> String {
-        if target == "FDX" {
+        if target == "FDX" || target == "Fade In" {
             return String::new();
         }
         let n = self
@@ -5531,6 +5599,9 @@ impl ScriptCraftApp {
                 if menu_item(ui, "Final Draft (.fdx)…", None, true) {
                     cmd = Some(MenuCommand::ImportFdx);
                 }
+                if menu_item(ui, "Fade In (.fadein)…", None, true) {
+                    cmd = Some(MenuCommand::ImportFadeIn);
+                }
             });
             if menu_item(ui, "Export…", None, has) {
                 cmd = Some(MenuCommand::Export);
@@ -5682,6 +5753,9 @@ impl ScriptCraftApp {
             MenuCommand::ImportFdx => {
                 self.do_import_fdx();
             }
+            MenuCommand::ImportFadeIn => {
+                self.do_import_fadein();
+            }
             MenuCommand::Export => {
                 self.close_compare();
                 self.show_export = true;
@@ -5777,6 +5851,7 @@ impl ScriptCraftApp {
             SaveAs,
             Import,
             ImportFdx,
+            ImportFadeIn,
             Export,
             Preview,
             Version,
@@ -5814,6 +5889,9 @@ impl ScriptCraftApp {
                 if menu_item(ui, "Final Draft (.fdx)…", None, true) {
                     action = Some(M::ImportFdx);
                 }
+                if menu_item(ui, "Fade In (.fadein)…", None, true) {
+                    action = Some(M::ImportFadeIn);
+                }
             });
             if menu_item(ui, "Export…", None, has) {
                 action = Some(M::Export);
@@ -5844,6 +5922,7 @@ impl ScriptCraftApp {
             Some(M::SaveAs) => self.do_save_as(),
             Some(M::Import) => self.do_import_fountain(),
             Some(M::ImportFdx) => self.do_import_fdx(),
+            Some(M::ImportFadeIn) => self.do_import_fadein(),
             Some(M::Export) => {
                 self.close_compare();
                 self.show_export = true;
@@ -5896,6 +5975,7 @@ impl ScriptCraftApp {
                 menu::ID_SAVE_AS => self.do_save_as(),
                 menu::ID_IMPORT => self.do_import_fountain(),
                 menu::ID_IMPORT_FDX => self.do_import_fdx(),
+                menu::ID_IMPORT_FADEIN => self.do_import_fadein(),
                 menu::ID_EXPORT => {
                     self.close_compare();
                     self.show_export = true;
@@ -6306,6 +6386,8 @@ impl ScriptCraftApp {
                     ExportFormat::Pdf => self.save_pdf(&path),
                     ExportFormat::Fdx => self.save_fdx(&path),
                     ExportFormat::Fountain => self.save_fountain(&path),
+                    ExportFormat::FadeIn => self.save_fadein(&path),
+                    ExportFormat::Markdown => self.save_markdown(&path),
                 }
                 self.show_export = false;
             }

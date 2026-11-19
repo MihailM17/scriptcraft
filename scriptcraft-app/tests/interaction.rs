@@ -1077,8 +1077,86 @@ fn fdx_import_builds_a_project() {
     assert_eq!(a.block_element_type(13).unwrap(), ElementType::NonPrintable);
 }
 
-/// The Export dialog now offers PDF / FDX / Fountain — DOCX is hidden
-/// until implemented.
+/// Fade In import replaces the session: scene numbers stay frozen, notes
+/// survive as non-printing blocks and dual dialogue is rebuilt.
+#[test]
+fn fadein_import_builds_a_project_with_dual_dialogue() {
+    use scriptcraft_core::kitsp::Metadata;
+    use scriptcraft_core::model::{DualMark, DualSide, ElementType as ET, Project, ScriptBlock};
+
+    let mut p = Project {
+        title: "Control Room".into(),
+        ..Default::default()
+    };
+    for (t, text) in [
+        (ET::SceneHeading, "INT. CONTROL ROOM - NIGHT"),
+        (ET::Action, "Two operators watch the same screen."),
+        (ET::Character, "ADA"),
+        (ET::Parenthetical, "(quietly)"),
+        (ET::Dialogue, "It is still moving."),
+        (ET::Character, "GRACE"),
+        (ET::Dialogue, "Then we stop it together."),
+        (ET::NonPrintable, "Check the switch with props."),
+        (ET::SceneHeading, "EXT. STREET - CONTINUOUS"),
+    ] {
+        p.blocks.push(ScriptBlock::new(t, text.into()));
+    }
+    let group = uuid::Uuid::new_v4();
+    p.blocks[2].dual = Some(DualMark {
+        group,
+        side: DualSide::Left,
+    });
+    p.blocks[5].dual = Some(DualMark {
+        group,
+        side: DualSide::Right,
+    });
+    let meta = Metadata {
+        title: "Control Room".into(),
+        author: "M. Hayll".into(),
+        locked_scene_numbers: "SC1,SC2".into(),
+        ..Default::default()
+    };
+    let bytes = scriptcraft_core::fadein::to_fadein_bytes(&p, &meta).unwrap();
+
+    let mut h = harness(SideTab::Script);
+    h.run();
+    h.state_mut()
+        .import_fadein_bytes(&bytes)
+        .expect("the Fade In archive must import");
+    assert!(h.state_mut().import_fadein_bytes(b"not a zip").is_err());
+    h.run();
+
+    let a = h.state();
+    assert_eq!(a.block_count(), 9);
+    assert_eq!(a.block_text(0).unwrap(), "INT. CONTROL ROOM - NIGHT");
+    assert_eq!(a.block_element_type(0).unwrap(), ET::SceneHeading);
+    assert_eq!(a.block_text(3).unwrap(), "(quietly)");
+    assert_eq!(a.block_text(7).unwrap(), "Check the switch with props.");
+    assert_eq!(a.block_element_type(7).unwrap(), ET::NonPrintable);
+    assert_eq!(a.first_dual_pair_for_test(), Some((2, 5)));
+    assert_eq!(a.title_meta_for_test().title, "Control Room");
+    assert_eq!(a.title_meta_for_test().author, "M. Hayll");
+    assert_eq!(a.title_meta_for_test().locked_scene_numbers, "SC1,SC2");
+}
+
+/// The File ▸ Import submenu offers every supported source format,
+/// including Fade In.
+#[test]
+fn import_menu_offers_fade_in() {
+    let mut h = harness(SideTab::Script);
+    h.run();
+    h.get_by_label("Menu").click();
+    h.run();
+    h.get_by_label("Import ⏵").click();
+    h.run();
+    assert!(
+        h.query_by_label("Fade In (.fadein)…").is_some(),
+        "Import must list Fade In"
+    );
+}
+
+/// The Export dialog now offers PDF / FDX / Fountain / Fade In / Markdown —
+/// DOCX is hidden until implemented.
 #[test]
 fn export_dialog_offers_fdx_not_docx() {
     let mut h = harness(SideTab::Script);
@@ -1089,6 +1167,14 @@ fn export_dialog_offers_fdx_not_docx() {
     h.get_by_label("Export…").click();
     h.run();
     assert!(h.query_by_label("FDX").is_some(), "FDX radio must be shown");
+    assert!(
+        h.query_by_label("Fade In").is_some(),
+        "Fade In radio must be shown"
+    );
+    assert!(
+        h.query_by_label("Markdown").is_some(),
+        "Markdown radio must be shown"
+    );
     assert!(
         h.query_by_label("DOCX").is_none(),
         "unimplemented DOCX must be hidden"

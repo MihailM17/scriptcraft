@@ -18,17 +18,19 @@ Status legend: `[ ]` to do `[-]` in progress `[x]` done `[!]` blocked
 
 | Field | Value |
 |---|---|
-| Date | 2026-11-18 |
+| Date | 2026-11-19 |
 | Project | ScriptCraft — free, open-source, revision-first screenwriting studio |
 | Repo | `/Users/mihailmihaylov/Documents/Dev_work/scriptcraft` |
 | Branch / commit | `main` at **v0.8.8** (released 2026-11-18, tag `v0.8.8` at `bbf90bd`); tags `v0.7.0` at `9ce2e0e`, `v0.7.1` at `d8b17de`, `v0.7.2` at `8b75f9a`, `v0.8.0` at `0052bba`, `v0.8.1` at `0fa598e`, `v0.8.2` at `6bf1983`, `v0.8.3` at `69c0329`, `v0.8.4` at `b178e00`, `v0.8.5` at `a9394bc`, `v0.8.6` at `cf48880`, `v0.8.7` at `8ea4437`, `v0.8.8` at `bbf90bd`. |
 | Rust workspace | `scriptcraft-core`, `scriptcraft-app`, `scriptcraft-layout` (`Cargo.toml`, resolver 2) |
-| App crate version | `scriptcraft-app 0.8.8` (released 2026-11-18, tag `v0.8.8` at `bbf90bd`); `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
+| App crate version | `scriptcraft-app 0.8.9` (in progress; v0.8.8 released 2026-11-18, tag `v0.8.8` at `bbf90bd`); `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
 | Distribution | **v0.8.8 released** — <https://github.com/MihailM17/scriptcraft/releases/tag/v0.8.8>. Assets (unsigned/ad-hoc macOS, not notarised): `ScriptCraft-0.8.8-macos-arm64.dmg` 10,048,488 B sha256 `5aff11ce7e9cea562a2d6fe9ec830ad24e5ff04ad997274ac2f47b7a2491a388`, `ScriptCraft-0.8.8-windows-x64.zip` 8,267,068 B sha256 `7b7a3c0ac38b98380f0dd3079c76a9046643050b5ba9c4e78f32499e5eb61fd5`, `ScriptCraft-0.8.8-linux-x86_64.tar.gz` 12,499,652 B sha256 `717bf13de261ea2d39775c9f35e862f7d1aaeefbd5305d99165d814ba99ce293`, each with `.sha256`. |
 | Current one-liner | Free, open-source, revision-first studio: one screenplay engine (Editor 2.0), crash-safe saves + recovery, revision colours/marks/pages, compare/restore, revision summary with scene counts + CSV + printable PDF, omitted scenes, smart screenplay paste, KIT version write/import, changes-only compare with context gaps and template indentation, revision headers/title-page fields, production page locks with A/B page numbers and FDX revision metadata, dual dialogue side by side in editor/PDF with FDX interchange, a title-page editor whose A4 preview is the exporter's own layout, KIT-style editor/navigator settings, macOS standard selection keys, a compact file-focused Menu, OFL fonts, FDX/Fountain import/export; PDF export paginates exactly like the editor; eight contrast-tested themes with revision marks legible on every palette, and live spellchecking in English, Bulgarian and Russian with screenplay-aware ALL-CAPS skipping, right-click suggestions and per-language custom dictionaries; v0.8.5 corrected editor input with whitespace-aware caret mapping, press-point clicks, double-click word selection and press-anchored drag selection; v0.8.6 gives every typed space its own cell, sets IBM Plex Mono as the default page face with Courier Prime as a Latin-only alternative, adds monochrome paper under the theme picker, 28 theme palettes as swatches (KIT Scenarist plus all 23 base Omarchy themes), a Tab character picker and live script recognition in Research; v0.8.8 installs updates in place after checksum verification, moves the page grid to the standard 1/6-inch leading with 58 lines on A4, adopts KIT Scenarist's published light and dark palettes (29 total) and writes panics to `panic.log`. The editor preview and the PDF export now follow
 KIT Scenistar's `final_draft_a4.kitss` (A4 margins 38/24/17/24 mm, 155 mm text
-column, no bold, right-aligned transitions). |
-| Next release | Post-v0.8.8: Linux typing-crash root cause (needs a reproduction and `panic.log`), Windows code signing, Developer ID/notarisation, and an optional release-binary/screenshot probe. |
+column, right-aligned transitions); v0.8.9 prints the PDF body in bold to match
+KIT's own PDF, adds Fade In `.fadein` import/export, Markdown export and the
+`website/` GitHub Pages site. |
+| Next release | Post-v0.8.9: Linux typing-crash root cause (needs a reproduction and `panic.log`), Windows code signing, Developer ID/notarisation, Markdown import, Fade In revision colours, and an optional release-binary/screenshot probe. |
 
 **Positioning (locked 2026-10-26):** the free, open-source, revision-first
 screenwriting studio. Moat = the production revision workflow (colours, locked
@@ -2358,3 +2360,38 @@ Built on top of the released v0.8.7. Released 2026-11-18 as **v0.8.8** (tag `v0.
   claimed.
 - README, `docs/releases/v0.8.8.md` and `docs/release-checklist.md` §6 updated.
   Gate: fmt, clippy `-D warnings`, workspace tests, deny, `git diff --check`.
+
+### 2026-11-19 — v0.8.9: bold PDF, Fade In, Markdown, website
+
+Built on the released v0.8.8.
+
+- **Bold PDF:** `scriptcraft-layout/src/pdf.rs` sets `BODY_BOLD = true`, so the
+  body, transitions, scene numbers, `(MORE)`, `(CONT'D)` and both dual-dialogue
+  columns print in Courier Prime Bold, matching KIT Scenarist's own PDF (which
+  embeds `CourierNewPS-BoldMT` although its template stores `bold="false"`).
+  Page numbers stay bold; header/footer stay regular. The editor stays regular
+  (as KIT's editor does) and `a95_pdf_matches_editor_layout` still pins the two
+  layouts together, because the bold face shares the regular advance width.
+- **Fade In:** `scriptcraft-core/src/fadein.rs` reads and writes real `.fadein`
+  archives (ZIP + `document.xml` OSF): `basestylename` and legacy `basestyle`,
+  scene numbers on `<para number>`, notes in `<para note>`, title-page
+  bookmarks, and dual dialogue via `dualdialogue="1"` on the left cue.
+  Parentheticals are stripped/wrapped around their storage convention. The
+  internal ZIP helper handles one stored/deflated CRC-checked entry without a
+  general ZIP dependency (`flate2` + `crc32fast`).
+- **Markdown:** `scriptcraft-core/src/markdown.rs` exports title-page metadata,
+  bold headings/cues, italic parentheticals/transitions/lyrics, note
+  blockquotes and escapes Markdown that would change the script. Export is
+  one-way; dual pairs are consecutive dialogue and the status line says so.
+- **App wiring:** Export dialog now has five radios (PDF, FDX, Fountain,
+  Fade In, Markdown), File ▸ Import lists Fade In, the native menu has
+  `ID_IMPORT_FADEIN`, and `dual_export_note` treats FDX and Fade In as native.
+  Interaction tests cover a real Fade In archive round trip, the import menu
+  entry and the five export radios.
+- **Website:** `website/` is a dependency-free static site (system fonts,
+  persisted light/dark toggle, real screenshots, format table, download cards,
+  FAQ). `.github/workflows/pages.yml` publishes it to GitHub Pages.
+- **Docs:** `docs/releases/v0.8.9.md`, README status/interchange and this
+  roadmap updated; `08_export_dialog` snapshot regenerated for the extra
+  format row.
+- Gate: fmt, clippy `-D warnings`, workspace tests, deny, `git diff --check`.
