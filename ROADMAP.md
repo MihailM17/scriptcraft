@@ -24,7 +24,7 @@ Status legend: `[ ]` to do `[-]` in progress `[x]` done `[!]` blocked
 | Branch / commit | `main` at **v0.8.12** (released 2026-11-19); tags `v0.7.0` at `9ce2e0e`, `v0.7.1` at `d8b17de`, `v0.7.2` at `8b75f9a`, `v0.8.0` at `0052bba`, `v0.8.1` at `0fa598e`, `v0.8.2` at `6bf1983`, `v0.8.3` at `69c0329`, `v0.8.4` at `b178e00`, `v0.8.5` at `a9394bc`, `v0.8.6` at `cf48880`, `v0.8.7` at `8ea4437`, `v0.8.8` at `bbf90bd`, `v0.8.9` at `ba5458b`, `v0.8.10` at `2363789`, `v0.8.11` at `4ca88c1`, `v0.8.12` at this release. |
 | Rust workspace | `scriptcraft-core`, `scriptcraft-app`, `scriptcraft-layout` (`Cargo.toml`, resolver 2) |
 | App crate version | `scriptcraft-app 0.8.12` (released 2026-11-19); `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
-| Distribution | **v0.8.11 released** — <https://github.com/MihailM17/scriptcraft/releases/tag/v0.8.11>. Assets (unsigned/ad-hoc macOS, not notarised): `ScriptCraft-0.8.11-macos-arm64.dmg` 10,633,158 B sha256 `f8e235391c16953a28b5eb061a8b4671be0d6fc64c1ef61ec8dec54ea8c037fc`, `ScriptCraft-0.8.11-windows-x64.zip` 8,822,194 B sha256 `c0a494d40181de8e1d198643efe046f878c9dc6ce5dfa1462eea0f77e9839542`, `ScriptCraft-0.8.11-linux-x86_64.tar.gz` 13,046,363 B sha256 `978d4c340acb3c84f7b68b2c2b99ac76985a6501e1486e8a3863f3c88ad3af4f`, each with `.sha256`. Website: <https://mihailm17.github.io/scriptcraft/>. v0.8.10 and v0.8.9 remain published with correction notices. |
+| Distribution | **v0.8.12 released** — <https://github.com/MihailM17/scriptcraft/releases/tag/v0.8.12>. Assets (unsigned/ad-hoc macOS, not notarised): `ScriptCraft-0.8.12-macos-arm64.dmg` 10,633,877 B sha256 `6058d5d67bd3d67b03ac433ea7928e41987d8a541259cfb6d6dde900203127eb`, `ScriptCraft-0.8.12-windows-x64.zip` 8,823,664 B sha256 `a067974f76b02fec322f73a977565cbf8ccd78f572fc509c223a826365a7cb0c`, `ScriptCraft-0.8.12-linux-x86_64.tar.gz` 13,048,180 B sha256 `e78b6ec699b8bf1c7056a2fe190ccd7b1824c3a52efdd6f213027a537471f0d1`, each with `.sha256`. Website: <https://mihailm17.github.io/scriptcraft/>. v0.8.11 and v0.8.10 remain published with correction notices. |
 | Current one-liner | Free, open-source, revision-first studio: one screenplay engine (Editor 2.0), crash-safe saves + recovery, revision colours/marks/pages, compare/restore, revision summary with scene counts + CSV + printable PDF, omitted scenes, smart screenplay paste, KIT version write/import, changes-only compare with context gaps and template indentation, revision headers/title-page fields, production page locks with A/B page numbers and FDX revision metadata, dual dialogue side by side in editor/PDF with FDX interchange, a title-page editor whose A4 preview is the exporter's own layout, KIT-style editor/navigator settings, macOS standard selection keys, a compact file-focused Menu, OFL fonts, FDX/Fountain import/export; PDF export paginates exactly like the editor; thirty-five contrast-tested themes with revision marks legible on every palette, and live spellchecking in English, Bulgarian and Russian with screenplay-aware ALL-CAPS skipping, right-click suggestions and per-language custom dictionaries; v0.8.5 corrected editor input with whitespace-aware caret mapping, press-point clicks, double-click word selection and press-anchored drag selection; v0.8.6 gives every typed space its own cell, sets IBM Plex Mono as the default page face with Courier Prime as a Latin-only alternative, adds monochrome paper under the theme picker, 28 theme palettes as swatches (KIT Scenarist plus all 23 base Omarchy themes), a Tab character picker and live script recognition in Research; v0.8.12 adds six writer themes (Midnight Ink, Amber Projector, Noir Emerald, Velvet Curtain, Red Light and Paper and Rust) to the picker, growing the theme set to thirty-five, v0.8.8 installs updates in place after checksum verification, moves the page grid to the standard 1/6-inch leading with 58 lines on A4, adopts KIT Scenarist's published light and dark palettes (29 total) and writes panics to `panic.log`. The editor preview and the PDF export now follow
 KIT Scenistar's `final_draft_a4.kitss` (A4 margins 38/24/17/24 mm, 155 mm text
 column, right-aligned transitions); v0.8.9 adds Fade In `.fadein`
@@ -2439,9 +2439,15 @@ Built on the released v0.8.8. Released 2026-11-19 as **v0.8.9** (tag `v0.8.9` at
 
 ### 2026-11-19 — v0.8.12 release
 
-- Shipped the six writer themes and released **v0.8.12** (tag `v0.8.12`, release
-  notes in `docs/releases/v0.8.12.md`).
-- Assets uploaded and verified; website redeployed.
+- Shipped the six writer themes and released **v0.8.12** (tag `v0.8.12` at
+  `4ec24d7`, release notes in `docs/releases/v0.8.12.md`).
+- Assets uploaded and verified: DMG `6058d5d6...127eb`, Windows zip
+  `a067974f...b0c`, Linux tar.gz `e78b6ec6...f0d1`.
+- Packages workflow re-run on the released commit produced the Windows and
+  Linux archives; the macOS DMG was built locally with
+  `packaging/macos/bundle.sh` (ad-hoc signed, verified, not notarised).
+- GitHub release `v0.8.12` published as **Latest**; website redeployed from the
+  release commit.
 
 ### 2026-11-19 — v0.8.11: Liberation Mono page face
 
