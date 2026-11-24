@@ -5,6 +5,7 @@
 //! through the existing `preview_pdf` / `save_pdf` / `save_fdx` /
 //! `save_fountain` paths.
 
+use crate::theme::{ink_on_accent, kit};
 use egui::Context;
 use scriptcraft_core::kitsp;
 use scriptcraft_layout::pdf::ExportOptions;
@@ -81,43 +82,72 @@ pub fn dialog(ctx: &Context, state: &mut ExportDialog<'_>) -> ExportAction {
         .open(&mut win_open)
         .collapsible(false)
         .resizable(false)
-        .fixed_size(egui::vec2(550.0, 500.0))
+        .fixed_size(egui::vec2(560.0, 500.0))
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
         .show(ctx, |ui| {
-            // Tab bar across the top (KIT: Export research / outline / script).
-            ui.spacing_mut().item_spacing.x = 4.0;
-            let tab_w = (ui.available_width() - 8.0) / 3.0;
+            let c = kit();
+            // Segmented tab bar across the top (Research / Outline / Script).
+            ui.spacing_mut().item_spacing.x = 6.0;
+            let tab_w = (ui.available_width() - 12.0) / 3.0;
             ui.horizontal(|ui| {
                 for (tab, name) in [
                     (ExportTab::Research, "Export research"),
                     (ExportTab::Outline, "Export outline"),
                     (ExportTab::Script, "Export script"),
                 ] {
-                    if ui
-                        .add_sized(
-                            [tab_w, 26.0],
-                            egui::Button::selectable(*state.tab == tab, name),
-                        )
+                    let active = *state.tab == tab;
+                    let (rect, resp) =
+                        ui.allocate_exact_size(egui::vec2(tab_w, 30.0), egui::Sense::click());
+                    let bg = if active {
+                        c.accent_soft
+                    } else if resp.hovered() {
+                        c.hover_light
+                    } else {
+                        c.button
+                    };
+                    ui.painter().rect_filled(rect, 7.0, bg);
+                    ui.painter().rect_stroke(
+                        rect,
+                        7.0,
+                        egui::Stroke::new(1.0_f32, if active { c.accent } else { c.sep }),
+                        egui::StrokeKind::Inside,
+                    );
+                    ui.painter().text(
+                        rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        name,
+                        egui::FontId::proportional(12.5),
+                        if active { c.accent_text } else { c.text },
+                    );
+                    if resp
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
                         .clicked()
                     {
                         *state.tab = tab;
                     }
                 }
             });
-            ui.separator();
+            ui.add_space(10.0);
             let script_tab = *state.tab == ExportTab::Script;
 
-            // "Choose file to export:" + path field + browse button.
-            ui.label("Choose file to export:");
+            // Destination path + browse button.
+            ui.label(
+                egui::RichText::new("DESTINATION FILE")
+                    .size(10.5)
+                    .strong()
+                    .color(c.disabled_text),
+            );
+            ui.add_space(4.0);
             ui.spacing_mut().item_spacing.x = 6.0;
             ui.horizontal(|ui| {
-                let w = (ui.available_width() - 36.0).max(80.0);
+                let w = (ui.available_width() - 40.0).max(80.0);
                 ui.add_sized(
-                    [w, 22.0],
+                    [w, 26.0],
                     egui::TextEdit::singleline(state.path).hint_text("Choose a destination file…"),
                 );
                 if ui
-                    .add_sized([30.0, 22.0], egui::Button::new("..."))
+                    .add_sized([34.0, 26.0], egui::Button::new("…"))
+                    .on_hover_text("Browse…")
                     .clicked()
                 {
                     browse = true;
@@ -125,18 +155,24 @@ pub fn dialog(ctx: &Context, state: &mut ExportDialog<'_>) -> ExportAction {
             });
             let file_exists = !state.path.is_empty() && std::path::Path::new(&*state.path).exists();
             if file_exists {
+                ui.add_space(2.0);
                 ui.label(
-                    egui::RichText::new("File exists. It will be replaced after exporting.")
-                        .small()
-                        .weak(),
+                    egui::RichText::new("File exists and will be replaced on export.")
+                        .size(11.5)
+                        .color(c.accent_text),
                 );
             }
 
             match *state.tab {
                 ExportTab::Script => {
-                    ui.add_space(6.0);
+                    ui.add_space(12.0);
                     ui.horizontal(|ui| {
-                        ui.label("Format:");
+                        ui.label(
+                            egui::RichText::new("Format:")
+                                .size(12.5)
+                                .color(c.disabled_text),
+                        );
+                        ui.add_space(4.0);
                         for fmt in [
                             ExportFormat::Pdf,
                             ExportFormat::Fdx,
@@ -147,66 +183,83 @@ pub fn dialog(ctx: &Context, state: &mut ExportDialog<'_>) -> ExportAction {
                             ui.radio_value(state.format, fmt, fmt.label());
                         }
                     });
-                    ui.add_space(2.0);
+                    ui.add_space(8.0);
                     ui.checkbox(state.additional, "Additional (Numbering, Title Page etc.)");
                     if *state.additional {
-                        egui::Frame::group(ui.style()).show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                ui.label("Template:");
-                                egui::ComboBox::from_id_salt("export_template")
-                                    .selected_text("Final Draft Screenplay (A4)")
-                                    .show_ui(ui, |ui| {
-                                        ui.selectable_value(
-                                            &mut (),
-                                            (),
-                                            "Final Draft Screenplay (A4)",
-                                        );
-                                    });
-                            });
-                            ui.checkbox(&mut state.options.title_page, "Print Title Page");
-                            ui.checkbox(&mut state.options.page_numbers, "Print pages numbers");
-                            ui.checkbox(&mut state.options.scene_numbers, "Print scenes numbers");
-                            if state.has_revisions {
+                        ui.add_space(6.0);
+                        egui::Frame::new()
+                            .fill(c.window)
+                            .stroke(egui::Stroke::new(1.0_f32, c.sep))
+                            .corner_radius(8.0)
+                            .inner_margin(egui::Margin::same(12))
+                            .show(ui, |ui| {
+                                ui.set_width(ui.available_width());
+                                ui.spacing_mut().item_spacing.y = 5.0;
+                                ui.horizontal(|ui| {
+                                    ui.label(
+                                        egui::RichText::new("Template:")
+                                            .size(12.5)
+                                            .color(c.disabled_text),
+                                    );
+                                    egui::ComboBox::from_id_salt("export_template")
+                                        .selected_text("Final Draft Screenplay (A4)")
+                                        .show_ui(ui, |ui| {
+                                            ui.selectable_value(
+                                                &mut (),
+                                                (),
+                                                "Final Draft Screenplay (A4)",
+                                            );
+                                        });
+                                });
+                                ui.add_space(2.0);
+                                ui.checkbox(&mut state.options.title_page, "Print title page");
+                                ui.checkbox(&mut state.options.page_numbers, "Print page numbers");
                                 ui.checkbox(
-                                    &mut state.options.revision_marks,
-                                    "Print revision marks (current)",
+                                    &mut state.options.scene_numbers,
+                                    "Print scene numbers",
                                 );
-                                ui.checkbox(
-                                    &mut state.options.revision_pages_only,
-                                    "Print current revision pages only",
-                                );
-                            }
-                            ui.add_enabled(
-                                false,
-                                egui::Checkbox::new(&mut false, "Print dialogues numbers"),
-                            )
-                            .on_disabled_hover_text("Not supported yet");
-                            ui.add_enabled(
-                                false,
-                                egui::Checkbox::new(&mut false, "Save Review Marks"),
-                            )
-                            .on_disabled_hover_text("No review marks in this app");
-                            ui.checkbox(state.check_breaks, "Check Page Breaks");
-                            ui.horizontal(|ui| {
-                                ui.checkbox(state.watermark_on, "Print watermark:");
+                                if state.has_revisions {
+                                    ui.checkbox(
+                                        &mut state.options.revision_marks,
+                                        "Print revision marks (current)",
+                                    );
+                                    ui.checkbox(
+                                        &mut state.options.revision_pages_only,
+                                        "Print current revision pages only",
+                                    );
+                                }
                                 ui.add_enabled(
-                                    *state.watermark_on,
-                                    egui::TextEdit::singleline(state.watermark)
-                                        .desired_width(150.0),
-                                );
+                                    false,
+                                    egui::Checkbox::new(&mut false, "Print dialogue numbers"),
+                                )
+                                .on_disabled_hover_text("Not supported yet");
+                                ui.add_enabled(
+                                    false,
+                                    egui::Checkbox::new(&mut false, "Save review marks"),
+                                )
+                                .on_disabled_hover_text("No review marks in this app");
+                                ui.checkbox(state.check_breaks, "Check page breaks");
+                                ui.horizontal(|ui| {
+                                    ui.checkbox(state.watermark_on, "Print watermark:");
+                                    ui.add_enabled(
+                                        *state.watermark_on,
+                                        egui::TextEdit::singleline(state.watermark)
+                                            .hint_text("e.g. CONFIDENTIAL")
+                                            .desired_width(180.0),
+                                    );
+                                });
                             });
-                        });
                     }
                 }
                 ExportTab::Research => {
-                    ui.add_space(6.0);
+                    ui.add_space(10.0);
                     ui.label(
                         egui::RichText::new("Research export is not implemented yet.")
                             .small()
                             .weak(),
                     );
                     egui::ScrollArea::vertical()
-                        .max_height(280.0)
+                        .max_height(260.0)
                         .show(ui, |ui| {
                             for e in state.research {
                                 let kind = match e.kind {
@@ -219,7 +272,7 @@ pub fn dialog(ctx: &Context, state: &mut ExportDialog<'_>) -> ExportAction {
                         });
                 }
                 ExportTab::Outline => {
-                    ui.add_space(6.0);
+                    ui.add_space(10.0);
                     ui.label(
                         egui::RichText::new("Outline export is not implemented yet.")
                             .small()
@@ -228,16 +281,15 @@ pub fn dialog(ctx: &Context, state: &mut ExportDialog<'_>) -> ExportAction {
                 }
             }
 
-            // Bottom-right buttons (KIT order: Export, Print Preview, Cancel).
-            let gap = (ui.available_height() - 32.0).max(4.0);
+            // Footer action row separated by a clean hairline rule.
+            let gap = (ui.available_height() - 42.0).max(8.0);
             ui.add_space(gap);
+            let (rule, _) =
+                ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::hover());
+            ui.painter().rect_filled(rule, 0.0, c.sep);
+            ui.add_space(8.0);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("Cancel").clicked() {
-                    close = true;
-                }
-                if ui.button("Print Preview").clicked() {
-                    do_preview = true;
-                }
+                ui.spacing_mut().item_spacing.x = 8.0;
                 let supported = script_tab
                     && !state.path.is_empty()
                     && matches!(
@@ -249,11 +301,24 @@ pub fn dialog(ctx: &Context, state: &mut ExportDialog<'_>) -> ExportAction {
                             | ExportFormat::Markdown
                     );
                 let label = if file_exists { "Rewrite" } else { "Export" };
-                if ui
-                    .add_enabled(supported, egui::Button::new(label))
-                    .clicked()
-                {
+                let primary_btn = if supported {
+                    egui::Button::new(
+                        egui::RichText::new(label)
+                            .strong()
+                            .color(ink_on_accent(c.accent)),
+                    )
+                    .fill(c.accent)
+                } else {
+                    egui::Button::new(label)
+                };
+                if ui.add_enabled(supported, primary_btn).clicked() {
                     do_export = true;
+                }
+                if ui.button("Print Preview").clicked() {
+                    do_preview = true;
+                }
+                if ui.button("Cancel").clicked() {
+                    close = true;
                 }
             });
         });

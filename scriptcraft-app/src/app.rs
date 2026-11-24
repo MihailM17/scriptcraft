@@ -19,14 +19,10 @@ use crate::research::{ResearchAction, ResearchEdit, ResearchView};
 use crate::settings::{AppSettings, SettingsUi};
 use crate::theme::*;
 pub use crate::theme::{apply_theme, kit_visuals, set_kit_theme};
-/// Statistics report bar palette (sampled from KIT's summary report).
-const REP_GREEN_LIGHT: egui::Color32 = egui::Color32::from_rgb(0xB1, 0xE1, 0x86);
+/// Semantic status indicator colors (saved / dirty / error).
 const REP_GREEN: egui::Color32 = egui::Color32::from_rgb(0x2B, 0xA1, 0x21);
-const REP_PINK: egui::Color32 = egui::Color32::from_rgb(0xFC, 0x99, 0x98);
 const REP_RED: egui::Color32 = egui::Color32::from_rgb(0xD8, 0x4D, 0x4B);
 const REP_SAND: egui::Color32 = egui::Color32::from_rgb(0xFD, 0xC0, 0x69);
-const REP_ORANGE: egui::Color32 = egui::Color32::from_rgb(0xFE, 0x82, 0x00);
-const REP_BLUE: egui::Color32 = egui::Color32::from_rgb(0x69, 0xC6, 0xFF);
 pub(crate) const MONO: egui::FontFamily = egui::FontFamily::Monospace;
 
 /// `(block, paragraph, char)` triple used by the Editor 2.0 test hooks.
@@ -408,51 +404,64 @@ fn element_label(t: ElementType) -> &'static str {
         .unwrap_or("Action")
 }
 
-/// One flat left-aligned KIT format button. Active rows invert to
-/// light off-white with dark ink, exactly like the original.
+/// Quiet left-aligned element row for the right-hand Format rail.
+/// Resting rows stay borderless so visual attention remains on the page;
+/// the active element carries a soft accent surface and 3px left bar.
 fn fmt_button(ui: &mut egui::Ui, label: &str, active: bool) -> bool {
     let c = kit();
     let (rect, resp) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 30.0), egui::Sense::click());
-    let (bg, fg, muted) = if active {
-        let text_ink = crate::theme::ink_on_accent(c.accent);
-        let muted_ink = if text_ink == egui::Color32::WHITE {
-            egui::Color32::from_white_alpha(170)
-        } else {
-            egui::Color32::from_black_alpha(170)
-        };
-        (c.accent, text_ink, muted_ink)
-    } else if resp.hovered() {
-        (c.button_hover, c.text, c.disabled_text)
-    } else {
-        (c.elt_bg, c.text, c.disabled_text)
-    };
-    ui.painter().rect_filled(rect, 7.0, bg);
-    if !active {
-        ui.painter().rect_stroke(
-            rect,
-            7.0,
-            egui::Stroke::new(1.0_f32, c.elt_stroke),
-            egui::StrokeKind::Inside,
+    if active {
+        ui.painter().rect_filled(rect, 7.0, c.accent_soft);
+        let bar = egui::Rect::from_min_size(
+            egui::pos2(rect.left(), rect.top() + 6.0),
+            egui::vec2(3.0, rect.height() - 12.0),
         );
+        ui.painter().rect_filled(bar, 1.5, c.accent);
+    } else if resp.hovered() {
+        ui.painter().rect_filled(rect, 7.0, c.hover_light);
     }
-    // "3 Dialogue": the FastFormat number becomes a muted gutter.
+
+    // "3 Dialogue": render the FastFormat digit inside a subtle keycap pill.
     let (num, name) = match label.split_once(' ') {
         Some((n, rest)) if n.len() == 1 && n.chars().all(|ch| ch.is_ascii_digit()) => {
             (Some(n), rest)
         }
         _ => (None, label),
     };
-    let mut x = rect.left() + 12.0;
+    let fg = if active {
+        c.accent_text
+    } else if resp.hovered() {
+        c.heading_text
+    } else {
+        c.text
+    };
+    let mut x = rect.left() + 10.0;
     if let Some(n) = num {
-        ui.painter().text(
-            egui::pos2(x, rect.center().y),
-            egui::Align2::LEFT_CENTER,
-            n,
-            egui::FontId::proportional(11.5),
-            muted,
+        let cap = egui::Rect::from_center_size(
+            egui::pos2(x + 9.0, rect.center().y),
+            egui::vec2(18.0, 18.0),
         );
-        x += 18.0;
+        ui.painter()
+            .rect_filled(cap, 4.0, if active { c.accent_soft } else { c.button });
+        ui.painter().rect_stroke(
+            cap,
+            4.0,
+            egui::Stroke::new(1.0_f32, if active { c.accent } else { c.sep }),
+            egui::StrokeKind::Inside,
+        );
+        ui.painter().text(
+            cap.center(),
+            egui::Align2::CENTER_CENTER,
+            n,
+            egui::FontId::proportional(10.5),
+            if active {
+                c.accent_text
+            } else {
+                c.disabled_text
+            },
+        );
+        x += 26.0;
     }
     ui.painter().text(
         egui::pos2(x, rect.center().y),
@@ -468,6 +477,39 @@ fn fmt_button(ui: &mut egui::Ui, label: &str, active: bool) -> bool {
     } else {
         resp.clicked()
     }
+}
+
+/// Compact secondary pill button used for paired Prev / Next navigation.
+fn fmt_nav_button(ui: &mut egui::Ui, label: &str, width: f32) -> bool {
+    let c = kit();
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(width, 28.0), egui::Sense::click());
+    ui.painter().rect_filled(rect, 7.0, button_fill(&resp));
+    ui.painter().rect_stroke(
+        rect,
+        7.0,
+        egui::Stroke::new(
+            1.0_f32,
+            if resp.hovered() {
+                c.field_stroke
+            } else {
+                c.sep
+            },
+        ),
+        egui::StrokeKind::Inside,
+    );
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        label,
+        egui::FontId::proportional(12.0),
+        if resp.hovered() {
+            c.heading_text
+        } else {
+            c.text
+        },
+    );
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+        .clicked()
 }
 
 /// KIT QMenu-style row: full-width, accent fill on hover, painted check gutter.
@@ -4970,32 +5012,42 @@ fn pct_text(p: f32) -> String {
     }
 }
 
-/// Column headers with KIT's thin underline; the last column is the bar lane.
+/// Editorial uppercase tracked table header with a full-width theme hairline.
 fn kit_report_cols(ui: &mut egui::Ui, cols: &[(&str, f32)]) {
+    let c = kit();
     let (rect, _) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 22.0), egui::Sense::hover());
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 26.0), egui::Sense::hover());
     let mut x = rect.left();
-    for (name, w) in cols {
-        let g = ui.painter().layout_no_wrap(
-            name.to_string(),
-            egui::FontId::proportional(12.5),
-            kit().text,
-        );
-        let gw = g.size().x.min(*w - 6.0);
-        ui.painter().galley(
-            egui::pos2(x, rect.center().y - g.size().y / 2.0),
-            g,
-            kit().text,
-        );
-        ui.painter().line_segment(
-            [
-                egui::pos2(x, rect.bottom() - 2.0),
-                egui::pos2(x + gw, rect.bottom() - 2.0),
-            ],
-            egui::Stroke::new(1.0_f32, egui::Color32::from_gray(0xDD)),
-        );
-        x += w;
+    let last = cols.len().saturating_sub(1);
+    for (i, (name, w)) in cols.iter().enumerate() {
+        let label = name.to_ascii_uppercase();
+        if i > 0 && i < last {
+            // Numeric columns right-align to keep digits stacked cleanly.
+            ui.painter().text(
+                egui::pos2(x + *w - 14.0, rect.center().y - 1.0),
+                egui::Align2::RIGHT_CENTER,
+                label,
+                egui::FontId::proportional(10.5),
+                c.disabled_text,
+            );
+        } else {
+            ui.painter().text(
+                egui::pos2(x + if i == 0 { 6.0 } else { 0.0 }, rect.center().y - 1.0),
+                egui::Align2::LEFT_CENTER,
+                label,
+                egui::FontId::proportional(10.5),
+                c.disabled_text,
+            );
+        }
+        x += *w;
     }
+    ui.painter().line_segment(
+        [
+            egui::pos2(rect.left(), rect.bottom() - 1.0),
+            egui::pos2(rect.right(), rect.bottom() - 1.0),
+        ],
+        egui::Stroke::new(1.0_f32, c.sep),
+    );
 }
 
 fn kit_report_row(
@@ -5003,47 +5055,88 @@ fn kit_report_row(
     cols: &[(&str, f32)],
     texts: &[String],
     bar: Option<(egui::Color32, f32)>,
+    max_pct: f32,
 ) {
-    let (rect, _) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 21.0), egui::Sense::hover());
+    let c = kit();
+    let (rect, resp) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 28.0), egui::Sense::hover());
     let p = ui.painter();
+    if resp.hovered() {
+        p.rect_filled(rect, 5.0, c.hover_light);
+    }
     let font = egui::FontId::proportional(12.5);
     let mut x = rect.left();
     let last = cols.len().saturating_sub(1);
     for (i, (_, w)) in cols.iter().enumerate() {
         if i == last {
             if let Some((color, pct)) = bar {
-                let capacity = (*w - 44.0).max(12.0);
-                let bw = (capacity * pct / 100.0).max(2.5);
-                let brect = egui::Rect::from_min_size(
-                    egui::pos2(x, rect.center().y - 6.0),
-                    egui::vec2(bw, 12.0),
+                let pct_col_w = 46.0;
+                let capacity = (*w - pct_col_w - 8.0).max(24.0);
+                let track = egui::Rect::from_min_size(
+                    egui::pos2(x, rect.center().y - 3.5),
+                    egui::vec2(capacity, 7.0),
                 );
-                p.rect_filled(brect, 0.0, color);
+                // Recessed full-width track makes proportions immediately readable.
+                p.rect_filled(track, 3.5, c.button);
+                if pct > 0.0 {
+                    let frac = (pct / 100.0).clamp(0.0, 1.0);
+                    let bw = (capacity * frac).max(5.0);
+                    let brect = egui::Rect::from_min_size(
+                        egui::pos2(x, rect.center().y - 3.5),
+                        egui::vec2(bw, 7.0),
+                    );
+                    p.rect_filled(brect, 3.5, color);
+                }
+                let is_peak = max_pct > 0.0 && (pct - max_pct).abs() < 0.05;
                 p.text(
-                    egui::pos2(brect.right() + 6.0, rect.center().y),
-                    egui::Align2::LEFT_CENTER,
+                    egui::pos2(rect.right() - 6.0, rect.center().y),
+                    egui::Align2::RIGHT_CENTER,
                     pct_text(pct),
-                    font.clone(),
-                    kit().text,
+                    egui::FontId::proportional(12.0),
+                    if is_peak {
+                        c.heading_text
+                    } else {
+                        c.disabled_text
+                    },
                 );
             }
         } else if let Some(t) = texts.get(i) {
             if !t.is_empty() {
-                p.text(
-                    egui::pos2(x, rect.center().y),
-                    egui::Align2::LEFT_CENTER,
-                    t,
-                    font.clone(),
-                    kit().text,
-                );
+                if i == 0 {
+                    paint_ellipsized(
+                        p,
+                        egui::pos2(x + 6.0, rect.center().y),
+                        rect.center().y,
+                        t,
+                        font.clone(),
+                        c.text,
+                        (*w - 16.0).max(20.0),
+                    );
+                } else {
+                    p.text(
+                        egui::pos2(x + *w - 14.0, rect.center().y),
+                        egui::Align2::RIGHT_CENTER,
+                        t,
+                        font.clone(),
+                        c.text,
+                    );
+                }
             }
         }
-        x += w;
+        x += *w;
     }
+    // Subtle hairline between rows.
+    let hairline = egui::Color32::from_rgba_unmultiplied(c.sep.r(), c.sep.g(), c.sep.b(), 130);
+    p.line_segment(
+        [
+            egui::pos2(rect.left() + 6.0, rect.bottom() - 0.5),
+            egui::pos2(rect.right() - 6.0, rect.bottom() - 0.5),
+        ],
+        egui::Stroke::new(0.75_f32, hairline),
+    );
 }
 
-/// Label column + fixed 80pt cell columns + a flexible bar lane at the end.
+/// Label column + right-aligned numeric columns + single-accent proportional bar lane.
 fn kit_report_table(
     ui: &mut egui::Ui,
     width: f32,
@@ -5052,56 +5145,117 @@ fn kit_report_table(
     cell_names: &[&str],
     rows: &[RepRow],
 ) {
-    let used = label_w + 80.0 * cell_names.len() as f32;
-    let bar_w = (width - used - 10.0).max(150.0);
+    let table_w = width.min(900.0);
+    let cell_w = 88.0;
+    let clamped_label = label_w.min((table_w * 0.44).max(160.0));
+    let used = clamped_label + cell_w * cell_names.len() as f32;
+    let bar_w = (table_w - used).max(150.0);
     let mut cols: Vec<(&str, f32)> = Vec::with_capacity(cell_names.len() + 2);
-    cols.push((label_name, label_w));
+    cols.push((label_name, clamped_label));
     for c in cell_names {
-        cols.push((c, 80.0));
+        cols.push((c, cell_w));
     }
-    cols.push(("Percentages", bar_w));
-    kit_report_cols(ui, &cols);
-    for r in rows {
-        let mut texts = vec![r.label.clone()];
-        texts.extend(r.cells.iter().cloned());
-        kit_report_row(ui, &cols, &texts, Some((r.color, r.pct)));
-    }
+    cols.push(("Share", bar_w));
+    let max_pct = rows.iter().map(|r| r.pct).fold(0.0_f32, f32::max);
+    ui.allocate_ui(egui::vec2(table_w, 0.0), |ui| {
+        kit_report_cols(ui, &cols);
+        for r in rows {
+            let mut texts = vec![r.label.clone()];
+            texts.extend(r.cells.iter().cloned());
+            kit_report_row(ui, &cols, &texts, Some((r.color, r.pct)), max_pct);
+        }
+    });
 }
 
-/// Big number block + hairline rule under it.
+/// Recessed KPI summary strip: even-width cards with uppercase labels and crisp numerals.
 fn kit_big_numbers(ui: &mut egui::Ui, items: &[(&str, &str)]) {
-    let w = (ui.available_width() / items.len().max(1) as f32).max(110.0);
-    ui.horizontal_top(|ui| {
-        for (v, l) in items {
-            ui.allocate_ui_with_layout(
-                egui::vec2(w, 40.0),
-                egui::Layout::top_down(egui::Align::Min),
-                |ui| {
-                    ui.label(egui::RichText::new(*v).size(21.0).strong());
-                    ui.label(egui::RichText::new(*l).size(11.5));
-                },
+    let c = kit();
+    let total_w = ui.available_width().min(900.0);
+    let gap = 10.0;
+    let count = items.len().max(1) as f32;
+    let card_w = ((total_w - gap * (count - 1.0)) / count).max(110.0);
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = gap;
+        for (idx, (v, l)) in items.iter().enumerate() {
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(card_w, 66.0), egui::Sense::hover());
+            ui.painter().rect_filled(rect, 8.0, c.surface);
+            ui.painter().rect_stroke(
+                rect,
+                8.0,
+                egui::Stroke::new(1.0_f32, c.sep),
+                egui::StrokeKind::Inside,
+            );
+            // Subtle top accent hairline on the lead metric (Duration).
+            if idx == 0 {
+                let top_bar = egui::Rect::from_min_size(
+                    egui::pos2(rect.left() + 12.0, rect.top()),
+                    egui::vec2(28.0, 2.5),
+                );
+                ui.painter().rect_filled(top_bar, 1.25, c.accent);
+            }
+            ui.painter().text(
+                egui::pos2(rect.left() + 14.0, rect.top() + 16.0),
+                egui::Align2::LEFT_CENTER,
+                l.to_ascii_uppercase(),
+                egui::FontId::proportional(10.0),
+                c.disabled_text,
+            );
+            ui.painter().text(
+                egui::pos2(rect.left() + 14.0, rect.bottom() - 22.0),
+                egui::Align2::LEFT_CENTER,
+                *v,
+                egui::FontId::proportional(22.0),
+                c.heading_text,
             );
         }
     });
-    ui.add_space(8.0);
-    let (r, _) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::hover());
-    ui.painter()
-        .rect_filled(r, 0.0, egui::Color32::from_gray(0x99));
-    ui.add_space(12.0);
+    ui.add_space(20.0);
 }
 
 fn kit_report_header(ui: &mut egui::Ui, project: &str, subtitle: &str, generated: &str) {
-    ui.horizontal(|ui| {
-        ui.vertical(|ui| {
-            ui.label(egui::RichText::new(project).size(15.0).strong());
-            ui.label(egui::RichText::new(subtitle).size(15.0).strong());
-        });
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
-            ui.label(egui::RichText::new(generated).size(11.5));
+    let c = kit();
+    let header_w = ui.available_width().min(900.0);
+    ui.allocate_ui(egui::vec2(header_w, 0.0), |ui| {
+        ui.horizontal_top(|ui| {
+            ui.vertical(|ui| {
+                ui.label(
+                    egui::RichText::new(subtitle.to_ascii_uppercase())
+                        .size(11.0)
+                        .strong()
+                        .color(c.accent_text),
+                );
+                ui.add_space(2.0);
+                ui.label(
+                    egui::RichText::new(if project.is_empty() {
+                        "Untitled Script"
+                    } else {
+                        project
+                    })
+                    .size(22.0)
+                    .strong()
+                    .color(c.heading_text),
+                );
+            });
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
+                ui.label(
+                    egui::RichText::new(generated)
+                        .size(11.5)
+                        .color(c.disabled_text),
+                );
+            });
         });
     });
-    ui.add_space(14.0);
+    ui.add_space(16.0);
+}
+
+fn kit_report_section(ui: &mut egui::Ui, text: &str) {
+    ui.label(
+        egui::RichText::new(text)
+            .size(14.5)
+            .strong()
+            .color(kit().heading_text),
+    );
+    ui.add_space(6.0);
 }
 
 pub(crate) fn kit_section(ui: &mut egui::Ui, text: &str) {
@@ -5109,8 +5263,8 @@ pub(crate) fn kit_section(ui: &mut egui::Ui, text: &str) {
     ui.add_space(6.0);
 }
 
-/// First printable action-ish line of a scene, for navigator rows.
-fn scene_preview(p: &Project, s: &Scene) -> String {
+/// First printable action-ish line of a scene, for navigator rows and cards.
+fn scene_preview_with_limit(p: &Project, s: &Scene, limit: usize) -> String {
     if p.scene_is_omitted(s) {
         return "Body hidden from pages and statistics.".to_string();
     }
@@ -5122,8 +5276,8 @@ fn scene_preview(p: &Project, s: &Scene) -> String {
             ) && !b.text.trim().is_empty()
             {
                 let t: String = b.text.split_whitespace().collect::<Vec<_>>().join(" ");
-                return if t.chars().count() > 64 {
-                    format!("{}…", t.chars().take(64).collect::<String>())
+                return if t.chars().count() > limit {
+                    format!("{}…", t.chars().take(limit).collect::<String>())
                 } else {
                     t
                 };
@@ -5131,6 +5285,11 @@ fn scene_preview(p: &Project, s: &Scene) -> String {
         }
     }
     String::new()
+}
+
+/// First printable action-ish line of a scene, for navigator rows.
+fn scene_preview(p: &Project, s: &Scene) -> String {
+    scene_preview_with_limit(p, s, 64)
 }
 
 impl eframe::App for ScriptCraftApp {
@@ -5441,116 +5600,190 @@ impl ScriptCraftApp {
                             self.menu_contents(ui);
                         });
                     }
-                    toolbar_sep(ui);
-                    let has = self.project.is_some();
-                    let editable = self.compare.is_none();
-                    let editing = has && editable;
-                    let n_scenes = self.project.as_ref().map(|p| p.scenes().len()).unwrap_or(0);
-                    ui.label(
-                        egui::RichText::new(format!("Scenes: {n_scenes}"))
-                            .small()
-                            .weak(),
-                    );
-                    if toolbar_icon_button(ui, editing, "Add scene", draw_plus).clicked() {
-                        self.insert_scene_below();
-                    }
-                    if toolbar_icon_button(ui, editing && n_scenes > 1, "Delete scene", draw_minus)
-                        .clicked()
-                    {
-                        self.delete_scene();
-                    }
-                    toolbar_sep(ui);
-                    let can_undo = editing && self.editor2.history.can_undo();
-                    let can_redo = editing && self.editor2.history.can_redo();
-                    let undo_hint = format!("Undo ({})", shortcut("Z"));
-                    let redo_hint = format!("Redo ({})", shift_shortcut("Z"));
-                    let dual_hint = format!("Dual dialogue ({})", shortcut("D"));
-                    if toolbar_icon_button(ui, can_undo, &undo_hint, draw_undo_arrow).clicked() {
-                        self.do_undo();
-                    }
-                    if toolbar_icon_button(ui, can_redo, &redo_hint, draw_redo_arrow).clicked() {
-                        self.do_redo();
-                    }
-                    let can_dual = editing && self.dual_dialogue_target().is_some();
-                    if toolbar_icon_button(ui, can_dual, &dual_hint, draw_dual).clicked() {
-                        self.toggle_dual_dialogue();
-                    }
-                    toolbar_sep(ui);
-                    let current = self.selected_block.and_then(|bi| {
-                        self.project
-                            .as_ref()
-                            .and_then(|p| p.blocks.get(bi))
-                            .map(|b| b.element_type)
-                    });
-                    let mut pick: Option<ElementType> = None;
-                    ui.add_enabled_ui(editing, |ui| {
-                        let label = current.map(element_label).unwrap_or("Element");
-                        ui.menu_button(label, |ui| {
-                            ui.set_min_width(220.0);
-                            for (n, t, name) in FORMAT_ORDER {
-                                let sc = format!("{}{n}", shortcut_prefix());
-                                if menu_check(ui, name, current == Some(t), Some(&sc), true) {
-                                    pick = Some(t);
-                                }
-                            }
-                        });
-                    });
-                    if let Some(t) = pick {
-                        if self.selected_block.is_some() {
-                            self.set_selected_type(t);
-                        } else {
-                            self.insert_below(t);
-                        }
-                    }
-                    // Page zoom cluster, always visible (pinch works too).
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let mut z = self.zoom;
-                        let mut free = false;
-                        if toolbar_icon_button(ui, z < 4.0 - 1e-3, "Zoom in (pinch out)", draw_plus)
-                            .clicked()
-                        {
-                            z = (z * 1.1).min(4.0);
-                            free = true;
-                        }
-                        let pct_zoom = match self.fit {
-                            FitMode::Off => self.zoom,
-                            _ => self.last_render_zoom,
-                        };
-                        if ui
-                            .add(
-                                egui::Button::new(
-                                    egui::RichText::new(format!(
-                                        "{}%",
-                                        (pct_zoom * 100.0).round() as i32
-                                    ))
-                                    .size(12.0),
-                                )
-                                .frame(false)
-                                .min_size(egui::vec2(46.0, 24.0)),
-                            )
-                            .on_hover_text("Reset zoom to 100%")
-                            .clicked()
-                        {
-                            z = 1.0;
-                            free = true;
+                    let on_script = self.side_tab == SideTab::Script && self.project.is_some();
+                    if on_script {
+                        toolbar_sep(ui);
+                        let editable = self.compare.is_none();
+                        let n_scenes = self.project.as_ref().map(|p| p.scenes().len()).unwrap_or(0);
+                        ui.label(
+                            egui::RichText::new(format!("Scenes: {n_scenes}"))
+                                .small()
+                                .weak(),
+                        );
+                        if toolbar_icon_button(ui, editable, "Add scene", draw_plus).clicked() {
+                            self.insert_scene_below();
                         }
                         if toolbar_icon_button(
                             ui,
-                            z > 0.25 + 1e-3,
-                            "Zoom out (pinch in)",
+                            editable && n_scenes > 1,
+                            "Delete scene",
                             draw_minus,
                         )
                         .clicked()
                         {
-                            z = (z / 1.1).max(0.25);
-                            free = true;
+                            self.delete_scene();
                         }
-                        if free {
-                            self.fit = FitMode::Off;
+                        toolbar_sep(ui);
+                        let can_undo = editable && self.editor2.history.can_undo();
+                        let can_redo = editable && self.editor2.history.can_redo();
+                        let undo_hint = format!("Undo ({})", shortcut("Z"));
+                        let redo_hint = format!("Redo ({})", shift_shortcut("Z"));
+                        let dual_hint = format!("Dual dialogue ({})", shortcut("D"));
+                        if toolbar_icon_button(ui, can_undo, &undo_hint, draw_undo_arrow).clicked()
+                        {
+                            self.do_undo();
                         }
-                        self.zoom = z.clamp(0.25, 4.0);
-                        ui.label(egui::RichText::new("Zoom").small().weak());
-                    });
+                        if toolbar_icon_button(ui, can_redo, &redo_hint, draw_redo_arrow).clicked()
+                        {
+                            self.do_redo();
+                        }
+                        let can_dual = editable && self.dual_dialogue_target().is_some();
+                        if toolbar_icon_button(ui, can_dual, &dual_hint, draw_dual).clicked() {
+                            self.toggle_dual_dialogue();
+                        }
+                        toolbar_sep(ui);
+                        let current = self.selected_block.and_then(|bi| {
+                            self.project
+                                .as_ref()
+                                .and_then(|p| p.blocks.get(bi))
+                                .map(|b| b.element_type)
+                        });
+                        let mut pick: Option<ElementType> = None;
+                        ui.add_enabled_ui(editable, |ui| {
+                            let label = current.map(element_label).unwrap_or("Element");
+                            ui.menu_button(label, |ui| {
+                                ui.set_min_width(220.0);
+                                for (n, t, name) in FORMAT_ORDER {
+                                    let sc = format!("{}{n}", shortcut_prefix());
+                                    if menu_check(ui, name, current == Some(t), Some(&sc), true) {
+                                        pick = Some(t);
+                                    }
+                                }
+                            });
+                        });
+                        if let Some(t) = pick {
+                            if self.selected_block.is_some() {
+                                self.set_selected_type(t);
+                            } else {
+                                self.insert_below(t);
+                            }
+                        }
+                        // Page zoom cluster (script view only; pinch works too).
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let mut z = self.zoom;
+                            let mut free = false;
+                            if toolbar_icon_button(
+                                ui,
+                                z < 4.0 - 1e-3,
+                                "Zoom in (pinch out)",
+                                draw_plus,
+                            )
+                            .clicked()
+                            {
+                                z = (z * 1.1).min(4.0);
+                                free = true;
+                            }
+                            let pct_zoom = match self.fit {
+                                FitMode::Off => self.zoom,
+                                _ => self.last_render_zoom,
+                            };
+                            if ui
+                                .add(
+                                    egui::Button::new(
+                                        egui::RichText::new(format!(
+                                            "{}%",
+                                            (pct_zoom * 100.0).round() as i32
+                                        ))
+                                        .size(12.0),
+                                    )
+                                    .frame(false)
+                                    .min_size(egui::vec2(46.0, 24.0)),
+                                )
+                                .on_hover_text("Reset zoom to 100%")
+                                .clicked()
+                            {
+                                z = 1.0;
+                                free = true;
+                            }
+                            if toolbar_icon_button(
+                                ui,
+                                z > 0.25 + 1e-3,
+                                "Zoom out (pinch in)",
+                                draw_minus,
+                            )
+                            .clicked()
+                            {
+                                z = (z / 1.1).max(0.25);
+                                free = true;
+                            }
+                            if free {
+                                self.fit = FitMode::Off;
+                            }
+                            self.zoom = z.clamp(0.25, 4.0);
+                            ui.label(egui::RichText::new("Zoom").small().weak());
+                        });
+                    } else {
+                        // Calm contextual header for non-editing modules: keep chrome
+                        // focused by hiding irrelevant script controls.
+                        let module_name = match self.side_tab {
+                            SideTab::Start => "",
+                            SideTab::Script => "Script",
+                            SideTab::Research => "Research",
+                            SideTab::Cards => "Corkboard",
+                            SideTab::Statistics => "Statistics",
+                            SideTab::Settings => "Settings",
+                        };
+                        if self.project.is_some() && !module_name.is_empty() {
+                            toolbar_sep(ui);
+                            let doc_title = if self.meta.title.trim().is_empty() {
+                                "Untitled"
+                            } else {
+                                self.meta.title.trim()
+                            };
+                            ui.label(
+                                egui::RichText::new(doc_title)
+                                    .size(12.5)
+                                    .strong()
+                                    .color(kit().heading_text),
+                            );
+                            ui.label(
+                                egui::RichText::new("·")
+                                    .size(12.5)
+                                    .color(kit().disabled_text),
+                            );
+                            ui.label(
+                                egui::RichText::new(module_name)
+                                    .size(12.5)
+                                    .color(kit().disabled_text),
+                            );
+                        } else if !module_name.is_empty() {
+                            toolbar_sep(ui);
+                            ui.label(
+                                egui::RichText::new(module_name)
+                                    .size(12.5)
+                                    .color(kit().disabled_text),
+                            );
+                        }
+                        if self.side_tab == SideTab::Cards && self.project.is_some() {
+                            let n_scenes =
+                                self.project.as_ref().map(|p| p.scenes().len()).unwrap_or(0);
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if toolbar_icon_button(ui, true, "Add scene", draw_plus)
+                                        .clicked()
+                                    {
+                                        self.insert_scene_below();
+                                    }
+                                    ui.label(
+                                        egui::RichText::new(format!("{n_scenes} scenes"))
+                                            .size(12.0)
+                                            .color(kit().disabled_text),
+                                    );
+                                },
+                            );
+                        }
+                    }
                 });
             });
     }
@@ -6784,11 +7017,26 @@ impl ScriptCraftApp {
     /// Drop a card onto another; scenes (and their cards on save) follow.
     fn cards_tab(&mut self, ui: &mut egui::Ui) {
         let Some(p) = &self.project else {
-            ui.label("No project open.");
+            ui.add_space(40.0);
+            ui.vertical_centered(|ui| {
+                ui.label(
+                    egui::RichText::new("No screenplay open")
+                        .size(16.0)
+                        .strong()
+                        .color(kit().heading_text),
+                );
+                ui.add_space(4.0);
+                ui.label(
+                    egui::RichText::new(
+                        "Open a project from Start to view and arrange scene cards.",
+                    )
+                    .size(12.5)
+                    .color(kit().disabled_text),
+                );
+            });
             return;
         };
-        // Owned rows: (scene idx, heading block, title, duration, preview,
-        // omitted).
+        // Owned rows: (scene idx, heading block, title, duration, preview, omitted).
         let rows: Vec<(usize, usize, String, f64, String, bool)> = p
             .scenes()
             .into_iter()
@@ -6805,7 +7053,7 @@ impl ScriptCraftApp {
                     s.blocks.first().copied().unwrap_or(0),
                     title,
                     p.scene_duration_secs(Some(&s)),
-                    scene_preview(p, &s),
+                    scene_preview_with_limit(p, &s, 115),
                     p.scene_is_omitted(&s),
                 )
             })
@@ -6815,110 +7063,208 @@ impl ScriptCraftApp {
         let mut clicked: Option<usize> = None;
         let mut dbl_clicked: Option<(usize, usize)> = None;
         let mut toggle: Option<usize> = None;
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
-                for (i, (si, bi, title, secs, preview, omitted)) in rows.iter().enumerate() {
-                    let (rect, resp) = ui.allocate_exact_size(
-                        egui::vec2(168.0, 112.0),
-                        egui::Sense::click_and_drag(),
-                    );
-                    let is_sel = *si == self.selected_scene;
-                    let bg = if is_sel {
-                        kit().accent_soft
-                    } else if resp.hovered() || dragging == Some(*si) {
-                        kit().hover_light
-                    } else {
-                        kit().surface
-                    };
-                    ui.painter().rect_filled(rect, 10.0, bg);
-                    ui.painter().rect_stroke(
-                        rect,
-                        10.0,
-                        egui::Stroke::new(1.0_f32, if is_sel { kit().accent } else { kit().sep }),
-                        egui::StrokeKind::Inside,
-                    );
-                    let inner = rect.shrink(8.0);
-                    let mut card_ui = ui.new_child(
-                        egui::UiBuilder::new()
-                            .max_rect(inner)
-                            .layout(egui::Layout::top_down(egui::Align::LEFT)),
-                    );
-                    card_ui.set_width(inner.width());
-                    card_ui.label(
-                        egui::RichText::new(format!("{}  {}", self.scene_label(i), title))
-                            .small()
-                            .strong()
-                            .color(kit().heading_text),
-                    );
-                    if *omitted {
-                        card_ui.label(
-                            egui::RichText::new("OMITTED")
-                                .small()
-                                .strong()
-                                .color(kit().accent_text),
-                        );
-                    }
-                    card_ui.label(
-                        egui::RichText::new(format_duration(*secs))
-                            .small()
-                            .color(kit().disabled_text),
-                    );
-                    if !preview.is_empty() {
-                        let prev_show: String = if preview.chars().count() > 32 {
-                            format!("{}…", preview.chars().take(31).collect::<String>())
-                        } else {
-                            preview.clone()
-                        };
-                        card_ui.label(
-                            egui::RichText::new(prev_show)
-                                .small()
-                                .color(kit().disabled_text),
-                        );
-                    }
-                    let _ = bi;
-                    // Drop indicator: accent bar on the hovered edge.
-                    if dragging.is_some() && dragging != Some(*si) {
-                        if let Some(pos) = ui.ctx().input(|inp| inp.pointer.hover_pos()) {
-                            if rect.contains(pos) {
-                                let before = pos.x < rect.center().x;
-                                drop_at = Some((*si, before));
-                                let x = if before { rect.left() } else { rect.right() };
-                                ui.painter().rect_filled(
-                                    egui::Rect::from_min_size(
-                                        egui::pos2(x - 1.5, rect.top()),
-                                        egui::vec2(3.0, rect.height()),
+        let c = kit();
+        let gap = 12.0;
+        let card_h = 136.0;
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                let avail_w = (ui.available_width() - 8.0).max(240.0);
+                let cols = (((avail_w + gap) / 264.0).floor() as usize).clamp(1, 5);
+                let card_w =
+                    ((avail_w - gap * (cols.saturating_sub(1)) as f32) / cols as f32).max(200.0);
+                ui.spacing_mut().item_spacing = egui::vec2(gap, gap);
+                for chunk in rows.chunks(cols) {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = gap;
+                        for (si, bi, title, secs, preview, omitted) in chunk {
+                            let i = *si;
+                            let (rect, resp) = ui.allocate_exact_size(
+                                egui::vec2(card_w, card_h),
+                                egui::Sense::click_and_drag(),
+                            );
+                            let is_sel = *si == self.selected_scene;
+                            let is_hover = resp.hovered() || dragging == Some(*si);
+                            let bg = if is_sel {
+                                c.accent_soft
+                            } else if is_hover {
+                                c.hover_light
+                            } else {
+                                c.surface
+                            };
+                            let border = if is_sel {
+                                c.accent
+                            } else if is_hover {
+                                c.field_stroke
+                            } else {
+                                c.sep
+                            };
+                            ui.painter().rect_filled(rect, 8.0, bg);
+                            ui.painter().rect_stroke(
+                                rect,
+                                8.0,
+                                egui::Stroke::new(1.0_f32, border),
+                                egui::StrokeKind::Inside,
+                            );
+                            if is_sel {
+                                let bar = egui::Rect::from_min_size(
+                                    egui::pos2(rect.left(), rect.top() + 10.0),
+                                    egui::vec2(3.0, rect.height() - 20.0),
+                                );
+                                ui.painter().rect_filled(bar, 1.5, c.accent);
+                            }
+
+                            // Card header row: scene number left, duration right.
+                            let pad_x = 12.0;
+                            let header_y = rect.top() + 16.0;
+                            let num_str = self.scene_label(i);
+                            let num_col = if is_sel {
+                                c.accent_text
+                            } else {
+                                c.disabled_text
+                            };
+                            let num_g = ui.painter().layout_no_wrap(
+                                num_str,
+                                egui::FontId::proportional(11.5),
+                                num_col,
+                            );
+                            let num_w = num_g.size().x;
+                            ui.painter().galley(
+                                egui::pos2(rect.left() + pad_x, header_y - num_g.size().y / 2.0),
+                                num_g,
+                                num_col,
+                            );
+                            if *omitted {
+                                let badge_g = ui.painter().layout_no_wrap(
+                                    "OMITTED".to_string(),
+                                    egui::FontId::proportional(9.5),
+                                    c.accent_text,
+                                );
+                                let badge_rect = egui::Rect::from_min_size(
+                                    egui::pos2(rect.left() + pad_x + num_w + 8.0, header_y - 8.0),
+                                    egui::vec2(badge_g.size().x + 10.0, 16.0),
+                                );
+                                ui.painter().rect_filled(badge_rect, 4.0, c.accent_soft);
+                                ui.painter().galley(
+                                    egui::pos2(
+                                        badge_rect.center().x - badge_g.size().x / 2.0,
+                                        badge_rect.center().y - badge_g.size().y / 2.0,
                                     ),
-                                    0.0,
-                                    kit().accent,
+                                    badge_g,
+                                    c.accent_text,
                                 );
                             }
-                        }
-                    }
-                    egui::Popup::context_menu(&resp).show(|ui| {
-                        ui.set_min_width(180.0);
-                        let label = if *omitted {
-                            "Restore scene"
-                        } else {
-                            "Omit scene"
-                        };
-                        if ui.button(label).clicked() {
-                            toggle = Some(*si);
-                            ui.close();
+                            let dur_clean =
+                                format_duration(*secs).trim_matches(['(', ')']).to_string();
+                            ui.painter().text(
+                                egui::pos2(rect.right() - pad_x, header_y),
+                                egui::Align2::RIGHT_CENTER,
+                                dur_clean,
+                                egui::FontId::proportional(11.5),
+                                if is_sel {
+                                    c.accent_text
+                                } else {
+                                    c.disabled_text
+                                },
+                            );
+
+                            // Slugline (max 2 lines, ellipsized cleanly).
+                            let content_w = (rect.width() - pad_x * 2.0).max(40.0);
+                            let mut title_job = egui::text::LayoutJob::simple(
+                                title.clone(),
+                                egui::FontId::proportional(12.5),
+                                c.heading_text,
+                                content_w,
+                            );
+                            title_job.wrap.max_rows = 2;
+                            title_job.wrap.overflow_character = Some('\u{2026}');
+                            let title_g = ui.painter().layout_job(title_job);
+                            let title_top = rect.top() + 30.0;
+                            ui.painter().galley(
+                                egui::pos2(rect.left() + pad_x, title_top),
+                                title_g,
+                                c.heading_text,
+                            );
+
+                            // Subtle index-card rule between slugline and body excerpt.
+                            let rule_y = rect.top() + 64.0;
+                            let rule_col = egui::Color32::from_rgba_unmultiplied(
+                                c.sep.r(),
+                                c.sep.g(),
+                                c.sep.b(),
+                                180,
+                            );
+                            ui.painter().line_segment(
+                                [
+                                    egui::pos2(rect.left() + pad_x, rule_y),
+                                    egui::pos2(rect.right() - pad_x, rule_y),
+                                ],
+                                egui::Stroke::new(1.0_f32, rule_col),
+                            );
+
+                            // Body excerpt (up to 3 readable wrapped lines).
+                            if !preview.is_empty() {
+                                let mut body_job = egui::text::LayoutJob::simple(
+                                    preview.clone(),
+                                    egui::FontId::proportional(11.5),
+                                    c.disabled_text,
+                                    content_w,
+                                );
+                                body_job.wrap.max_rows = 3;
+                                body_job.wrap.overflow_character = Some('\u{2026}');
+                                let body_g = ui.painter().layout_job(body_job);
+                                ui.painter().galley(
+                                    egui::pos2(rect.left() + pad_x, rule_y + 9.0),
+                                    body_g,
+                                    c.disabled_text,
+                                );
+                            }
+
+                            // Drop indicator: accent bar on the hovered edge.
+                            if dragging.is_some() && dragging != Some(*si) {
+                                if let Some(pos) = ui.ctx().input(|inp| inp.pointer.hover_pos()) {
+                                    if rect.contains(pos) {
+                                        let before = pos.x < rect.center().x;
+                                        drop_at = Some((*si, before));
+                                        let x = if before { rect.left() } else { rect.right() };
+                                        ui.painter().rect_filled(
+                                            egui::Rect::from_min_size(
+                                                egui::pos2(x - 1.5, rect.top() + 4.0),
+                                                egui::vec2(3.0, rect.height() - 8.0),
+                                            ),
+                                            1.5,
+                                            c.accent,
+                                        );
+                                    }
+                                }
+                            }
+                            let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+                            egui::Popup::context_menu(&resp).show(|ui| {
+                                ui.set_min_width(180.0);
+                                let label = if *omitted {
+                                    "Restore scene"
+                                } else {
+                                    "Omit scene"
+                                };
+                                if ui.button(label).clicked() {
+                                    toggle = Some(*si);
+                                    ui.close();
+                                }
+                            });
+                            if resp.drag_started() {
+                                self.drag_scene = Some(*si);
+                            }
+                            if resp.clicked() {
+                                clicked = Some(*si);
+                            }
+                            if resp.double_clicked() {
+                                dbl_clicked = Some((*si, *bi));
+                            }
                         }
                     });
-                    if resp.drag_started() {
-                        self.drag_scene = Some(*si);
-                    }
-                    if resp.clicked() {
-                        clicked = Some(*si);
-                    }
-                    if resp.double_clicked() {
-                        dbl_clicked = Some((*si, *bi));
-                    }
                 }
+                ui.add_space(12.0);
             });
-        });
         if let Some(si) = clicked {
             self.selected_scene = si;
         }
@@ -7143,7 +7489,7 @@ impl ScriptCraftApp {
     /// at the caret now, so this panel stays clean.
     fn format_panel(&mut self, ctx: &egui::Context) {
         egui::SidePanel::right("format")
-            .exact_width(172.0)
+            .exact_width(176.0)
             .resizable(false)
             .frame(
                 egui::Frame::new()
@@ -7151,7 +7497,7 @@ impl ScriptCraftApp {
                     .inner_margin(egui::Margin::symmetric(10, 12)),
             )
             .show(ctx, |ui| {
-                ui.spacing_mut().item_spacing.y = 4.0;
+                ui.spacing_mut().item_spacing.y = 2.0;
                 if self.project.is_none() {
                     ui.label("No project open.");
                     return;
@@ -7162,9 +7508,10 @@ impl ScriptCraftApp {
                         .and_then(|p| p.blocks.get(bi))
                         .map(|b| b.element_type)
                 });
-                if fmt_button(ui, "Prev", false) {
-                    self.step_selection(-1);
-                }
+                ui.horizontal(|ui| {
+                    ui.add_space(6.0);
+                    overline(ui, "Elements");
+                });
                 ui.add_space(6.0);
                 let mut pick: Option<ElementType> = None;
                 for (n, t, name) in FORMAT_ORDER {
@@ -7179,10 +7526,23 @@ impl ScriptCraftApp {
                         self.insert_below(t);
                     }
                 }
-                ui.add_space(6.0);
-                if fmt_button(ui, "Next", false) {
-                    self.step_selection(1);
-                }
+                ui.add_space(10.0);
+                let (rule, _) = ui.allocate_exact_size(
+                    egui::vec2(ui.available_width(), 1.0),
+                    egui::Sense::hover(),
+                );
+                ui.painter().rect_filled(rule, 0.0, kit().sep);
+                ui.add_space(10.0);
+                let nav_w = (ui.available_width() - 6.0) * 0.5;
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 6.0;
+                    if fmt_nav_button(ui, "Prev", nav_w) {
+                        self.step_selection(-1);
+                    }
+                    if fmt_nav_button(ui, "Next", nav_w) {
+                        self.step_selection(1);
+                    }
+                });
             });
     }
 
@@ -7410,7 +7770,7 @@ impl ScriptCraftApp {
                         (chars_s.as_str(), "Characters"),
                     ],
                 );
-                kit_section(ui, "Text");
+                kit_report_section(ui, "Text Breakdown");
                 kit_report_table(
                     ui,
                     width,
@@ -7419,7 +7779,7 @@ impl ScriptCraftApp {
                     &["Words", "Characters"],
                     &text_rows,
                 );
-                ui.add_space(14.0);
+                ui.add_space(20.0);
                 let labels: Vec<String> = p
                     .scenes()
                     .iter()
@@ -7428,7 +7788,7 @@ impl ScriptCraftApp {
                         format!("{} {}", self.scene_label(i), truncate_text(&s.heading, 44))
                     })
                     .collect();
-                kit_section(ui, "Scenes");
+                kit_report_section(ui, "Scenes");
                 kit_report_table(
                     ui,
                     width,
@@ -7437,8 +7797,8 @@ impl ScriptCraftApp {
                     &["Time", "Words"],
                     &stat_scene_rows(p, &labels),
                 );
-                ui.add_space(14.0);
-                kit_section(ui, "Locations");
+                ui.add_space(20.0);
+                kit_report_section(ui, "Locations");
                 kit_report_table(
                     ui,
                     width,
@@ -7447,8 +7807,8 @@ impl ScriptCraftApp {
                     &["Time", "Scenes"],
                     &stat_location_rows(p),
                 );
-                ui.add_space(14.0);
-                kit_section(ui, "Characters");
+                ui.add_space(20.0);
+                kit_report_section(ui, "Characters");
                 kit_report_table(
                     ui,
                     width,
@@ -7543,32 +7903,89 @@ impl ScriptCraftApp {
                             ),
                         ],
                     );
-                    kit_section(ui, "Highlights");
-                    ui.label(format!("Longest scene: {}", truncate_text(&longest.0, 48)));
-                    ui.label(format!(
-                        "Longest scene duration: {}",
-                        format_duration(longest.1).trim_matches(['(', ')'])
-                    ));
-                    ui.add_space(6.0);
-                    ui.label(format!(
-                        "Shortest scene: {}",
-                        truncate_text(&shortest.0, 48)
-                    ));
-                    ui.label(format!(
-                        "Shortest scene duration: {}",
-                        format_duration(shortest.1).trim_matches(['(', ')'])
-                    ));
+                    kit_report_section(ui, "Pacing Highlights");
+                    let c = kit();
+                    let pair_w = ui.available_width().min(900.0);
+                    let card_w = ((pair_w - 12.0) * 0.5).max(180.0);
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 12.0;
+                        for (eyebrow, heading, dur) in [
+                            (
+                                "LONGEST SCENE",
+                                truncate_text(&longest.0, 44),
+                                format_duration(longest.1)
+                                    .trim_matches(['(', ')'])
+                                    .to_string(),
+                            ),
+                            (
+                                "SHORTEST SCENE",
+                                truncate_text(&shortest.0, 44),
+                                format_duration(shortest.1)
+                                    .trim_matches(['(', ')'])
+                                    .to_string(),
+                            ),
+                        ] {
+                            let (rect, _) = ui.allocate_exact_size(
+                                egui::vec2(card_w, 78.0),
+                                egui::Sense::hover(),
+                            );
+                            ui.painter().rect_filled(rect, 8.0, c.surface);
+                            ui.painter().rect_stroke(
+                                rect,
+                                8.0,
+                                egui::Stroke::new(1.0_f32, c.sep),
+                                egui::StrokeKind::Inside,
+                            );
+                            ui.painter().text(
+                                egui::pos2(rect.left() + 14.0, rect.top() + 16.0),
+                                egui::Align2::LEFT_CENTER,
+                                eyebrow,
+                                egui::FontId::proportional(10.0),
+                                c.disabled_text,
+                            );
+                            ui.painter().text(
+                                egui::pos2(rect.right() - 14.0, rect.top() + 16.0),
+                                egui::Align2::RIGHT_CENTER,
+                                dur,
+                                egui::FontId::proportional(11.5),
+                                c.accent_text,
+                            );
+                            paint_ellipsized(
+                                ui.painter(),
+                                egui::pos2(rect.left() + 14.0, rect.top() + 48.0),
+                                rect.top() + 48.0,
+                                &heading,
+                                egui::FontId::proportional(13.5),
+                                c.heading_text,
+                                (rect.width() - 28.0).max(40.0),
+                            );
+                        }
+                    });
                 }
             }
             StatsPane::Activity => {
                 let chars = stat_char_stats(p);
                 if chars.is_empty() {
-                    ui.label("No dialogue yet.");
+                    ui.label(
+                        egui::RichText::new("No dialogue yet.")
+                            .size(13.0)
+                            .color(kit().disabled_text),
+                    );
                 } else {
-                    kit_section(ui, "Dialogue Activity");
-                    for (cname, parts, words, _) in chars.iter() {
-                        ui.label(format!("{cname}: {parts} dialogue blocks · {words} words"));
-                    }
+                    let total_blocks: usize = chars.iter().map(|(_, parts, _, _)| *parts).sum();
+                    let denom = total_blocks.max(1) as f32;
+                    let rows: Vec<RepRow> = chars
+                        .iter()
+                        .enumerate()
+                        .map(|(i, (cname, parts, words, _))| RepRow {
+                            label: cname.clone(),
+                            cells: vec![parts.to_string(), words.to_string()],
+                            color: rep_color(i),
+                            pct: *parts as f32 * 100.0 / denom,
+                        })
+                        .collect();
+                    kit_report_section(ui, "Dialogue Activity");
+                    kit_report_table(ui, width, "Character", 240.0, &["Blocks", "Words"], &rows);
                 }
             }
         }
@@ -7606,23 +8023,24 @@ impl ScriptCraftApp {
         }
         let total = names.len().max(1) as f32;
         let pct = |n: usize| n as f32 * 100.0 / total;
+        let c = kit();
         vec![
             RepRow {
                 label: "More than 10 Speaking Parts".to_string(),
                 cells: vec![more.to_string()],
-                color: REP_GREEN,
+                color: c.accent,
                 pct: pct(more),
             },
             RepRow {
                 label: "About 10 Speaking Parts".to_string(),
                 cells: vec![about.to_string()],
-                color: REP_SAND,
+                color: c.accent.lerp_to_gamma(c.surface, 0.30),
                 pct: pct(about),
             },
             RepRow {
                 label: "Non-Speaking".to_string(),
                 cells: vec![non.to_string()],
-                color: REP_RED,
+                color: c.field_stroke,
                 pct: pct(non),
             },
         ]
@@ -7729,11 +8147,19 @@ impl ScriptCraftApp {
                                 ui.vertical(|ui| {
                                     ui.set_width(260.0);
                                     ui.label(
+                                        egui::RichText::new("SCREENWRITING STUDIO")
+                                            .size(10.5)
+                                            .strong()
+                                            .color(c.accent_text),
+                                    );
+                                    ui.add_space(4.0);
+                                    ui.label(
                                         egui::RichText::new("ScriptCraft")
                                             .size(28.0)
+                                            .strong()
                                             .color(c.heading_text),
                                     );
-                                    ui.add_space(2.0);
+                                    ui.add_space(4.0);
                                     ui.label(
                                         egui::RichText::new(
                                             "Your screenplay, from first idea to final page.",
@@ -7761,25 +8187,25 @@ impl ScriptCraftApp {
                                     ) {
                                         self.open_projects_folder();
                                     }
-                                    ui.add_space(36.0);
+                                    ui.add_space(32.0);
                                     egui::Frame::new()
                                         .fill(c.surface)
                                         .stroke(egui::Stroke::new(1.0_f32, c.sep))
-                                        .corner_radius(12.0)
-                                        .inner_margin(egui::Margin::same(14))
+                                        .corner_radius(10.0)
+                                        .inner_margin(egui::Margin::same(16))
                                         .show(ui, |ui| {
                                             ui.set_width(ui.available_width());
                                             ui.label(
-                                                egui::RichText::new("New to KIT Scenarist?")
+                                                egui::RichText::new("New to ScriptCraft?")
                                                     .size(13.5)
+                                                    .strong()
                                                     .color(c.heading_text),
                                             );
                                             ui.add_space(4.0);
                                             ui.label(
                                                 egui::RichText::new(
-                                                    "Learn how to write your own stories and \
-                                                     explore KIT Scenarist through our help \
-                                                     articles and tutorials.",
+                                                    "Explore screenplay shortcuts, revision \
+                                                     workflows, and FDX / Fade In interchange.",
                                                 )
                                                 .size(12.5)
                                                 .color(c.disabled_text),
@@ -7796,22 +8222,29 @@ impl ScriptCraftApp {
                     let (sep, _) =
                         ui.allocate_exact_size(egui::vec2(1.0, avail_h), egui::Sense::hover());
                     ui.painter().rect_filled(sep, 0.0, c.sep);
-                    // Right: projects.
+                    // Right: recent projects, framed to a comfortable reading measure.
                     ui.vertical(|ui| {
                         egui::Frame::new()
-                            .inner_margin(egui::Margin::symmetric(32, 32))
+                            .inner_margin(egui::Margin::symmetric(36, 36))
                             .show(ui, |ui| {
-                                ui.label(
-                                    egui::RichText::new("Projects")
-                                        .size(20.0)
-                                        .color(c.heading_text),
+                                let content_w = ui.available_width().min(760.0);
+                                ui.allocate_ui(
+                                    egui::vec2(content_w, ui.available_height()),
+                                    |ui| {
+                                        ui.label(
+                                            egui::RichText::new("Projects")
+                                                .size(22.0)
+                                                .strong()
+                                                .color(c.heading_text),
+                                        );
+                                        ui.add_space(14.0);
+                                        self.start_toolbar(ui);
+                                        ui.add_space(10.0);
+                                        egui::ScrollArea::vertical()
+                                            .auto_shrink([false, false])
+                                            .show(ui, |ui| self.start_recent_list(ui));
+                                    },
                                 );
-                                ui.add_space(12.0);
-                                self.start_toolbar(ui);
-                                ui.add_space(12.0);
-                                egui::ScrollArea::vertical()
-                                    .auto_shrink([false, false])
-                                    .show(ui, |ui| self.start_recent_list(ui));
                             });
                     });
                 });
@@ -7820,24 +8253,42 @@ impl ScriptCraftApp {
 
     /// Title row of the Start module plus the refresh button.
     fn start_toolbar(&mut self, ui: &mut egui::Ui) {
+        let c = kit();
         ui.horizontal(|ui| {
-            ui.label(
-                egui::RichText::new("Projects from Local Computer")
-                    .size(12.5)
-                    .color(kit().disabled_text),
-            );
+            overline(ui, "Recent Projects");
+            if !self.recent.is_empty() {
+                ui.add_space(4.0);
+                let count_str = self.recent.len().to_string();
+                let g = ui.painter().layout_no_wrap(
+                    count_str,
+                    egui::FontId::proportional(10.5),
+                    c.accent_text,
+                );
+                let (rect, _) = ui
+                    .allocate_exact_size(egui::vec2(g.size().x + 12.0, 18.0), egui::Sense::hover());
+                ui.painter().rect_filled(rect, 9.0, c.accent_soft);
+                ui.painter().galley(
+                    egui::pos2(
+                        rect.center().x - g.size().x / 2.0,
+                        rect.center().y - g.size().y / 2.0,
+                    ),
+                    g,
+                    c.accent_text,
+                );
+            }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if kit_square_button(ui, KitIcon::Refresh)
-                    .on_hover_text("Refresh")
+                    .on_hover_text("Refresh recent list")
                     .clicked()
                 {
                     self.refresh_recent();
                 }
             });
         });
+        ui.add_space(4.0);
         let (line, _) =
             ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::hover());
-        ui.painter().rect_filled(line, 0.0, kit().sep);
+        ui.painter().rect_filled(line, 0.0, c.sep);
     }
 
     /// Recent projects: bold name, dim path + [date], click to open.
@@ -7990,17 +8441,14 @@ fn cue_name(text: &str) -> String {
     }
 }
 
+/// Theme-locked tonal accent steps for Statistics bars (single-accent restraint).
 fn rep_color(i: usize) -> egui::Color32 {
-    const CYCLE: [egui::Color32; 7] = [
-        REP_GREEN_LIGHT,
-        REP_GREEN,
-        REP_PINK,
-        REP_RED,
-        REP_SAND,
-        REP_ORANGE,
-        REP_BLUE,
-    ];
-    CYCLE[i % CYCLE.len()]
+    let c = kit();
+    match i % 3 {
+        0 => c.accent,
+        1 => c.accent.lerp_to_gamma(c.accent_text, 0.22),
+        _ => c.accent.lerp_to_gamma(c.surface, 0.24),
+    }
 }
 
 fn truncate_text(s: &str, max: usize) -> String {

@@ -1956,10 +1956,10 @@ pub struct ProjectCard {
 pub fn project_card(ui: &mut Ui, name: &str, path: &str, when: &str) -> ProjectCard {
     let c = kit();
     let width = ui.available_width();
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(width, 64.0), Sense::click());
-    let card = rect.shrink2(egui::vec2(0.0, 3.0));
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(width, 70.0), Sense::click());
+    let card = rect.shrink2(egui::vec2(0.0, 4.0));
     let remove_rect = Rect::from_center_size(
-        Pos2::new(card.right() - 18.0, card.center().y),
+        Pos2::new(card.right() - 20.0, card.center().y),
         egui::vec2(26.0, 26.0),
     );
     let remove = ui
@@ -1972,26 +1972,27 @@ pub fn project_card(ui: &mut Ui, name: &str, path: &str, when: &str) -> ProjectC
     remove.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Remove from list")
     });
+    let hovered = resp.hovered() || remove.hovered();
     let p = ui.painter().clone();
-    let fill = if resp.hovered() {
-        c.hover_light
-    } else {
-        c.surface
-    };
-    let border = if resp.hovered() {
-        c.field_stroke
-    } else {
-        c.sep
-    };
-    p.rect_filled(card, 10.0, fill);
-    p.rect_stroke(card, 10.0, Stroke::new(1.0_f32, border), StrokeKind::Inside);
+    let fill = if hovered { c.hover_light } else { c.surface };
+    let border = if hovered { c.field_stroke } else { c.sep };
+    p.rect_filled(card, 8.0, fill);
+    p.rect_stroke(card, 8.0, Stroke::new(1.0_f32, border), StrokeKind::Inside);
+
+    if resp.hovered() {
+        let bar = Rect::from_min_size(
+            Pos2::new(card.left(), card.top() + 12.0),
+            egui::vec2(3.0, card.height() - 24.0),
+        );
+        p.rect_filled(bar, 1.5, c.accent);
+    }
 
     // Document tile.
     let tile = Rect::from_min_size(
         Pos2::new(card.left() + 14.0, card.center().y - 19.0),
         egui::vec2(38.0, 38.0),
     );
-    p.rect_filled(tile, 9.0, c.accent_soft);
+    p.rect_filled(tile, 8.0, c.accent_soft);
     let st = Stroke::new(1.4_f32, c.accent_text);
     let page = Rect::from_center_size(tile.center(), egui::vec2(14.0, 18.0));
     p.rect_stroke(page, 2.0, st, StrokeKind::Inside);
@@ -2006,7 +2007,14 @@ pub fn project_card(ui: &mut Ui, name: &str, path: &str, when: &str) -> ProjectC
     }
 
     let x = tile.right() + 14.0;
-    let right = card.right() - 40.0;
+    let right = card.right() - 44.0;
+
+    // Right-aligned metadata: format badge + timestamp.
+    let ext = std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_uppercase())
+        .unwrap_or_default();
     let when_g = p.layout_no_wrap(when.to_owned(), FontId::proportional(11.5), c.disabled_text);
     let when_w = when_g.size().x;
     p.galley(
@@ -2014,11 +2022,35 @@ pub fn project_card(ui: &mut Ui, name: &str, path: &str, when: &str) -> ProjectC
         when_g,
         c.disabled_text,
     );
-    let text_w = (right - 12.0 - x).max(10.0);
+    let mut meta_left = right - when_w;
+    if !ext.is_empty() {
+        let badge_g = p.layout_no_wrap(ext, FontId::proportional(10.0), c.accent_text);
+        let badge_w = badge_g.size().x + 12.0;
+        let badge_h = 18.0;
+        let badge_x = meta_left - badge_w - 10.0;
+        if badge_x > x + 90.0 {
+            let badge_rect = Rect::from_min_size(
+                Pos2::new(badge_x, card.top() + 13.5),
+                egui::vec2(badge_w, badge_h),
+            );
+            p.rect_filled(badge_rect, 4.0, c.accent_soft);
+            p.galley(
+                Pos2::new(
+                    badge_rect.center().x - badge_g.size().x / 2.0,
+                    badge_rect.center().y - badge_g.size().y / 2.0,
+                ),
+                badge_g,
+                c.accent_text,
+            );
+            meta_left = badge_x;
+        }
+    }
+
+    let text_w = (meta_left - 12.0 - x).max(10.0);
     paint_ellipsized(
         &p,
-        Pos2::new(x, card.top() + 21.0),
-        card.top() + 21.0,
+        Pos2::new(x, card.top() + 22.0),
+        card.top() + 22.0,
         name,
         FontId::proportional(14.5),
         c.heading_text,
@@ -2026,8 +2058,8 @@ pub fn project_card(ui: &mut Ui, name: &str, path: &str, when: &str) -> ProjectC
     );
     paint_ellipsized(
         &p,
-        Pos2::new(x, card.top() + 43.0),
-        card.top() + 43.0,
+        Pos2::new(x, card.top() + 44.0),
+        card.top() + 44.0,
         path,
         FontId::proportional(11.5),
         c.disabled_text,
@@ -2035,7 +2067,7 @@ pub fn project_card(ui: &mut Ui, name: &str, path: &str, when: &str) -> ProjectC
     );
 
     if remove.hovered() {
-        p.rect_filled(remove_rect, 6.0, c.hover_light);
+        p.rect_filled(remove_rect, 6.0, c.button_hover);
     }
     let ink = if remove.hovered() {
         c.heading_text
@@ -2043,7 +2075,7 @@ pub fn project_card(ui: &mut Ui, name: &str, path: &str, when: &str) -> ProjectC
         c.disabled_text
     };
     let mid = remove_rect.center();
-    let r = 5.0;
+    let r = 4.5;
     let st = Stroke::new(1.4_f32, ink);
     p.line_segment(
         [
