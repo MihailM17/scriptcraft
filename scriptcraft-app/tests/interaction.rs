@@ -23,6 +23,18 @@ fn harness(tab: SideTab) -> Harness<'static, ScriptCraftApp> {
     harness_with_dt(tab, 1.0 / 4.0)
 }
 
+/// Open the primary file menu: the compact `Menu` button on macOS, or `File`
+/// on Windows and Linux where the inline menu bar replaces it.
+fn open_file_menu(h: &mut Harness<'static, ScriptCraftApp>) {
+    let label = if cfg!(target_os = "macos") {
+        "Menu"
+    } else {
+        "File"
+    };
+    h.get_by_label(label).click();
+    h.run();
+}
+
 /// Show Research ▸ Versions, where KIT-style revisions now live.
 fn open_research_versions(h: &mut Harness<'static, ScriptCraftApp>) {
     h.state_mut().goto_tab(SideTab::Research);
@@ -227,8 +239,7 @@ fn export_dialog_opens_and_cancels() {
     let mut h = harness(SideTab::Script);
     h.run();
 
-    h.get_by_label("Menu").click();
-    h.run();
+    open_file_menu(&mut h);
     h.get_by_label("Export…").click();
     h.run();
     assert!(
@@ -650,10 +661,18 @@ fn format_shortcuts_apply_to_selection() {
 fn menu_popup_opens_help_and_closes() {
     let mut h = harness(SideTab::Script);
     h.run();
-    h.get_by_label("Menu").click();
-    h.run();
-    h.get_by_label("Help").click();
-    h.run();
+    if cfg!(target_os = "macos") {
+        h.get_by_label("Menu").click();
+        h.run();
+        h.get_by_label("Help").click();
+        h.run();
+    } else {
+        h.get_by_label("Help").click();
+        h.run();
+        h.get_by_label("ScriptCraft Help").click();
+        h.run();
+        h.run();
+    }
     assert!(
         h.query_by_label("Keep writing!").is_some(),
         "Help window should open from the menu row"
@@ -817,8 +836,7 @@ fn dual_dialogue_persists_across_save_and_reopen() {
         .contains("not represented"));
     assert!(h.state().dual_export_note_for_test("FDX").is_empty());
 
-    h.get_by_label("Menu").click();
-    h.run();
+    open_file_menu(&mut h);
     h.get_by_label("Save").click();
     h.run();
     assert!(!h.state().is_dirty());
@@ -1160,8 +1178,7 @@ fn fadein_import_builds_a_project_with_dual_dialogue() {
 fn import_menu_offers_fade_in() {
     let mut h = harness(SideTab::Script);
     h.run();
-    h.get_by_label("Menu").click();
-    h.run();
+    open_file_menu(&mut h);
     h.get_by_label("Import ⏵").click();
     h.run();
     assert!(
@@ -1177,8 +1194,7 @@ fn export_dialog_offers_fdx_not_docx() {
     let mut h = harness(SideTab::Script);
     h.run();
 
-    h.get_by_label("Menu").click();
-    h.run();
+    open_file_menu(&mut h);
     h.get_by_label("Export…").click();
     h.run();
     assert!(h.query_by_label("FDX").is_some(), "FDX radio must be shown");
@@ -1572,8 +1588,7 @@ fn page_locks_capture_persist_and_unlock() {
     assert_eq!(labels.first(), Some(&None));
     assert_eq!(labels.get(1), Some(&Some("2".to_string())));
 
-    h.get_by_label("Menu").click();
-    h.run();
+    open_file_menu(&mut h);
     h.get_by_label("Save").click();
     h.run();
     assert!(!h.state().is_dirty());
@@ -1629,8 +1644,7 @@ fn revisions_persist_across_save_and_reopen() {
     h.run();
     assert!(h.state().is_dirty());
 
-    h.get_by_label("Menu").click();
-    h.run();
+    open_file_menu(&mut h);
     h.get_by_label("Save").click();
     h.run();
     assert!(!h.state().is_dirty(), "menu Save must write the project");
@@ -2345,8 +2359,7 @@ fn restore_revision_as_copy_leaves_original_and_opens_copy() {
     h.run();
     assert!(h.state().is_dirty());
 
-    h.get_by_label("Menu").click();
-    h.run();
+    open_file_menu(&mut h);
     h.get_by_label("Save").click();
     h.run();
     assert!(!h.state().is_dirty(), "save must write the Blue draft");
@@ -2631,8 +2644,7 @@ fn omitted_scene_persists_with_page_locks_and_keeps_later_numbers() {
         "later headings keep their locked page numbers"
     );
 
-    h.get_by_label("Menu").click();
-    h.run();
+    open_file_menu(&mut h);
     h.get_by_label("Save").click();
     h.run();
     assert!(!h.state().is_dirty());
@@ -2661,8 +2673,7 @@ fn omitted_scene_persists_with_page_locks_and_keeps_later_numbers() {
     // Restoring and saving brings the body and the original page count back.
     reopened.state_mut().set_scene_omitted_for_test(1, false);
     reopened.run();
-    reopened.get_by_label("Menu").click();
-    reopened.run();
+    open_file_menu(&mut reopened);
     reopened.get_by_label("Save").click();
     reopened.run();
 

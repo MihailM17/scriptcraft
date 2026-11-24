@@ -232,10 +232,7 @@ fn followed_by_speech(lines: &[String], i: usize) -> bool {
     // Another all-caps line directly below is more likely a stacked action
     // line than dialogue.
     let has_lower = next.chars().any(|c| c.is_lowercase());
-    if !has_lower && !is_parenthetical(next) {
-        return false;
-    }
-    true
+    has_lower || is_parenthetical(next)
 }
 
 #[cfg(test)]

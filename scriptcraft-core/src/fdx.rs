@@ -243,8 +243,13 @@ pub fn to_fdx_with_revisions_and_latest(
             // Final Draft's dual shape: one General wrapper around two
             // consecutive dialogue columns.
             out.push_str("<Paragraph Type=\"General\">\n<DualDialogue>\n");
-            for bi in pair.left..pair.right_end {
-                let b = &p.blocks[bi];
+            for (bi, b) in p
+                .blocks
+                .iter()
+                .enumerate()
+                .take(pair.right_end)
+                .skip(pair.left)
+            {
                 push_paragraph(
                     &mut out,
                     fdx_type(b.element_type),
