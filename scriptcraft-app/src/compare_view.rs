@@ -500,21 +500,10 @@ fn text_job(width: f32) -> LayoutJob {
     job
 }
 
-/// Keep the end of a long prefix so the actual edit stays on screen. A diff
-/// that begins off-screen is not useful, however correct the colours are.
-fn tail_with_ellipsis(text: &str, max_chars: usize) -> String {
-    let count = text.chars().count();
-    if count <= max_chars {
-        return text.to_string();
-    }
-    let mut out = String::from("… ");
-    out.extend(text.chars().skip(count - max_chars));
-    out
-}
-
-fn chars_for_width(width: f32) -> usize {
-    // Courier Prime at DIFF_FONT_SIZE is roughly 7.6 px per character.
-    (width / 7.6).max(20.0) as usize
+fn wrapped_job(width: f32) -> LayoutJob {
+    let mut job = LayoutJob::default();
+    job.wrap.max_width = width.max(40.0);
+    job
 }
 
 fn push_text(job: &mut LayoutJob, text: &str, font: &FontId, color: Color32, strike: bool) {
@@ -540,7 +529,7 @@ fn push_text(job: &mut LayoutJob, text: &str, font: &FontId, color: Color32, str
 fn unified_job(entry: &DiffEntry, width: f32) -> LayoutJob {
     let c = kit();
     let font = FontId::monospace(DIFF_FONT_SIZE);
-    let mut job = text_job(width);
+    let mut job = wrapped_job(width);
     let left = entry_base_text(entry);
     let right = entry_current_text(entry);
     match entry.kind {
@@ -549,14 +538,7 @@ fn unified_job(entry: &DiffEntry, width: f32) -> LayoutJob {
         DiffKind::Removed => push_text(&mut job, left, &font, kind_color(DiffKind::Removed), true),
         DiffKind::Changed => {
             let diff = inline_diff(left, right);
-            let budget = chars_for_width(width);
-            let change_len = diff.old_mid.chars().count() + diff.new_mid.chars().count() + 3;
-            let prefix = if diff.prefix.chars().count() + change_len > budget {
-                tail_with_ellipsis(diff.prefix, budget.saturating_sub(change_len + 6).max(10))
-            } else {
-                diff.prefix.to_string()
-            };
-            push_text(&mut job, &prefix, &font, c.text, false);
+            push_text(&mut job, diff.prefix, &font, c.text, false);
             push_text(
                 &mut job,
                 diff.old_mid,
@@ -583,7 +565,7 @@ fn unified_job(entry: &DiffEntry, width: f32) -> LayoutJob {
 fn side_job(entry: &DiffEntry, old_side: bool, width: f32) -> LayoutJob {
     let c = kit();
     let font = FontId::monospace(DIFF_FONT_SIZE);
-    let mut job = text_job(width);
+    let mut job = wrapped_job(width);
     let left = entry_base_text(entry);
     let right = entry_current_text(entry);
     match (entry.kind, old_side) {
@@ -600,18 +582,7 @@ fn side_job(entry: &DiffEntry, old_side: bool, width: f32) -> LayoutJob {
         }
         (DiffKind::Changed, old_side) => {
             let diff = inline_diff(left, right);
-            let mid_len = diff
-                .old_mid
-                .chars()
-                .count()
-                .max(diff.new_mid.chars().count());
-            let budget = chars_for_width(width);
-            let prefix = if diff.prefix.chars().count() + mid_len > budget {
-                tail_with_ellipsis(diff.prefix, budget.saturating_sub(mid_len + 6).max(8))
-            } else {
-                diff.prefix.to_string()
-            };
-            push_text(&mut job, &prefix, &font, c.text, false);
+            push_text(&mut job, diff.prefix, &font, c.text, false);
             if old_side {
                 push_text(
                     &mut job,
@@ -1270,28 +1241,21 @@ pub fn show(
                     });
                 });
 
-            let mut area = ScrollArea::vertical()
+            let area = ScrollArea::vertical()
                 .id_salt("compare_main")
                 .auto_shrink([false, false]);
-            let scroll_index = scroll_row.and_then(|entry| {
-                items
-                    .iter()
-                    .position(|item| matches!(item, DisplayItem::Entry(index) if *index == entry))
-            });
-            if let Some(row) = scroll_index {
-                let viewport = ui.available_height();
-                let offset = (row as f32 * ROW_HEIGHT - viewport * 0.35).max(0.0);
-                area = area.vertical_scroll_offset(offset);
-            }
-            ui.spacing_mut().item_spacing.y = 0.0;
+            ui.spacing_mut().item_spacing.y = 2.0;
             let mut gap_clicked = None;
-            area.show_rows(ui, ROW_HEIGHT, items.len(), |ui, range| {
-                ui.spacing_mut().item_spacing.y = 0.0;
-                for row in range {
-                    match items[row] {
+            area.show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 2.0;
+                for item in &items {
+                    match *item {
                         DisplayItem::Entry(index) => {
                             let entry = &diff.entries[index];
                             let response = diff_row(ui, entry, view, selected == Some(index));
+                            if scroll_row == Some(index) {
+                                response.scroll_to_me(Some(Align::Center));
+                            }
                             if response.clicked() {
                                 clicked = Some(index);
                             }
@@ -1489,7 +1453,43 @@ fn gap_row(ui: &mut Ui, count: usize) -> egui::Response {
 
 fn diff_row(ui: &mut Ui, entry: &DiffEntry, view: CompareView, selected: bool) -> egui::Response {
     let width = ui.available_width().max(160.0);
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, ROW_HEIGHT), Sense::click());
+    let inner_w = (width - 24.0).max(80.0);
+    let marker_w = 18.0;
+    let marker_gap = 8.0;
+    let content_avail = (inner_w - marker_w - marker_gap).max(40.0);
+    let (left_frac, right_frac) = entry_indent(entry);
+    let vpad = 7.0;
+
+    // Pre-layout wrapped galleys so multi-line screenplay paragraphs never clip.
+    let (row_h, unified_g, side_gs, side_col, indent) = match view {
+        CompareView::Unified => {
+            let (indent, pad) = if content_avail > 120.0 {
+                (content_avail * left_frac, content_avail * right_frac)
+            } else {
+                (0.0, 0.0)
+            };
+            let text_w = (content_avail - indent - pad).max(40.0);
+            let galley = ui.painter().layout_job(unified_job(entry, text_w));
+            let h = (galley.size().y + vpad * 2.0).max(ROW_HEIGHT);
+            (h, Some(galley), None, 0.0, indent)
+        }
+        CompareView::SideBySide => {
+            let column = ((content_avail - 28.0) / 2.0).max(40.0);
+            let (indent, pad) = if column > 120.0 {
+                (column * left_frac, column * right_frac)
+            } else {
+                (0.0, 0.0)
+            };
+            let text_w = (column - indent - pad - 12.0).max(40.0);
+            let left_g = ui.painter().layout_job(side_job(entry, true, text_w));
+            let right_g = ui.painter().layout_job(side_job(entry, false, text_w));
+            let text_h = left_g.size().y.max(right_g.size().y);
+            let h = (text_h + vpad * 2.0).max(ROW_HEIGHT);
+            (h, None, Some((left_g, right_g)), column, indent)
+        }
+    };
+
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, row_h), Sense::click());
     let row_rect = rect.shrink2(Vec2::new(4.0, 1.0));
     let background = if selected {
         kit().accent_soft
@@ -1512,58 +1512,46 @@ fn diff_row(ui: &mut Ui, entry: &DiffEntry, view: CompareView, selected: bool) -
         }
     }
 
-    let inner = rect.shrink2(Vec2::new(12.0, 0.0));
-    let mut row = ui.new_child(
-        egui::UiBuilder::new()
-            .max_rect(inner)
-            .layout(egui::Layout::left_to_right(Align::Center)),
+    let left_x = rect.left() + 12.0;
+    let marker_rect = Rect::from_min_size(
+        Pos2::new(left_x, rect.top() + 4.0),
+        Vec2::new(marker_w, (ROW_HEIGHT - 8.0).min(row_h - 8.0)),
     );
-    row.spacing_mut().item_spacing.x = 8.0;
-    let (marker_slot, _) = row.allocate_exact_size(Vec2::new(18.0, ROW_HEIGHT), Sense::hover());
-    paint_marker(&row, marker_slot.shrink2(Vec2::new(0.0, 4.0)), entry.kind);
+    paint_marker(ui, marker_rect, entry.kind);
+    let content_x = left_x + marker_w + marker_gap;
 
     match view {
         CompareView::Unified => {
-            let available = row.available_width().max(40.0);
-            let (left, right) = entry_indent(entry);
-            let (indent, pad) = if available > 120.0 {
-                (available * left, available * right)
-            } else {
-                (0.0, 0.0)
-            };
-            let text_width = (available - indent - pad).max(40.0);
-            row.add_space(indent);
-            add_text_cell(
-                &mut row,
-                text_width,
-                ROW_HEIGHT,
-                unified_job(entry, text_width),
-            );
-            row.add_space(pad);
+            if let Some(galley) = unified_g {
+                let y = if galley.rows.len() <= 1 {
+                    rect.center().y - galley.size().y / 2.0
+                } else {
+                    rect.top() + vpad
+                };
+                ui.painter()
+                    .galley(Pos2::new(content_x + indent, y), galley, kit().text);
+            }
         }
         CompareView::SideBySide => {
-            let available = row.available_width().max(80.0);
-            let column = ((available - 28.0) / 2.0).max(40.0);
-            let start = row.cursor().left();
             let top = rect.top() + 3.0;
             let bottom = rect.bottom() - 3.0;
             {
-                let painter = row.painter();
+                let painter = ui.painter();
                 if matches!(entry.kind, DiffKind::Removed | DiffKind::Changed) {
                     let cell = Rect::from_min_max(
-                        Pos2::new(start, top),
-                        Pos2::new(start + column, bottom),
+                        Pos2::new(content_x, top),
+                        Pos2::new(content_x + side_col, bottom),
                     );
                     painter.rect_filled(cell, 5.0, cell_fill(DiffKind::Removed));
                 }
                 if matches!(entry.kind, DiffKind::Added | DiffKind::Changed) {
                     let cell = Rect::from_min_max(
-                        Pos2::new(start + column + 28.0, top),
-                        Pos2::new(start + column * 2.0 + 28.0, bottom),
+                        Pos2::new(content_x + side_col + 28.0, top),
+                        Pos2::new(content_x + side_col * 2.0 + 28.0, bottom),
                     );
                     painter.rect_filled(cell, 5.0, cell_fill(DiffKind::Added));
                 }
-                let divider = start + column + 14.0;
+                let divider = content_x + side_col + 14.0;
                 painter.line_segment(
                     [
                         Pos2::new(divider, rect.top() + 5.0),
@@ -1572,47 +1560,48 @@ fn diff_row(ui: &mut Ui, entry: &DiffEntry, view: CompareView, selected: bool) -
                     Stroke::new(1.0_f32, kit().field_stroke),
                 );
             }
-            let (left, right) = entry_indent(entry);
-            let (indent, pad) = if column > 120.0 {
-                (column * left, column * right)
-            } else {
-                (0.0, 0.0)
-            };
-            let text_width = (column - indent - pad).max(40.0);
-            row.add_space(indent);
-            add_text_cell(
-                &mut row,
-                text_width,
-                ROW_HEIGHT,
-                side_job(entry, true, text_width),
-            );
-            row.add_space((column - indent - text_width).max(0.0));
-            row.add_space(12.0);
-            row.add_space(indent);
-            add_text_cell(
-                &mut row,
-                text_width,
-                ROW_HEIGHT,
-                side_job(entry, false, text_width),
-            );
-            row.add_space((column - indent - text_width).max(0.0));
+            if let Some((left_g, right_g)) = side_gs {
+                let single = left_g.rows.len() <= 1 && right_g.rows.len() <= 1;
+                let left_y = if single {
+                    rect.center().y - left_g.size().y / 2.0
+                } else {
+                    rect.top() + vpad
+                };
+                let right_y = if single {
+                    rect.center().y - right_g.size().y / 2.0
+                } else {
+                    rect.top() + vpad
+                };
+                ui.painter().galley(
+                    Pos2::new(content_x + 6.0 + indent, left_y),
+                    left_g,
+                    kit().text,
+                );
+                ui.painter().galley(
+                    Pos2::new(content_x + side_col + 34.0 + indent, right_y),
+                    right_g,
+                    kit().text,
+                );
+            }
         }
     }
 
-    response.on_hover_text(format!(
-        "{}\n\nBase: {}\nTarget: {}",
-        entry.scene_heading,
-        if entry_base_text(entry).is_empty() {
-            "—"
-        } else {
-            entry_base_text(entry)
-        },
-        if entry_current_text(entry).is_empty() {
-            "—"
-        } else {
-            entry_current_text(entry)
-        }
-    ))
+    response
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .on_hover_text(format!(
+            "{}\n\nBase: {}\nTarget: {}",
+            entry.scene_heading,
+            if entry_base_text(entry).is_empty() {
+                "—"
+            } else {
+                entry_base_text(entry)
+            },
+            if entry_current_text(entry).is_empty() {
+                "—"
+            } else {
+                entry_current_text(entry)
+            }
+        ))
 }
 
 #[cfg(test)]

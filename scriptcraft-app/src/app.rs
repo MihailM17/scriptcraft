@@ -94,6 +94,12 @@ pub fn run() -> eframe::Result<()> {
             install_fonts(&cc.egui_ctx);
             let mut app = ScriptCraftApp::default();
             app.load_persistent();
+            if let Some(arg) = std::env::args().nth(1) {
+                let path = std::path::Path::new(&arg);
+                if path.is_file() {
+                    app.open_any_path(path);
+                }
+            }
             app.start_update_check_on_open();
             crate::quit_guard::install(&cc.egui_ctx);
             #[cfg(target_os = "macos")]
@@ -797,6 +803,8 @@ pub struct ScriptCraftApp {
     find_query: String,
     find_replace: String,
     find_idx: usize,
+    find_case_sensitive: bool,
+    find_whole_word: bool,
     /// KIT-style Export dialog: module tab, format, and PDF options.
     show_export: bool,
     export_tab: ExportTab,
@@ -901,6 +909,8 @@ impl Default for ScriptCraftApp {
             find_query: String::new(),
             find_replace: String::new(),
             find_idx: 0,
+            find_case_sensitive: false,
+            find_whole_word: false,
             show_export: false,
             export_tab: ExportTab::default(),
             export_format: ExportFormat::default(),
@@ -2719,6 +2729,64 @@ impl ScriptCraftApp {
         for card in self.cards.iter_mut() {
             if let Some((_, t)) = titles.iter().find(|(k, _)| *k == Some(card.id.clone())) {
                 card.title = t.clone();
+            }
+        }
+    }
+
+    /// Open a screenplay file passed via CLI arguments or OS file association
+    /// (`.kitsp`, `.fdx`, `.fadein`, or `.fountain`).
+    pub fn open_any_path(&mut self, path: &std::path::Path) {
+        let ext = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_ascii_lowercase())
+            .unwrap_or_default();
+        match ext.as_str() {
+            "kitsp" => {
+                if let Some(s) = path.to_str() {
+                    self.open_path(s);
+                }
+            }
+            "fdx" => match std::fs::read_to_string(path) {
+                Ok(text) => {
+                    if let Err(e) = self.import_fdx_str(&text) {
+                        self.status = format!("FDX import failed: {e}");
+                    } else {
+                        self.side_tab = SideTab::Script;
+                    }
+                }
+                Err(e) => self.status = format!("Could not read FDX file: {e}"),
+            },
+            "fadein" => match std::fs::read(path) {
+                Ok(bytes) => {
+                    if let Err(e) = self.import_fadein_bytes(&bytes) {
+                        self.status = format!("Fade In import failed: {e}");
+                    } else {
+                        self.side_tab = SideTab::Script;
+                    }
+                }
+                Err(e) => self.status = format!("Could not read Fade In file: {e}"),
+            },
+            "fountain" => match std::fs::read_to_string(path) {
+                Ok(text) => {
+                    let (p, fmeta) = scriptcraft_core::fountain::parse_fountain(&text);
+                    let meta = kitsp::Metadata {
+                        title: fmeta.title.clone(),
+                        genre: fmeta.credit.clone(),
+                        author: fmeta.author.clone(),
+                        additional_info: fmeta.source.clone(),
+                        contacts: fmeta.contact.clone(),
+                        year: fmeta.draft_date.clone(),
+                        ..Default::default()
+                    };
+                    self.adopt_imported(p, meta, &path.to_string_lossy());
+                }
+                Err(e) => self.status = format!("Could not read Fountain file: {e}"),
+            },
+            _ => {
+                if let Some(s) = path.to_str() {
+                    self.open_path(s);
+                }
             }
         }
     }
@@ -5600,7 +5668,9 @@ impl ScriptCraftApp {
                             self.menu_contents(ui);
                         });
                     }
-                    let on_script = self.side_tab == SideTab::Script && self.project.is_some();
+                    let on_script = self.side_tab == SideTab::Script
+                        && self.project.is_some()
+                        && self.compare.is_none();
                     if on_script {
                         toolbar_sep(ui);
                         let editable = self.compare.is_none();
@@ -5725,13 +5795,17 @@ impl ScriptCraftApp {
                     } else {
                         // Calm contextual header for non-editing modules: keep chrome
                         // focused by hiding irrelevant script controls.
-                        let module_name = match self.side_tab {
-                            SideTab::Start => "",
-                            SideTab::Script => "Script",
-                            SideTab::Research => "Research",
-                            SideTab::Cards => "Corkboard",
-                            SideTab::Statistics => "Statistics",
-                            SideTab::Settings => "Settings",
+                        let module_name = if self.compare.is_some() {
+                            "Compare"
+                        } else {
+                            match self.side_tab {
+                                SideTab::Start => "",
+                                SideTab::Script => "Script",
+                                SideTab::Research => "Research",
+                                SideTab::Cards => "Corkboard",
+                                SideTab::Statistics => "Statistics",
+                                SideTab::Settings => "Settings",
+                            }
                         };
                         if self.project.is_some() && !module_name.is_empty() {
                             toolbar_sep(ui);
@@ -6368,35 +6442,78 @@ impl ScriptCraftApp {
                         self.revision_marks_dirty = true;
                     }
                     ui.add_space(6.0);
+                    let c = kit();
                     let current_pages = self.page_count();
                     let sets = &self.revisions.sets;
                     let last = sets.len().saturating_sub(1);
                     egui::ScrollArea::vertical()
-                        .max_height(300.0)
+                        .max_height(320.0)
                         .show(ui, |ui| {
+                            ui.spacing_mut().item_spacing.y = 6.0;
                             for (i, set) in sets.iter().enumerate().rev() {
                                 let previous = i.checked_sub(1).and_then(|j| sets.get(j));
-                                ui.horizontal(|ui| {
-                                    let (swatch, _) = ui.allocate_exact_size(
-                                        egui::vec2(10.0, 10.0),
-                                        egui::Sense::hover(),
-                                    );
-                                    paint_revision(ui.painter(), swatch, set.color, 2.0);
-                                    ui.vertical(|ui| {
+                                egui::Frame::new()
+                                    .fill(c.window)
+                                    .stroke(egui::Stroke::new(
+                                        1.0_f32,
+                                        if i == last { c.field_stroke } else { c.sep },
+                                    ))
+                                    .corner_radius(8.0)
+                                    .inner_margin(egui::Margin::same(10))
+                                    .show(ui, |ui| {
+                                        ui.set_width(ui.available_width());
                                         ui.horizontal(|ui| {
+                                            let (swatch, _) = ui.allocate_exact_size(
+                                                egui::vec2(10.0, 10.0),
+                                                egui::Sense::hover(),
+                                            );
+                                            paint_revision(ui.painter(), swatch, set.color, 2.5);
                                             let name = if set.name.is_empty() {
                                                 format!("{} Revision", set.color.label())
                                             } else {
                                                 set.name.clone()
                                             };
-                                            ui.label(egui::RichText::new(name).strong());
+                                            ui.label(
+                                                egui::RichText::new(name)
+                                                    .strong()
+                                                    .color(c.heading_text),
+                                            );
                                             if i == last {
-                                                ui.label(
-                                                    egui::RichText::new("current")
-                                                        .small()
-                                                        .color(kit().accent_text),
+                                                let g = ui.painter().layout_no_wrap(
+                                                    "current".to_string(),
+                                                    egui::FontId::proportional(10.0),
+                                                    c.accent_text,
+                                                );
+                                                let (pill, pill_resp) = ui.allocate_exact_size(
+                                                    egui::vec2(g.size().x + 10.0, 16.0),
+                                                    egui::Sense::hover(),
+                                                );
+                                                pill_resp.widget_info(|| {
+                                                    egui::WidgetInfo::labeled(
+                                                        egui::WidgetType::Label,
+                                                        true,
+                                                        "current",
+                                                    )
+                                                });
+                                                ui.painter().rect_filled(pill, 4.0, c.accent_soft);
+                                                ui.painter().galley(
+                                                    egui::pos2(
+                                                        pill.center().x - g.size().x / 2.0,
+                                                        pill.center().y - g.size().y / 2.0,
+                                                    ),
+                                                    g,
+                                                    c.accent_text,
                                                 );
                                             }
+                                            ui.with_layout(
+                                                egui::Layout::right_to_left(egui::Align::Center),
+                                                |ui| {
+                                                    if ui.small_button("Restore as copy…").clicked()
+                                                    {
+                                                        restore = Some(i);
+                                                    }
+                                                },
+                                            );
                                         });
                                         let mut meta = if set.started.is_empty() {
                                             "Date not recorded".to_string()
@@ -6434,15 +6551,13 @@ impl ScriptCraftApp {
                                                 current_pages, delta
                                             ));
                                         }
-                                        ui.label(egui::RichText::new(meta).small().weak());
-                                        if ui.small_button("Restore as copy…").clicked() {
-                                            restore = Some(i);
-                                        }
+                                        ui.add_space(2.0);
+                                        ui.label(
+                                            egui::RichText::new(meta)
+                                                .size(11.5)
+                                                .color(c.disabled_text),
+                                        );
                                     });
-                                });
-                                if i != 0 {
-                                    ui.separator();
-                                }
                             }
                         });
                     ui.add_space(4.0);
@@ -6519,6 +6634,19 @@ impl ScriptCraftApp {
             crate::revision_summary::SummaryAction::BaseChanged => {
                 self.summary = None;
                 self.ensure_summary();
+            }
+            crate::revision_summary::SummaryAction::JumpScene(scene_idx) => {
+                self.show_summary = false;
+                self.close_compare();
+                self.side_tab = SideTab::Script;
+                if let Some(bi) = self.project.as_ref().and_then(|p| {
+                    p.scenes()
+                        .get(scene_idx)
+                        .and_then(|s| s.blocks.first().copied())
+                }) {
+                    self.selected_scene = scene_idx;
+                    self.goto_block(bi);
+                }
             }
             crate::revision_summary::SummaryAction::Close => self.show_summary = false,
             crate::revision_summary::SummaryAction::SaveCsv => self.save_summary_csv(),
@@ -6684,27 +6812,49 @@ impl ScriptCraftApp {
         }
     }
 
-    /// All case-insensitive matches as (block, char_start, char_len).
+    /// All matches as (block, char_start, char_len), honouring Match Case & Whole Word.
     fn find_matches(&self) -> Vec<(usize, usize, usize)> {
-        let q = self.find_query.to_lowercase();
-        if q.is_empty() {
+        if self.find_query.is_empty() {
             return Vec::new();
         }
+        let q: String = if self.find_case_sensitive {
+            self.find_query.clone()
+        } else {
+            self.find_query.to_lowercase()
+        };
+        let qchars: Vec<char> = q.chars().collect();
+        if qchars.is_empty() {
+            return Vec::new();
+        }
+        let is_word = |ch: char| ch.is_alphanumeric() || ch == '_';
         let mut out = Vec::new();
         if let Some(p) = &self.project {
             for (bi, b) in p.blocks.iter().enumerate() {
-                let lower = b.text.to_lowercase();
-                let mut from = 0usize;
+                let haystack: String = if self.find_case_sensitive {
+                    b.text.clone()
+                } else {
+                    b.text.to_lowercase()
+                };
                 // char-indexed search (byte indices would split Cyrillic).
-                let chars: Vec<char> = lower.chars().collect();
-                let qchars: Vec<char> = q.chars().collect();
+                let chars: Vec<char> = haystack.chars().collect();
+                let mut from = 0usize;
                 while from + qchars.len() <= chars.len() {
                     if chars[from..from + qchars.len()] == qchars[..] {
-                        out.push((bi, from, qchars.len()));
-                        from += qchars.len().max(1);
-                    } else {
-                        from += 1;
+                        let boundary_ok = if self.find_whole_word {
+                            let left_ok = from == 0 || !is_word(chars[from - 1]);
+                            let end = from + qchars.len();
+                            let right_ok = end >= chars.len() || !is_word(chars[end]);
+                            left_ok && right_ok
+                        } else {
+                            true
+                        };
+                        if boundary_ok {
+                            out.push((bi, from, qchars.len()));
+                            from += qchars.len().max(1);
+                            continue;
+                        }
                     }
+                    from += 1;
                 }
             }
         }
@@ -6734,7 +6884,7 @@ impl ScriptCraftApp {
     }
 
     fn find_replace_current(&mut self, ctx: &egui::Context) {
-        if self.find_replace.is_empty() {
+        if self.find_query.is_empty() {
             return;
         }
         let matches = self.find_matches();
@@ -6765,7 +6915,7 @@ impl ScriptCraftApp {
     }
 
     fn find_replace_all(&mut self, ctx: &egui::Context) {
-        if self.find_query.is_empty() || self.find_replace.is_empty() {
+        if self.find_query.is_empty() {
             return;
         }
         let matches = self.find_matches();
@@ -6802,13 +6952,21 @@ impl ScriptCraftApp {
         let _ = ctx;
     }
 
-    /// Slim Find / Replace bar under the toolbar (KIT has search here).
+    /// Slim Find / Replace bar under the toolbar.
     fn find_bar(&mut self, ctx: &egui::Context) {
+        let c = kit();
         egui::TopBottomPanel::top("findbar").show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.label("Find:");
-                let resp =
-                    ui.add(egui::TextEdit::singleline(&mut self.find_query).desired_width(180.0));
+                ui.label(
+                    egui::RichText::new("Find:")
+                        .size(12.0)
+                        .color(c.disabled_text),
+                );
+                let resp = ui.add(
+                    egui::TextEdit::singleline(&mut self.find_query)
+                        .hint_text("Search script…")
+                        .desired_width(180.0),
+                );
                 if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     let dir = !ui.input(|i| i.modifiers.shift);
                     let matches = self.find_matches();
@@ -6821,8 +6979,47 @@ impl ScriptCraftApp {
                         self.find_goto(ctx, next);
                     }
                 }
-                ui.label("Replace:");
-                ui.add(egui::TextEdit::singleline(&mut self.find_replace).desired_width(140.0));
+                let case_btn = egui::Button::new(egui::RichText::new("Aa").size(11.5).color(
+                    if self.find_case_sensitive {
+                        c.accent_text
+                    } else {
+                        c.disabled_text
+                    },
+                ))
+                .fill(if self.find_case_sensitive {
+                    c.accent_soft
+                } else {
+                    c.button
+                });
+                if ui.add(case_btn).on_hover_text("Match case").clicked() {
+                    self.find_case_sensitive = !self.find_case_sensitive;
+                }
+                let word_btn = egui::Button::new(egui::RichText::new("W").size(11.5).color(
+                    if self.find_whole_word {
+                        c.accent_text
+                    } else {
+                        c.disabled_text
+                    },
+                ))
+                .fill(if self.find_whole_word {
+                    c.accent_soft
+                } else {
+                    c.button
+                });
+                if ui.add(word_btn).on_hover_text("Whole word").clicked() {
+                    self.find_whole_word = !self.find_whole_word;
+                }
+                ui.add_space(4.0);
+                ui.label(
+                    egui::RichText::new("Replace:")
+                        .size(12.0)
+                        .color(c.disabled_text),
+                );
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.find_replace)
+                        .hint_text("Replace with…")
+                        .desired_width(140.0),
+                );
                 let n = self.find_matches().len();
                 if ui.small_button("Prev").clicked() {
                     self.find_goto(ctx, self.find_idx.saturating_sub(1));
@@ -6840,10 +7037,14 @@ impl ScriptCraftApp {
                     ui.label(
                         egui::RichText::new(format!("{}/{}", (self.find_idx + 1).min(n), n))
                             .small()
-                            .weak(),
+                            .color(c.accent_text),
                     );
                 } else if !self.find_query.is_empty() {
-                    ui.label(egui::RichText::new("no matches").small().weak());
+                    ui.label(
+                        egui::RichText::new("no matches")
+                            .small()
+                            .color(c.disabled_text),
+                    );
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.small_button("✕").clicked() {

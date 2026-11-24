@@ -30,5 +30,48 @@
 	<string>11.0</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>KIT Scenarist Project</string>
+			<key>CFBundleTypeExtensions</key>
+			<array>
+				<string>kitsp</string>
+			</array>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Final Draft Screenplay</string>
+			<key>CFBundleTypeExtensions</key>
+			<array>
+				<string>fdx</string>
+			</array>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Fade In Screenplay</string>
+			<key>CFBundleTypeExtensions</key>
+			<array>
+				<string>fadein</string>
+			</array>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Fountain Screenplay</string>
+			<key>CFBundleTypeExtensions</key>
+			<array>
+				<string>fountain</string>
+			</array>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+		</dict>
+	</array>
 </dict>
 </plist>

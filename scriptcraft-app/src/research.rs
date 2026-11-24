@@ -17,7 +17,7 @@ use crate::app::{
     draw_kit_icon, kit_button, kit_field, kit_field_multi, kit_icon_button, kit_module_strip,
     kit_mono_editor, kit_section, kit_tree_row, KitIcon, KitTreeRow,
 };
-use crate::theme::kit;
+use crate::theme::{ink_on_accent, kit, paint_revision};
 
 /// Research module selection (KIT's research tree).
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -122,7 +122,7 @@ pub(crate) fn view(ctx: &Context, state: &mut ResearchView<'_>) -> Vec<ResearchA
                     "Start a revision to compare drafts."
                 })
                 .size(11.0)
-                .color(egui::Color32::from_gray(0xA1)),
+                .color(kit().disabled_text),
             );
         });
         ui.add_space(2.0);
@@ -411,7 +411,7 @@ fn entities_pane(
             script_names.len()
         ))
         .size(11.0)
-        .color(egui::Color32::from_gray(0xA1)),
+        .color(kit().disabled_text),
     );
     if !missing.is_empty() {
         ui.add_space(4.0);
@@ -438,7 +438,7 @@ fn entities_pane(
                  appears here."
             ))
             .size(12.0)
-            .color(egui::Color32::from_gray(0xA1)),
+            .color(kit().disabled_text),
         );
     }
     for name in script_names {
@@ -453,7 +453,7 @@ fn entities_pane(
                 ui.label(
                     egui::RichText::new("card")
                         .size(10.0)
-                        .color(egui::Color32::from_gray(0x8C)),
+                        .color(kit().disabled_text),
                 );
             }
             None => {
@@ -475,7 +475,7 @@ fn entities_pane(
         ui.label(
             egui::RichText::new("Not in the script yet — keep planning notes here.")
                 .size(11.0)
-                .color(egui::Color32::from_gray(0xA1)),
+                .color(kit().disabled_text),
         );
         for (id, name) in only_cards {
             let selected = *state.research_sel == Some(*id);
@@ -514,7 +514,7 @@ fn script_pane(ui: &mut Ui, state: &mut ResearchView<'_>, actions: &mut Vec<Rese
     ui.label(
         egui::RichText::new("Header/footer tokens: {revision} {date} {page}")
             .size(11.0)
-            .color(egui::Color32::from_gray(0xA1)),
+            .color(kit().disabled_text),
     );
     dirty |= kit_field(
         ui,
@@ -568,7 +568,7 @@ fn script_pane(ui: &mut Ui, state: &mut ResearchView<'_>, actions: &mut Vec<Rese
         ui.label(
             egui::RichText::new("Lock page starts before revisions so page references stay valid.")
                 .size(11.0)
-                .color(egui::Color32::from_gray(0xA1)),
+                .color(kit().disabled_text),
         );
     }
     ui.horizontal_wrapped(|ui| {
@@ -616,123 +616,316 @@ fn logline_pane(ui: &mut Ui, state: &mut ResearchView<'_>, synopsis: bool) {
 }
 
 fn versions_pane(ui: &mut Ui, state: &mut ResearchView<'_>, actions: &mut Vec<ResearchAction>) {
-    kit_section(ui, "Versions");
-    let can_write = !state.read_only && !state.path.is_empty();
-    if ui
-        .add_enabled(can_write, egui::Button::new("Save Current as Version…"))
-        .on_disabled_hover_text("Save the project before creating a version.")
-        .clicked()
-    {
-        actions.push(ResearchAction::SaveVersionDialog);
-    }
-    if !can_write {
-        ui.label(
-            egui::RichText::new("Save the project first — fixture is read-only.")
-                .size(11.0)
-                .color(egui::Color32::from_gray(0xA1)),
-        );
-    }
-    ui.add_space(8.0);
-    if state.versions.is_empty() {
-        ui.label(egui::RichText::new("No versions in this project.").size(13.0));
-    } else {
-        for (name, when) in state.versions {
-            let (rect, _) = ui
-                .allocate_exact_size(egui::vec2(ui.available_width(), 40.0), egui::Sense::hover());
-            ui.painter().rect_filled(rect, 2.0, kit().strip);
-            draw_kit_icon(
-                ui.painter(),
-                KitIcon::Layers,
-                egui::pos2(rect.left() + 18.0, rect.center().y),
-                kit().text,
-            );
-            ui.painter().text(
-                egui::pos2(rect.left() + 36.0, rect.center().y - 7.0),
-                egui::Align2::LEFT_CENTER,
-                name,
-                egui::FontId::proportional(13.0),
-                kit().text,
-            );
-            ui.painter().text(
-                egui::pos2(rect.left() + 36.0, rect.center().y + 8.0),
-                egui::Align2::LEFT_CENTER,
-                when,
-                egui::FontId::proportional(11.5),
-                egui::Color32::from_gray(0xA1),
+    let c = kit();
+    let max_w = ui.available_width().min(760.0);
+    ui.allocate_ui(egui::vec2(max_w, 0.0), |ui| {
+        // ---- Production Revisions Hub ----
+        kit_section(ui, "Revisions");
+        let has = state.has_project;
+        let next_color = state.revisions.next_color();
+
+        egui::Frame::new()
+            .fill(c.surface)
+            .stroke(egui::Stroke::new(1.0_f32, c.sep))
+            .corner_radius(10.0)
+            .inner_margin(egui::Margin::same(16))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                if let Some(latest) = state.revisions.latest() {
+                    let (banner, _) = ui.allocate_exact_size(
+                        egui::vec2(ui.available_width(), 24.0),
+                        egui::Sense::hover(),
+                    );
+                    let swatch = egui::Rect::from_center_size(
+                        egui::pos2(banner.left() + 6.0, banner.center().y),
+                        egui::vec2(12.0, 12.0),
+                    );
+                    paint_revision(ui.painter(), swatch, latest.color, 2.5);
+                    let name = if latest.name.trim().is_empty() {
+                        format!("{} Revision", latest.color.label())
+                    } else {
+                        latest.name.clone()
+                    };
+                    let name_g = ui.painter().layout_no_wrap(
+                        name,
+                        egui::FontId::proportional(14.5),
+                        c.heading_text,
+                    );
+                    let name_w = name_g.size().x;
+                    ui.painter().galley(
+                        egui::pos2(banner.left() + 22.0, banner.center().y - name_g.size().y / 2.0),
+                        name_g,
+                        c.heading_text,
+                    );
+                    let badge_g = ui.painter().layout_no_wrap(
+                        "ACTIVE".to_string(),
+                        egui::FontId::proportional(9.5),
+                        c.accent_text,
+                    );
+                    let pill = egui::Rect::from_min_size(
+                        egui::pos2(banner.left() + 30.0 + name_w, banner.center().y - 9.0),
+                        egui::vec2(badge_g.size().x + 12.0, 18.0),
+                    );
+                    ui.painter().rect_filled(pill, 4.0, c.accent_soft);
+                    ui.painter().galley(
+                        egui::pos2(
+                            pill.center().x - badge_g.size().x / 2.0,
+                            pill.center().y - badge_g.size().y / 2.0,
+                        ),
+                        badge_g,
+                        c.accent_text,
+                    );
+                    let mut meta = String::new();
+                    if !latest.started.is_empty() {
+                        meta.push_str(&latest.started);
+                    }
+                    if latest.pages > 0 {
+                        if !meta.is_empty() {
+                            meta.push_str(" · ");
+                        }
+                        meta.push_str(&format!("{} pages", latest.pages));
+                    }
+                    if !meta.is_empty() {
+                        ui.painter().text(
+                            egui::pos2(banner.right(), banner.center().y),
+                            egui::Align2::RIGHT_CENTER,
+                            meta,
+                            egui::FontId::proportional(11.5),
+                            c.disabled_text,
+                        );
+                    }
+                } else {
+                    ui.label(
+                        egui::RichText::new("No active revision yet")
+                            .size(14.0)
+                            .strong()
+                            .color(c.heading_text),
+                    );
+                    ui.add_space(2.0);
+                    ui.label(
+                        egui::RichText::new(
+                            "Start a revision to freeze a baseline, track line edits with colored gutter bars, and export revised pages.",
+                        )
+                        .size(12.0)
+                        .color(c.disabled_text),
+                    );
+                }
+
+                ui.add_space(12.0);
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
+                    let start_btn = if has {
+                        egui::Button::new(
+                            egui::RichText::new(format!("Start {} Revision", next_color.label()))
+                                .strong()
+                                .color(ink_on_accent(c.accent)),
+                        )
+                        .fill(c.accent)
+                    } else {
+                        egui::Button::new(format!("Start {} Revision", next_color.label()))
+                    };
+                    if ui
+                        .add_enabled(has, start_btn)
+                        .on_disabled_hover_text("Open a project to start a revision.")
+                        .clicked()
+                    {
+                        actions.push(ResearchAction::StartRevision);
+                    }
+                    if ui
+                        .add_enabled(
+                            has && !state.revisions.is_empty(),
+                            egui::Button::new("Revision Summary…"),
+                        )
+                        .on_disabled_hover_text("Start a revision to summarize changes.")
+                        .clicked()
+                    {
+                        actions.push(ResearchAction::OpenSummary);
+                    }
+                    if ui
+                        .add_enabled(has, egui::Button::new("Revision History…"))
+                        .clicked()
+                    {
+                        actions.push(ResearchAction::ShowHistory);
+                    }
+                });
+
+                if !state.revisions.is_empty() {
+                    ui.add_space(10.0);
+                    let (rule, _) = ui.allocate_exact_size(
+                        egui::vec2(ui.available_width(), 1.0),
+                        egui::Sense::hover(),
+                    );
+                    ui.painter().rect_filled(rule, 0.0, c.sep);
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        if ui
+                            .checkbox(
+                                &mut *state.show_current_revision,
+                                "Show current revision only",
+                            )
+                            .changed()
+                        {
+                            *state.revision_marks_dirty = true;
+                        }
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button("Clear Revision History…").clicked() {
+                                actions.push(ResearchAction::ClearHistory);
+                            }
+                        });
+                    });
+                }
+            });
+
+        // Inline revision timeline (quick overview without opening the modal).
+        if !state.revisions.is_empty() {
+            ui.add_space(12.0);
+            ui.label(
+                egui::RichText::new("REVISION TIMELINE")
+                    .size(10.5)
+                    .strong()
+                    .color(c.disabled_text),
             );
             ui.add_space(6.0);
+            let sets = &state.revisions.sets;
+            let last = sets.len().saturating_sub(1);
+            for (i, set) in sets.iter().enumerate().rev() {
+                let prev = i.checked_sub(1).and_then(|j| sets.get(j));
+                let (rect, _) = ui.allocate_exact_size(
+                    egui::vec2(ui.available_width(), 44.0),
+                    egui::Sense::hover(),
+                );
+                let card = rect.shrink2(egui::vec2(0.0, 2.0));
+                ui.painter().rect_filled(card, 8.0, c.surface);
+                ui.painter().rect_stroke(
+                    card,
+                    8.0,
+                    egui::Stroke::new(1.0_f32, if i == last { c.field_stroke } else { c.sep }),
+                    egui::StrokeKind::Inside,
+                );
+                let swatch = egui::Rect::from_center_size(
+                    egui::pos2(card.left() + 18.0, card.center().y),
+                    egui::vec2(10.0, 10.0),
+                );
+                paint_revision(ui.painter(), swatch, set.color, 2.5);
+                let name = if set.name.trim().is_empty() {
+                    format!("{} Revision", set.color.label())
+                } else {
+                    set.name.clone()
+                };
+                ui.painter().text(
+                    egui::pos2(card.left() + 34.0, card.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    name,
+                    egui::FontId::proportional(13.0),
+                    if i == last { c.heading_text } else { c.text },
+                );
+                let mut right_meta = if set.started.is_empty() {
+                    "Date not recorded".to_string()
+                } else {
+                    set.started.clone()
+                };
+                if set.pages > 0 {
+                    right_meta.push_str(&format!(" · {} pages", set.pages));
+                }
+                if let Some(prev) = prev {
+                    if prev.pages > 0 && set.pages > 0 {
+                        let d = set.pages as i64 - prev.pages as i64;
+                        if d != 0 {
+                            right_meta.push_str(&format!(" ({d:+})"));
+                        }
+                    }
+                }
+                ui.painter().text(
+                    egui::pos2(card.right() - 14.0, card.center().y),
+                    egui::Align2::RIGHT_CENTER,
+                    right_meta,
+                    egui::FontId::proportional(11.5),
+                    c.disabled_text,
+                );
+            }
         }
-    }
-    ui.add_space(4.0);
-    if ui
-        .add_enabled(can_write, egui::Button::new("Import Versions as Revisions"))
-        .clicked()
-    {
-        actions.push(ResearchAction::ImportVersions);
-    }
-    ui.label(
-        egui::RichText::new("Each saved KIT version becomes a revision baseline.")
-            .size(11.0)
-            .color(egui::Color32::from_gray(0xA1)),
-    );
-    ui.add_space(16.0);
-    kit_section(ui, "Revisions");
-    let has = state.has_project;
-    let next_color = state.revisions.next_color();
-    if ui
-        .add_enabled(
-            has,
-            egui::Button::new(format!("Start {} Revision", next_color.label())),
-        )
-        .on_disabled_hover_text("Open a project to start a revision.")
-        .clicked()
-    {
-        actions.push(ResearchAction::StartRevision);
-    }
-    ui.add_space(4.0);
-    if ui
-        .add_enabled(has, egui::Button::new("Revision History…"))
-        .clicked()
-    {
-        actions.push(ResearchAction::ShowHistory);
-    }
-    ui.add_space(4.0);
-    if ui
-        .add_enabled(
-            has && !state.revisions.is_empty(),
-            egui::Button::new("Revision Summary…"),
-        )
-        .on_disabled_hover_text("Start a revision to summarize changes.")
-        .clicked()
-    {
-        actions.push(ResearchAction::OpenSummary);
-    }
-    if !state.revisions.is_empty() {
+
+        ui.add_space(20.0);
+
+        // ---- KIT Named Versions ----
+        kit_section(ui, "Saved Versions (KIT Snapshots)");
+        let can_write = !state.read_only && !state.path.is_empty();
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
+            if ui
+                .add_enabled(can_write, egui::Button::new("Save Current as Version…"))
+                .on_disabled_hover_text("Save the project before creating a version.")
+                .clicked()
+            {
+                actions.push(ResearchAction::SaveVersionDialog);
+            }
+            if ui
+                .add_enabled(can_write, egui::Button::new("Import Versions as Revisions"))
+                .clicked()
+            {
+                actions.push(ResearchAction::ImportVersions);
+            }
+        });
+        if !can_write {
+            ui.add_space(4.0);
+            ui.label(
+                egui::RichText::new("Save the project first — fixture is read-only.")
+                    .size(11.5)
+                    .color(c.disabled_text),
+            );
+        }
+        ui.add_space(10.0);
+        if state.versions.is_empty() {
+            ui.label(
+                egui::RichText::new("No saved KIT versions in this project.")
+                    .size(12.5)
+                    .color(c.disabled_text),
+            );
+        } else {
+            for (name, when) in state.versions {
+                let (rect, _) = ui.allocate_exact_size(
+                    egui::vec2(ui.available_width(), 48.0),
+                    egui::Sense::hover(),
+                );
+                let card = rect.shrink2(egui::vec2(0.0, 2.0));
+                ui.painter().rect_filled(card, 8.0, c.surface);
+                ui.painter().rect_stroke(
+                    card,
+                    8.0,
+                    egui::Stroke::new(1.0_f32, c.sep),
+                    egui::StrokeKind::Inside,
+                );
+                draw_kit_icon(
+                    ui.painter(),
+                    KitIcon::Layers,
+                    egui::pos2(card.left() + 20.0, card.center().y),
+                    c.accent_text,
+                );
+                ui.painter().text(
+                    egui::pos2(card.left() + 40.0, card.center().y - 7.0),
+                    egui::Align2::LEFT_CENTER,
+                    name,
+                    egui::FontId::proportional(13.0),
+                    c.heading_text,
+                );
+                ui.painter().text(
+                    egui::pos2(card.left() + 40.0, card.center().y + 9.0),
+                    egui::Align2::LEFT_CENTER,
+                    when,
+                    egui::FontId::proportional(11.5),
+                    c.disabled_text,
+                );
+            }
+        }
         ui.add_space(6.0);
-        if ui
-            .checkbox(
-                &mut *state.show_current_revision,
-                "Show current revision only",
+        ui.label(
+            egui::RichText::new(
+                "Revision colours mark changed lines and print in the PDF. Versions above are KIT's named snapshots.",
             )
-            .changed()
-        {
-            *state.revision_marks_dirty = true;
-        }
-        ui.add_space(4.0);
-        if ui
-            .add_enabled(true, egui::Button::new("Clear Revision History…"))
-            .clicked()
-        {
-            actions.push(ResearchAction::ClearHistory);
-        }
-    }
-    ui.label(
-        egui::RichText::new(
-            "Revision colours mark changed lines and print in the PDF. Versions above are KIT's named snapshots.",
-        )
-        .size(11.0)
-        .color(egui::Color32::from_gray(0xA1)),
-    );
+            .size(11.5)
+            .color(c.disabled_text),
+        );
+    });
 }
 
 fn entry_pane(
