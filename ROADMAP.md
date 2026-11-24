@@ -18,13 +18,13 @@ Status legend: `[ ]` to do `[-]` in progress `[x]` done `[!]` blocked
 
 | Field | Value |
 |---|---|
-| Date | 2026-11-19 |
+| Date | 2026-11-24 |
 | Project | ScriptCraft — free, open-source, revision-first screenwriting studio |
 | Repo | `/Users/mihailmihaylov/Documents/Dev_work/scriptcraft` |
-| Branch / commit | `main` at **v0.8.14** (released 2026-11-19); tags `v0.7.0` at `9ce2e0e`, `v0.7.1` at `d8b17de`, `v0.7.2` at `8b75f9a`, `v0.8.0` at `0052bba`, `v0.8.1` at `0fa598e`, `v0.8.2` at `6bf1983`, `v0.8.3` at `69c0329`, `v0.8.4` at `b178e00`, `v0.8.5` at `a9394bc`, `v0.8.6` at `cf48880`, `v0.8.7` at `8ea4437`, `v0.8.8` at `bbf90bd`, `v0.8.9` at `ba5458b`, `v0.8.10` at `2363789`, `v0.8.11` at `4ca88c1`, `v0.8.12` at `4ec24d7`, `v0.8.13` at `00495c4`, `v0.8.14` at this release. |
+| Branch / commit | `main` at **v0.8.15** (released 2026-11-24); tags `v0.7.0` at `9ce2e0e`, `v0.7.1` at `d8b17de`, `v0.7.2` at `8b75f9a`, `v0.8.0` at `0052bba`, `v0.8.1` at `0fa598e`, `v0.8.2` at `6bf1983`, `v0.8.3` at `69c0329`, `v0.8.4` at `b178e00`, `v0.8.5` at `a9394bc`, `v0.8.6` at `cf48880`, `v0.8.7` at `8ea4437`, `v0.8.8` at `bbf90bd`, `v0.8.9` at `ba5458b`, `v0.8.10` at `2363789`, `v0.8.11` at `4ca88c1`, `v0.8.12` at `4ec24d7`, `v0.8.13` at `00495c4`, `v0.8.14` at `d9f5940`, `v0.8.15` at this release. |
 | Rust workspace | `scriptcraft-core`, `scriptcraft-app`, `scriptcraft-layout` (`Cargo.toml`, resolver 2) |
-| App crate version | `scriptcraft-app 0.8.14` (released 2026-11-19); `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
-| Distribution | **v0.8.14 released** — <https://github.com/MihailM17/scriptcraft/releases/tag/v0.8.14>. Assets (unsigned/ad-hoc macOS, not notarised): `ScriptCraft-0.8.14-macos-arm64.dmg` 10,534,656 B sha256 `4dabfcb48ae8589c63dbb9cafb25fa9474becccd4c43f08d95d337a91d9ab5d4`, with `.sha256`. Windows/Linux archives generated via the Packages workflow. Website: <https://mihailm17.github.io/scriptcraft/>. |
+| App crate version | `scriptcraft-app 0.8.15` (released 2026-11-24); `scriptcraft-core 0.1.0`, `scriptcraft-layout 0.1.0` |
+| Distribution | **v0.8.15 released** — <https://github.com/MihailM17/scriptcraft/releases/tag/v0.8.15>. Assets (unsigned/ad-hoc macOS, not notarised): `ScriptCraft-0.8.15-macos-arm64.dmg` 10,612,545 B sha256 `dbd3cc614a9d55c8de6793e20c41c21314d623a209f03a91caeb3713aa60f82a`, with `.sha256`. Windows/Linux archives generated via the Packages workflow. Website: <https://mihailm17.github.io/scriptcraft/>. |
 | Current one-liner | Free, open-source, revision-first studio: one screenplay engine (Editor 2.0), crash-safe saves + recovery, revision colours/marks/pages, compare/restore, revision summary with scene counts + CSV + printable PDF, omitted scenes, smart screenplay paste, KIT version write/import, changes-only compare with context gaps and template indentation, revision headers/title-page fields, production page locks with A/B page numbers and FDX revision metadata, dual dialogue side by side in editor/PDF with FDX interchange, a title-page editor whose A4 preview is the exporter's own layout, KIT-style editor/navigator settings, macOS standard selection keys, a compact file-focused Menu, OFL fonts, FDX/Fountain import/export; PDF export paginates exactly like the editor; thirty-five contrast-tested themes with revision marks legible on every palette, and live spellchecking in English, Bulgarian and Russian with screenplay-aware ALL-CAPS skipping, right-click suggestions and per-language custom dictionaries; v0.8.5 corrected editor input with whitespace-aware caret mapping, press-point clicks, double-click word selection and press-anchored drag selection; v0.8.6 gives every typed space its own cell, sets IBM Plex Mono as the default page face with Courier Prime as a Latin-only alternative, adds monochrome paper under the theme picker, 28 theme palettes as swatches (KIT Scenarist plus all 23 base Omarchy themes), a Tab character picker and live script recognition in Research; v0.8.12 adds six writer themes (Midnight Ink, Amber Projector, Noir Emerald, Velvet Curtain, Red Light and Paper and Rust) to the picker, growing the theme set to thirty-five, v0.8.8 installs updates in place after checksum verification, moves the page grid to the standard 1/6-inch leading with 58 lines on A4, adopts KIT Scenarist's published light and dark palettes (29 total) and writes panics to `panic.log`. The editor preview and the PDF export now follow
 KIT Scenistar's `final_draft_a4.kitss` (A4 margins 38/24/17/24 mm, 155 mm text
 column, right-aligned transitions); v0.8.9 adds Fade In `.fadein`
@@ -2436,6 +2436,14 @@ Built on the released v0.8.8. Released 2026-11-19 as **v0.8.9** (tag `v0.8.9` at
   longer list; theme count assertions updated.
 - **Docs:** README status, website copy and release checklist updated to
   thirty-five themes.
+
+### 2026-11-24 — v0.8.15: full native UI polish, opt-in US Letter, inline bold/italic/underline, and revisions UX
+
+- **Full native egui UI polish:** Refined Start, Script toolbar & quiet Elements rail, responsive Corkboard cards, Statistics KPI strip, Export dialog, compact `264px` Menu popup with uppercase sections and glyph-safe `Shift+⌘` shortcuts, `272px` Research module with `720px` setting cards, segmented Compare header, Revisions Hub timeline, clickable Revision Summary rows, and redesigned About/Help/Clear Revisions dialogs.
+- **Inline Bold, Italic & Underline:** Added `InlineStyle` / `StyleSpan` and undoable `EditCommand::SetStyles` with `⌘B`/`⌘I`/`⌘U` (`Ctrl+B/I/U`) shortcuts, Script toolbar `B`/`I`/`U` pills, cell-exact monospace painting, PDF export with bundled italics & underline strokes, and full round-trip persistence across `.kitsp`, `.fdx`, `.fadein`, and `.fountain`.
+- **Opt-in US Letter support:** Kept A4 (`58` lines/page) as the default and added opt-in US Letter (`8.5 × 11 in`, `55` lines/page) in Settings → Appearance → Page size and Export Scenario → Template across both live editor layout and PDF export.
+- **Revisions, Find/Replace & macOS file associations:** Wrapped multi-line Compare diffs, added Match Case (`Aa`), Whole Word (`W`), and empty-string replacement to Find & Replace, and registered `.kitsp`/`.fdx`/`.fadein`/`.fountain` in `packaging/macos/Info.plist.in`.
+- Released **v0.8.15** (release notes in `docs/releases/v0.8.15.md`); macOS DMG `ScriptCraft-0.8.15-macos-arm64.dmg` (10,612,545 B, sha256 `dbd3cc61...`).
 
 ### 2026-11-19 — v0.8.14: highlighted button contrast and macOS dock icon native rendering
 

@@ -36,20 +36,18 @@ Most screenwriting software treats the production phase as an afterthought or a 
 </div>
 
 <details>
-<summary><b>🚀 What's New in v0.8.14 (Click to expand)</b></summary>
+<summary><b>🚀 What's New in v0.8.15 (Click to expand)</b></summary>
 <br>
 
-* **Highlighted Button & Selection Contrast:** Fixed an issue where selected sidebar navigation items and active button chips blended into glowing backgrounds on the six writer themes (*Midnight Ink*, *Amber Projector*, *Noir Emerald*, *Velvet Curtain*, *Red Light*, and *Paper and Rust*). Re-calibrated `accent_soft` to true premultiplied alpha (yielding 5.6:1 – 7.4:1 WCAG AAA contrast).
-* **Automatic High-Contrast Accent Ink:** Solid primary buttons (`Save`, `Update`, `Start`) dynamically select dark or white ink based on the palette's accent luminance.
-* **macOS Dock Icon Native Rendering:** Fixed an issue where the Dock icon reverted to the default framework `"e"` logo when opening the bundled application. Bundled runs now bypass runtime image overrides, cleanly preserving the multi-resolution `ScriptCraft.icns` with native Apple HIG squircle geometry.
-* **Writer Palettes Legibility (v0.8.13):** Re-tuned contrast, surface elevation and secondary label readability across the six writer themes.
-* **Six New Writer Themes (v0.8.12):** Added *Midnight Ink*, *Amber Projector*, *Noir Emerald*, *Velvet Curtain*, *Red Light*, and *Paper and Rust*, expanding the palette picker to 35 contrast-tested themes.
-* **Liberation Mono Bundled:** Added metric-compatible 0.6 em monospace typeface supporting Latin, Greek, and Cyrillic out of the box.
-* **Lossless Interchange:** Import and export native `.fadein` archives (ZIP + OSF) with dual dialogue and notes, plus Markdown export for reviews and wikis.
-* **Exact A4 Grid:** Uses the industry-standard 1/6-inch leading (58 lines on A4) matching KIT Scenarist's `final_draft_a4.kitss` (no bold body, right-aligned transitions).
-* **In-Place Updates:** Staged, checksum-verified (SHA-256) auto-updates with post-exit restart.
-* **Native Desktop Chrome:** Windows title bars tint to the active palette with embedded icon resources; macOS draws fullsize translucent titlebars with native traffic lights.
-* **Crash Resilience:** Integrated `panic.log` capture for instant, terminal-free crash diagnostics.
+* **Full Studio UI Redesign:** Polished every native `egui` view—Start, Script toolbar & quiet Elements rail, responsive Corkboard cards, Statistics KPI strip, Export dialog, compact Menu popup, Research module, Compare Drafts header, Revisions Hub, Revision Summary, and About/Help windows.
+* **Inline Bold, Italic & Underline:** Apply inline formatting (`⌘B` / `⌘I` / `⌘U`, `Ctrl+B/I/U`, or the Script toolbar `B` / `I` / `U` pills) on selections or the word under the caret—painted on the exact monospace grid, exported to PDF with bundled italics, and round-tripped through `.kitsp`, `.fdx`, `.fadein`, and `.fountain`.
+* **Opt-In US Letter Support:** A4 (`58` lines/page) remains the default; switch to standard Hollywood US Letter (`8.5 × 11 in`, `55` lines/page) in **Settings → Appearance → Page size** or override per export in **Export Scenario → Template**.
+* **Revisions Hub & Wrapped Compare Diffs:** Redesigned `Research ▸ Versions` with an inline timeline, wrapped multi-line Compare diffs in Unified and Side-by-Side modes, and clickable Revision Summary rows that jump directly to the scene.
+* **Upgraded Find & Replace & macOS File Associations:** Added Match Case (`Aa`), Whole Word (`W`), and empty-string deletion to Find & Replace, plus macOS Finder `.kitsp` / `.fdx` / `.fadein` / `.fountain` double-click open support.
+* **Highlighted Button Contrast & Native macOS Dock Icon (v0.8.14):** Re-calibrated `accent_soft` premultiplied alpha across all six writer themes, added dynamic `ink_on_accent` contrast ink, and restored native `ScriptCraft.icns` rendering in the macOS Dock.
+* **35 Contrast-Tested Themes & Bundled Fonts:** Includes six writer themes (*Midnight Ink*, *Amber Projector*, *Noir Emerald*, *Velvet Curtain*, *Red Light*, *Paper and Rust*) and bundled Liberation Mono, IBM Plex Mono, and Courier Prime.
+* **Lossless Interchange:** Import and export `.kitsp`, `.fdx`, `.fadein`, `.fountain`, plus Markdown export.
+* **In-Place Updates & Crash Resilience:** SHA-256 verified auto-updates with post-exit restart and integrated `panic.log` diagnostics.
 
 *See the full release history in [`docs/releases/`](docs/releases/).*
 
