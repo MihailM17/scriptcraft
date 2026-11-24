@@ -202,13 +202,15 @@ pub fn dialog(ctx: &Context, state: &mut ExportDialog<'_>) -> ExportAction {
                                             .color(c.disabled_text),
                                     );
                                     egui::ComboBox::from_id_salt("export_template")
-                                        .selected_text("Final Draft Screenplay (A4)")
+                                        .selected_text(state.options.page_size.template_label())
                                         .show_ui(ui, |ui| {
-                                            ui.selectable_value(
-                                                &mut (),
-                                                (),
-                                                "Final Draft Screenplay (A4)",
-                                            );
+                                            for size in scriptcraft_core::editing::PageSize::ALL {
+                                                ui.selectable_value(
+                                                    &mut state.options.page_size,
+                                                    size,
+                                                    size.template_label(),
+                                                );
+                                            }
                                         });
                                 });
                                 ui.add_space(2.0);

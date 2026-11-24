@@ -287,6 +287,7 @@ fn duplicate_headings_keep_distinct_ids_across_reorder() {
             element_type: ElementType::SceneHeading,
             text: "INT. ROOM - DAY".into(),
             dual: None,
+            styles: Vec::new(),
         },
         ScriptBlock::new(ElementType::Action, "First scene.".into()),
         ScriptBlock {
@@ -295,6 +296,7 @@ fn duplicate_headings_keep_distinct_ids_across_reorder() {
             element_type: ElementType::SceneHeading,
             text: "INT. ROOM - DAY".into(),
             dual: None,
+            styles: Vec::new(),
         },
         ScriptBlock::new(ElementType::Action, "Second scene.".into()),
     ];
@@ -450,6 +452,7 @@ fn retain_scene_meta_drops_unknown_and_duplicate_ids() {
             element_type: ElementType::SceneHeading,
             text: "INT. ROOM - DAY".into(),
             dual: None,
+            styles: Vec::new(),
         }],
         ..Default::default()
     };

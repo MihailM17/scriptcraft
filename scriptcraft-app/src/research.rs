@@ -14,8 +14,8 @@ use scriptcraft_core::{
 };
 
 use crate::app::{
-    draw_kit_icon, kit_button, kit_field, kit_field_multi, kit_icon_button, kit_module_strip,
-    kit_mono_editor, kit_section, kit_tree_row, KitIcon, KitTreeRow,
+    draw_kit_icon, kit_button, kit_field, kit_field_multi, kit_icon_button, kit_mono_editor,
+    kit_section, kit_tree_row, KitIcon, KitTreeRow,
 };
 use crate::theme::{ink_on_accent, kit, paint_revision};
 
@@ -100,55 +100,78 @@ pub(crate) fn view(ctx: &Context, state: &mut ResearchView<'_>) -> Vec<ResearchA
             });
             return;
         }
+        let c = kit();
         ui.spacing_mut().item_spacing.y = 0.0;
-        kit_module_strip(ui, "Research", &[]);
-        ui.spacing_mut().item_spacing.y = 6.0;
-        // Compare is the one revision workspace that is useful from every
-        // Research pane, so keep it in the module header instead of burying it
-        // below the versions list.
-        ui.horizontal(|ui| {
-            let can_compare = state.has_project && !state.revisions.is_empty();
-            if ui
-                .add_enabled(can_compare, egui::Button::new("Compare Drafts…"))
-                .on_disabled_hover_text("Start a revision to compare drafts.")
-                .clicked()
-            {
-                actions.push(ResearchAction::OpenCompare);
-            }
-            ui.label(
-                egui::RichText::new(if can_compare {
-                    "Read-only: latest revision vs current draft"
-                } else {
-                    "Start a revision to compare drafts."
-                })
-                .size(11.0)
-                .color(kit().disabled_text),
-            );
-        });
-        ui.add_space(2.0);
+        // Unified Research header strip with integrated Compare Drafts action.
+        egui::Frame::new()
+            .fill(c.surface)
+            .inner_margin(egui::Margin::symmetric(16, 10))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    ui.label(
+                        egui::RichText::new("Research")
+                            .size(16.0)
+                            .strong()
+                            .color(c.heading_text),
+                    );
+                    ui.add_space(12.0);
+                    let can_compare = state.has_project && !state.revisions.is_empty();
+                    let compare_btn = if can_compare {
+                        egui::Button::new(
+                            egui::RichText::new("Compare Drafts…")
+                                .size(12.5)
+                                .color(c.accent_text),
+                        )
+                        .fill(c.accent_soft)
+                        .stroke(egui::Stroke::new(1.0_f32, c.accent))
+                    } else {
+                        egui::Button::new("Compare Drafts…")
+                    };
+                    if ui
+                        .add_enabled(can_compare, compare_btn)
+                        .on_disabled_hover_text("Start a revision to compare drafts.")
+                        .clicked()
+                    {
+                        actions.push(ResearchAction::OpenCompare);
+                    }
+                    ui.label(
+                        egui::RichText::new(if can_compare {
+                            "Read-only: latest revision vs current draft"
+                        } else {
+                            "Start a revision to compare drafts."
+                        })
+                        .size(11.5)
+                        .color(c.disabled_text),
+                    );
+                });
+            });
+        let (hbar, _) =
+            ui.allocate_exact_size(egui::vec2(ui.available_width(), 1.0), egui::Sense::hover());
+        ui.painter().rect_filled(hbar, 0.0, c.sep);
+
         let pane_h = ui.available_height();
         ui.horizontal_top(|ui| {
             ui.allocate_ui_with_layout(
-                egui::vec2(330.0, pane_h),
+                egui::vec2(272.0, pane_h),
                 egui::Layout::top_down(egui::Align::Min),
                 |ui| {
-                    ui.set_min_width(330.0);
-                    ui.set_max_width(330.0);
+                    ui.set_min_width(272.0);
+                    ui.set_max_width(272.0);
                     egui::ScrollArea::vertical()
                         .id_salt("research_tree")
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
+                            ui.add_space(6.0);
                             tree(ui, state, &mut actions);
                         });
                 },
             );
-            ui.add_space(8.0);
             let (sep, _) = ui.allocate_exact_size(egui::vec2(1.0, pane_h), egui::Sense::hover());
-            ui.painter().rect_filled(sep, 0.0, kit().sep);
-            ui.add_space(4.0);
+            ui.painter().rect_filled(sep, 0.0, c.sep);
             egui::Frame::new()
-                .fill(kit().module_bg)
-                .inner_margin(egui::Margin::symmetric(14, 12))
+                .fill(c.module_bg)
+                .inner_margin(egui::Margin::symmetric(24, 18))
                 .show(ui, |ui| {
                     ui.vertical(|ui| {
                         egui::ScrollArea::vertical()
@@ -506,78 +529,121 @@ fn pane_view(ui: &mut Ui, state: &mut ResearchView<'_>, actions: &mut Vec<Resear
 }
 
 fn script_pane(ui: &mut Ui, state: &mut ResearchView<'_>, actions: &mut Vec<ResearchAction>) {
+    let c = kit();
     let mut dirty = false;
-    kit_section(ui, "Script");
-    dirty |= kit_field(ui, "Script Name", &mut state.meta.title);
-    dirty |= kit_field(ui, "Header", &mut state.meta.header);
-    dirty |= kit_field(ui, "Footer", &mut state.meta.footer);
-    ui.label(
-        egui::RichText::new("Header/footer tokens: {revision} {date} {page}")
-            .size(11.0)
-            .color(kit().disabled_text),
-    );
-    dirty |= kit_field(
-        ui,
-        "Scene Number Prefix",
-        &mut state.meta.scene_number_prefix,
-    );
-    dirty |= kit_field(
-        ui,
-        "Scene Numbering Starting at",
-        &mut state.meta.scene_number_start,
-    );
-    ui.add_space(6.0);
-    ui.horizontal_wrapped(|ui| {
-        if kit_icon_button(ui, KitIcon::LockClosed, "Lock scenes numbers").clicked()
-            && !state.scene_labels.is_empty()
-        {
-            let labels: Vec<String> = state
-                .scene_labels
-                .iter()
-                .map(|label| label.trim_end_matches('.').to_string())
-                .collect();
-            state.meta.locked_scene_numbers = labels.join(",");
-            dirty = true;
-        }
-        if kit_icon_button(ui, KitIcon::LockClosed, "Lock new scenes numbers").clicked() {
-            let labels: Vec<String> = state
-                .scene_labels
-                .iter()
-                .map(|label| label.trim_end_matches('.').to_string())
-                .collect();
-            state.meta.locked_scene_numbers = format!("*{}", labels.join(","));
-            dirty = true;
-        }
-        if kit_icon_button(ui, KitIcon::LockOpen, "Unlock scenes numbers").clicked() {
-            state.meta.locked_scene_numbers.clear();
-            dirty = true;
-        }
-    });
-    ui.add_space(6.0);
-    kit_section(ui, "Page Locks");
-    let page_lock = scriptcraft_core::page_lock::PageLock::from_json(&state.meta.locked_pages)
-        .ok()
-        .filter(|l| !l.is_empty());
-    if let Some(lock) = page_lock {
-        ui.label(format!(
-            "Locked: {} page{} (inserted pages use A/B labels).",
-            lock.pages,
-            if lock.pages == 1 { "" } else { "s" }
-        ));
-    } else {
-        ui.label(
-            egui::RichText::new("Lock page starts before revisions so page references stay valid.")
-                .size(11.0)
-                .color(kit().disabled_text),
-        );
-    }
-    ui.horizontal_wrapped(|ui| {
-        if kit_icon_button(ui, KitIcon::LockClosed, "Lock pages").clicked() {
-            actions.push(ResearchAction::LockPages);
-        }
-        if kit_icon_button(ui, KitIcon::LockOpen, "Unlock pages").clicked() {
-            actions.push(ResearchAction::UnlockPages);
-        }
+    let max_w = ui.available_width().min(720.0);
+    ui.allocate_ui(egui::vec2(max_w, 0.0), |ui| {
+        kit_section(ui, "Script");
+        egui::Frame::new()
+            .fill(c.surface)
+            .stroke(egui::Stroke::new(1.0_f32, c.sep))
+            .corner_radius(10.0)
+            .inner_margin(egui::Margin::same(16))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                dirty |= kit_field(ui, "Script Name", &mut state.meta.title);
+                dirty |= kit_field(ui, "Header", &mut state.meta.header);
+                dirty |= kit_field(ui, "Footer", &mut state.meta.footer);
+                ui.label(
+                    egui::RichText::new("Header/footer tokens: {revision} {date} {page}")
+                        .size(11.5)
+                        .color(c.disabled_text),
+                );
+            });
+
+        ui.add_space(16.0);
+        kit_section(ui, "Scene Numbering");
+        egui::Frame::new()
+            .fill(c.surface)
+            .stroke(egui::Stroke::new(1.0_f32, c.sep))
+            .corner_radius(10.0)
+            .inner_margin(egui::Margin::same(16))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                dirty |= kit_field(
+                    ui,
+                    "Scene Number Prefix",
+                    &mut state.meta.scene_number_prefix,
+                );
+                dirty |= kit_field(
+                    ui,
+                    "Scene Numbering Starting at",
+                    &mut state.meta.scene_number_start,
+                );
+                ui.add_space(6.0);
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
+                    if kit_icon_button(ui, KitIcon::LockClosed, "Lock scenes numbers").clicked()
+                        && !state.scene_labels.is_empty()
+                    {
+                        let labels: Vec<String> = state
+                            .scene_labels
+                            .iter()
+                            .map(|label| label.trim_end_matches('.').to_string())
+                            .collect();
+                        state.meta.locked_scene_numbers = labels.join(",");
+                        dirty = true;
+                    }
+                    if kit_icon_button(ui, KitIcon::LockClosed, "Lock new scenes numbers").clicked()
+                    {
+                        let labels: Vec<String> = state
+                            .scene_labels
+                            .iter()
+                            .map(|label| label.trim_end_matches('.').to_string())
+                            .collect();
+                        state.meta.locked_scene_numbers = format!("*{}", labels.join(","));
+                        dirty = true;
+                    }
+                    if kit_icon_button(ui, KitIcon::LockOpen, "Unlock scenes numbers").clicked() {
+                        state.meta.locked_scene_numbers.clear();
+                        dirty = true;
+                    }
+                });
+            });
+
+        ui.add_space(16.0);
+        kit_section(ui, "Page Locks");
+        egui::Frame::new()
+            .fill(c.surface)
+            .stroke(egui::Stroke::new(1.0_f32, c.sep))
+            .corner_radius(10.0)
+            .inner_margin(egui::Margin::same(16))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                let page_lock =
+                    scriptcraft_core::page_lock::PageLock::from_json(&state.meta.locked_pages)
+                        .ok()
+                        .filter(|l| !l.is_empty());
+                if let Some(lock) = page_lock {
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "Locked: {} page{} (inserted pages use A/B labels).",
+                            lock.pages,
+                            if lock.pages == 1 { "" } else { "s" }
+                        ))
+                        .size(12.5)
+                        .color(c.accent_text),
+                    );
+                } else {
+                    ui.label(
+                        egui::RichText::new(
+                            "Lock page starts before revisions so page references stay valid.",
+                        )
+                        .size(12.0)
+                        .color(c.disabled_text),
+                    );
+                }
+                ui.add_space(10.0);
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
+                    if kit_icon_button(ui, KitIcon::LockClosed, "Lock pages").clicked() {
+                        actions.push(ResearchAction::LockPages);
+                    }
+                    if kit_icon_button(ui, KitIcon::LockOpen, "Unlock pages").clicked() {
+                        actions.push(ResearchAction::UnlockPages);
+                    }
+                });
+            });
     });
     if dirty {
         *state.meta_dirty = true;

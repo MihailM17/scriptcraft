@@ -70,8 +70,10 @@ fn benches(c: &mut Criterion) {
     let fonts = ExportFonts {
         regular: &regular,
         bold: &bold,
+        italic: None,
         fallback_regular: &fallback_regular,
         fallback_bold: &fallback_bold,
+        fallback_italic: None,
     };
     let options = ExportOptions::default();
     c.bench_function("pdf_a95", |b| {

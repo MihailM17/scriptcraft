@@ -19,7 +19,7 @@
 //! never touches `kit_uuid` — assigning it for new scene headings stays a
 //! caller concern until the app migrates to commands (M4/M5).
 
-use crate::model::{DualMark, ElementType, ScriptBlock};
+use crate::model::{DualMark, ElementType, ScriptBlock, StyleSpan};
 use thiserror::Error;
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -136,6 +136,8 @@ pub enum EditCommand {
     /// Set or clear a dual-dialogue marker on one character block. The app
     /// applies two of these as one user step, so undo restores both sides.
     SetDual { bi: usize, mark: Option<DualMark> },
+    /// Replace a block's inline formatting spans (bold / italic / underline).
+    SetStyles { bi: usize, styles: Vec<StyleSpan> },
     /// Swap in a whole new block list. Used for structural edits (scene
     /// reordering, bulk operations) where composing per-block commands would
     /// be noisy; the inverse carries the previous list, so undo restores it
@@ -148,12 +150,10 @@ impl EditCommand {
     /// undoes it (in the order the undo steps must run).
     pub fn apply(self, blocks: &mut Vec<ScriptBlock>) -> Result<Vec<EditCommand>, EditError> {
         match self {
-            EditCommand::InsertText { at, text } => Ok(vec![apply_insert_text(blocks, at, &text)?]),
-            EditCommand::DeleteRange { start, end } => {
-                Ok(vec![apply_delete_range(blocks, start, end)?])
-            }
+            EditCommand::InsertText { at, text } => apply_insert_text(blocks, at, &text),
+            EditCommand::DeleteRange { start, end } => apply_delete_range(blocks, start, end),
             EditCommand::SetType { bi, t } => Ok(vec![apply_set_type(blocks, bi, t)?]),
-            EditCommand::SetText { bi, text } => Ok(vec![apply_set_text(blocks, bi, text)?]),
+            EditCommand::SetText { bi, text } => apply_set_text(blocks, bi, text),
             EditCommand::InsertBlock { at, block } => {
                 Ok(vec![apply_insert_block(blocks, at, block)?])
             }
@@ -163,6 +163,9 @@ impl EditCommand {
             }
             EditCommand::MergeBlocks { bi, fuse } => apply_merge_blocks(blocks, bi, fuse),
             EditCommand::SetDual { bi, mark } => Ok(vec![apply_set_dual(blocks, bi, mark)?]),
+            EditCommand::SetStyles { bi, styles } => {
+                Ok(vec![apply_set_styles(blocks, bi, styles)?])
+            }
             EditCommand::ReplaceAll { blocks: new } => {
                 let old = std::mem::replace(blocks, new);
                 Ok(vec![EditCommand::ReplaceAll { blocks: old }])
@@ -374,15 +377,19 @@ fn apply_insert_text(
     blocks: &mut [ScriptBlock],
     at: Pos,
     text: &str,
-) -> Result<EditCommand, EditError> {
+) -> Result<Vec<EditCommand>, EditError> {
     check_pos(blocks, at)?;
     let end_raw = advance(at, text);
     let b = &mut blocks[at.bi];
+    let old_styles = b.styles.clone();
+    let abs_at = char_index(&b.text, at);
+    let inserted_chars = char_len(text);
     let mut ps = paras(b);
     let (head, tail) = split_at_char(&ps[at.para], at.ch);
     let joined = format!("{head}{text}{tail}");
     ps.splice(at.para..=at.para, text_paras(&joined));
     set_paras(b, ps);
+    b.shift_styles_insert(abs_at, inserted_chars);
     // Trailing paragraph breaks can be trimmed away; clamp the inverse range
     // to what actually survived so undo deletes exactly the inserted chars.
     let final_n = b.text.split('\n').count();
@@ -396,14 +403,21 @@ fn apply_insert_text(
     } else {
         end_raw
     };
-    Ok(EditCommand::DeleteRange { start: at, end })
+    let mut inv = vec![EditCommand::DeleteRange { start: at, end }];
+    if b.styles != old_styles {
+        inv.push(EditCommand::SetStyles {
+            bi: at.bi,
+            styles: old_styles,
+        });
+    }
+    Ok(inv)
 }
 
 fn apply_delete_range(
     blocks: &mut [ScriptBlock],
     start: Pos,
     end: Pos,
-) -> Result<EditCommand, EditError> {
+) -> Result<Vec<EditCommand>, EditError> {
     let (start, end) = if start <= end {
         (start, end)
     } else {
@@ -416,6 +430,9 @@ fn apply_delete_range(
     }
     let b = &mut blocks[start.bi];
     let old_text = b.text.clone();
+    let old_styles = b.styles.clone();
+    let abs_start = char_index(&b.text, start);
+    let abs_end = char_index(&b.text, end);
     let ps = paras(b);
     let region = ps[start.para..=end.para].join("\n");
     let region_len = char_len(&region);
@@ -431,20 +448,29 @@ fn apply_delete_range(
     out.push(format!("{head}{tail}"));
     out.extend_from_slice(&ps[end.para + 1..]);
     set_paras(b, out);
+    b.shift_styles_delete(abs_start, abs_end);
     // Deleting everything up to the end of the block trims trailing empty
     // paragraphs, so the insertion point may no longer exist; a whole-text
     // restore is the exact inverse in that case.
     let final_n = b.text.split('\n').count();
-    if start.para >= final_n {
-        return Ok(EditCommand::SetText {
+    let mut inv = if start.para >= final_n {
+        vec![EditCommand::SetText {
             bi: start.bi,
             text: old_text,
+        }]
+    } else {
+        vec![EditCommand::InsertText {
+            at: start,
+            text: removed,
+        }]
+    };
+    if b.styles != old_styles {
+        inv.push(EditCommand::SetStyles {
+            bi: start.bi,
+            styles: old_styles,
         });
     }
-    Ok(EditCommand::InsertText {
-        at: start,
-        text: removed,
-    })
+    Ok(inv)
 }
 
 fn apply_set_type(
@@ -462,11 +488,31 @@ fn apply_set_text(
     blocks: &mut [ScriptBlock],
     bi: usize,
     text: String,
-) -> Result<EditCommand, EditError> {
+) -> Result<Vec<EditCommand>, EditError> {
     let b = blocks.get_mut(bi).ok_or(EditError::InvalidBlock(bi))?;
     let old = b.text.clone();
+    let old_styles = b.styles.clone();
     set_paras(b, text_paras(&text));
-    Ok(EditCommand::SetText { bi, text: old })
+    b.normalize_styles();
+    let mut inv = vec![EditCommand::SetText { bi, text: old }];
+    if b.styles != old_styles {
+        inv.push(EditCommand::SetStyles {
+            bi,
+            styles: old_styles,
+        });
+    }
+    Ok(inv)
+}
+
+fn apply_set_styles(
+    blocks: &mut [ScriptBlock],
+    bi: usize,
+    styles: Vec<StyleSpan>,
+) -> Result<EditCommand, EditError> {
+    let b = blocks.get_mut(bi).ok_or(EditError::InvalidBlock(bi))?;
+    let old = std::mem::replace(&mut b.styles, styles);
+    b.normalize_styles();
+    Ok(EditCommand::SetStyles { bi, styles: old })
 }
 
 fn apply_set_dual(
@@ -518,6 +564,12 @@ fn apply_split_block(
     let fuse = fuse && at.ch > 0;
     let b = &mut blocks[at.bi];
     let old_text = b.text.clone();
+    let old_styles = b.styles.clone();
+    let split_abs = if fuse {
+        char_index(&b.text, at)
+    } else {
+        char_index(&b.text, Pos { ch: 0, ..at })
+    };
     let ps = paras(b);
     let (upper, lower) = if fuse {
         let (head, tail) = split_at_char(&ps[at.para], at.ch);
@@ -529,23 +581,35 @@ fn apply_split_block(
     } else {
         (ps[..at.para].to_vec(), ps[at.para..].to_vec())
     };
+    let (head_styles, tail_styles) = b.split_styles(split_abs, 0);
     set_paras(b, upper);
+    b.styles = head_styles;
+    b.normalize_styles();
     let mut fresh = ScriptBlock::new(new_type, String::new());
     set_paras(&mut fresh, lower);
+    fresh.styles = tail_styles;
+    fresh.normalize_styles();
     if new_type == ElementType::SceneHeading && fresh.kit_uuid.is_none() {
         fresh.kit_uuid = Some(format!("{{{}}}", uuid::Uuid::new_v4()));
     }
     blocks.insert(at.bi + 1, fresh);
     // Split normalization can trim paragraph breaks (the same text can split
     // in more than one way), so the exact inverse restores the whole upper
-    // text rather than re-merging.
-    Ok(vec![
+    // text (and styles) rather than re-merging.
+    let mut inv = vec![
         EditCommand::DeleteBlock { bi: at.bi + 1 },
         EditCommand::SetText {
             bi: at.bi,
             text: old_text,
         },
-    ])
+    ];
+    if !old_styles.is_empty() {
+        inv.push(EditCommand::SetStyles {
+            bi: at.bi,
+            styles: old_styles,
+        });
+    }
+    Ok(inv)
 }
 
 fn apply_merge_blocks(
@@ -557,31 +621,34 @@ fn apply_merge_blocks(
         return Err(EditError::InvalidBlock(bi));
     }
     let upper_old_text = blocks[bi - 1].text.clone();
+    let upper_old_styles = blocks[bi - 1].styles.clone();
     let lower_block = blocks[bi].clone();
     let up = normalized_paras(&blocks[bi - 1]);
     let lo = normalized_paras(&blocks[bi]);
     let prev_empty = up.len() == 1 && up[0].is_empty();
     let cur_empty = lo.len() == 1 && lo[0].is_empty();
-    let merged: Vec<String> = if fuse {
+    let upper_len = char_len(&up.join("\n"));
+    let (merged, lower_offset): (Vec<String>, usize) = if fuse {
         let n = up.len();
         let mut m: Vec<String> = up[..n - 1].to_vec();
         m.push(format!("{}{}", up[n - 1], lo[0]));
         m.extend_from_slice(&lo[1..]);
-        m
+        (m, upper_len)
     } else if prev_empty {
-        lo
+        (lo, 0)
     } else if cur_empty {
-        up
+        (up, upper_len)
     } else {
         let mut m = up;
         m.extend_from_slice(&lo);
-        m
+        (m, upper_len + 1)
     };
     set_paras(&mut blocks[bi - 1], merged);
+    blocks[bi - 1].merge_styles(lower_offset, &lower_block.styles);
     blocks.remove(bi);
-    // Restore the upper text and re-insert the removed lower block (with its
-    // original id) for a byte-for-byte undo.
-    Ok(vec![
+    // Restore the upper text (and styles) and re-insert the removed lower
+    // block (with its original id and styles) for a byte-for-byte undo.
+    let mut inv = vec![
         EditCommand::SetText {
             bi: bi - 1,
             text: upper_old_text,
@@ -590,7 +657,17 @@ fn apply_merge_blocks(
             at: bi,
             block: lower_block,
         },
-    ])
+    ];
+    if blocks[bi - 1].styles != upper_old_styles {
+        inv.insert(
+            1,
+            EditCommand::SetStyles {
+                bi: bi - 1,
+                styles: upper_old_styles,
+            },
+        );
+    }
+    Ok(inv)
 }
 
 #[cfg(test)]
@@ -1255,5 +1332,87 @@ mod tests {
         }
         // The fuzz must actually have grown/shaped the document.
         assert!(blocks.len() > 3);
+    }
+
+    #[test]
+    fn inline_styles_survive_edits_splits_merges_and_undo() {
+        use crate::model::{InlineStyle, StyleSpan};
+        let mut blocks = vec![ScriptBlock::new(
+            ElementType::Action,
+            "Hello bold world.".into(),
+        )];
+        let mut h = History::new();
+        // Bold "bold" (6..10) and underline "world" (11..16).
+        let styles = vec![
+            StyleSpan {
+                start: 6,
+                end: 10,
+                style: InlineStyle::Bold,
+            },
+            StyleSpan {
+                start: 11,
+                end: 16,
+                style: InlineStyle::Underline,
+            },
+        ];
+        h.apply(
+            &mut blocks,
+            EditCommand::SetStyles {
+                bi: 0,
+                styles: styles.clone(),
+            },
+        )
+        .unwrap();
+        assert_eq!(blocks[0].styles, styles);
+
+        // Insert "very " before "bold" -> shifts bold to 11..15, underline to 16..21.
+        h.apply(
+            &mut blocks,
+            EditCommand::InsertText {
+                at: Pos {
+                    bi: 0,
+                    para: 0,
+                    ch: 6,
+                },
+                text: "very ".into(),
+            },
+        )
+        .unwrap();
+        assert_eq!(blocks[0].text, "Hello very bold world.");
+        assert!(blocks[0].has_style_over(11, 15, InlineStyle::Bold));
+        assert!(blocks[0].has_style_over(16, 21, InlineStyle::Underline));
+
+        // Split mid-block before "world" -> underline moves to block 1.
+        h.apply(
+            &mut blocks,
+            EditCommand::SplitBlock {
+                at: Pos {
+                    bi: 0,
+                    para: 0,
+                    ch: 16,
+                },
+                new_type: ElementType::Action,
+                fuse: true,
+            },
+        )
+        .unwrap();
+        assert_eq!(blocks.len(), 2);
+        assert!(blocks[0].has_style_over(11, 15, InlineStyle::Bold));
+        assert!(blocks[1].has_style_over(0, 5, InlineStyle::Underline));
+
+        // Undo split -> single block with both shifted styles restored.
+        assert!(h.undo(&mut blocks).unwrap());
+        assert_eq!(blocks.len(), 1);
+        assert!(blocks[0].has_style_over(11, 15, InlineStyle::Bold));
+        assert!(blocks[0].has_style_over(16, 21, InlineStyle::Underline));
+
+        // Undo insert -> original text and original offsets.
+        assert!(h.undo(&mut blocks).unwrap());
+        assert_eq!(blocks[0].text, "Hello bold world.");
+        assert_eq!(blocks[0].styles, styles);
+
+        // Undo SetStyles -> unstyled again.
+        assert!(h.undo(&mut blocks).unwrap());
+        assert!(blocks[0].styles.is_empty());
     }
 }

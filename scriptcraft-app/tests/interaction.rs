@@ -3684,3 +3684,76 @@ fn update_prompt_reports_a_failed_install_and_retries() {
         "Try again restarts the download"
     );
 }
+
+/// Inline Bold / Italic / Underline work from toolbar buttons and undo cleanly.
+#[test]
+fn inline_bold_italic_underline_toggle_and_undo() {
+    use scriptcraft_core::model::InlineStyle;
+
+    let mut h = harness(SideTab::Script);
+    h.run();
+    let bi = h.state().find_first_heading_block().expect("heading") + 1;
+    let text = h.state().block_text(bi).expect("action text");
+    let end = text.chars().count().min(10);
+    assert!(end >= 4, "need enough characters to style");
+
+    h.state_mut()
+        .editor2_set_selection((bi, 0, 0), (bi, 0, end));
+    h.run();
+
+    h.get_by_label("Bold").click();
+    h.run();
+    h.get_by_label("Italic").click();
+    h.run();
+    h.get_by_label("Underline").click();
+    h.run();
+
+    let styles = h.state().block_styles_for_test(bi);
+    assert!(styles
+        .iter()
+        .any(|s| s.style == InlineStyle::Bold && s.start == 0 && s.end == end));
+    assert!(styles
+        .iter()
+        .any(|s| s.style == InlineStyle::Italic && s.start == 0 && s.end == end));
+    assert!(styles
+        .iter()
+        .any(|s| s.style == InlineStyle::Underline && s.start == 0 && s.end == end));
+
+    // Clicking Bold again toggles Bold off while keeping Italic & Underline.
+    h.get_by_label("Bold").click();
+    h.run();
+    let styles = h.state().block_styles_for_test(bi);
+    assert!(!styles.iter().any(|s| s.style == InlineStyle::Bold));
+    assert!(styles.iter().any(|s| s.style == InlineStyle::Italic));
+    assert!(styles.iter().any(|s| s.style == InlineStyle::Underline));
+}
+
+/// US Letter is opt-in (A4 stays default) and reflows pagination when selected.
+#[test]
+fn us_letter_is_opt_in_and_updates_pagination() {
+    use scriptcraft_core::editing::PageSize;
+
+    let mut h = harness(SideTab::Script);
+    h.run();
+    assert_eq!(
+        h.state().page_size_for_test(),
+        PageSize::A4,
+        "A4 must remain the default page size"
+    );
+    let a4_pages = h.state().page_count();
+    let a4_rect = h.state().editor2_page_rects()[0];
+
+    h.state_mut().set_page_size_for_test(PageSize::UsLetter);
+    h.run();
+    let letter_pages = h.state().page_count();
+    let letter_rect = h.state().editor2_page_rects()[0];
+
+    assert!(
+        letter_pages > a4_pages,
+        "A95 should take more pages on 55-line US Letter ({letter_pages}) than 58-line A4 ({a4_pages})"
+    );
+    assert!(
+        letter_rect.width() > a4_rect.width() && letter_rect.height() < a4_rect.height(),
+        "US Letter is wider and shorter than A4"
+    );
+}

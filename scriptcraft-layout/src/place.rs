@@ -14,7 +14,9 @@
 use crate::dual;
 use crate::paginate;
 use crate::wrap;
-use scriptcraft_core::editing::{cue_name_for, TemplateMetrics};
+use scriptcraft_core::editing::{
+    cue_name_for, PageSize, TemplateMetrics, FINAL_DRAFT_A4, FINAL_DRAFT_LETTER,
+};
 use scriptcraft_core::model::{dual_pairs, DocumentView, ElementType, ScriptBlock};
 use scriptcraft_core::page_lock::PageLock;
 
@@ -29,6 +31,8 @@ pub const TEXT_W_MM: f32 = 147.5;
 /// Width of KIT's default export column (A4 210 − 38 − 17 mm). This is the
 /// template KIT opens new projects with (`final_draft_a4.kitss`).
 pub const FINAL_DRAFT_A4_TEXT_W_MM: f32 = 155.0;
+/// Width of the US Letter screenplay column (215.9 − 38.1 − 25.4 mm = 6.0 in).
+pub const FINAL_DRAFT_LETTER_TEXT_W_MM: f32 = 152.4;
 
 /// Height of one 12 pt line-grid row: one sixth of an inch (4.233 mm), the
 /// standard screenplay leading. KIT Scenarist and Final Draft both print at
@@ -83,6 +87,70 @@ pub const FINAL_DRAFT_A4_GEOMETRY: TemplateGeometry = TemplateGeometry {
     lyrics_w_mm: 129.0,
     scene_num_gap_mm: 4.0,
 };
+
+/// Standard Hollywood / Final Draft US Letter geometry inside the 6.0 in
+/// (152.4 mm) text column: character 2.2 in (55.9 mm), dialogue 1.0 in / 3.5 in
+/// (25.4 / 88.9 mm), parenthetical 1.6 in / 2.4 in (40.6 / 61.0 mm).
+pub const FINAL_DRAFT_LETTER_GEOMETRY: TemplateGeometry = TemplateGeometry {
+    text_w_mm: FINAL_DRAFT_LETTER_TEXT_W_MM,
+    cue_mm: 55.9,
+    paren_mm: 40.6,
+    paren_w_mm: 61.0,
+    dialog_mm: 25.4,
+    dialog_w_mm: 88.9,
+    lyrics_mm: 25.4,
+    lyrics_w_mm: 127.0,
+    scene_num_gap_mm: 4.0,
+};
+
+/// Complete physical page specification (paper size, margins, metrics, and
+/// block column geometry) shared by the live editor and PDF exporter.
+#[derive(Clone, Copy, Debug)]
+pub struct PageSpec {
+    pub size: PageSize,
+    pub width_mm: f32,
+    pub height_mm: f32,
+    pub margin_l_mm: f32,
+    pub margin_t_mm: f32,
+    pub margin_r_mm: f32,
+    pub margin_b_mm: f32,
+    pub metrics: &'static TemplateMetrics,
+    pub geometry: &'static TemplateGeometry,
+}
+
+impl PageSpec {
+    pub const fn text_right_mm(self) -> f32 {
+        self.width_mm - self.margin_r_mm
+    }
+}
+
+/// Physical page specification for the chosen [`PageSize`].
+pub const fn page_spec(size: PageSize) -> PageSpec {
+    match size {
+        PageSize::A4 => PageSpec {
+            size: PageSize::A4,
+            width_mm: 210.0,
+            height_mm: 297.0,
+            margin_l_mm: 38.0,
+            margin_t_mm: 24.0,
+            margin_r_mm: 17.0,
+            margin_b_mm: 24.0,
+            metrics: &FINAL_DRAFT_A4,
+            geometry: &FINAL_DRAFT_A4_GEOMETRY,
+        },
+        PageSize::UsLetter => PageSpec {
+            size: PageSize::UsLetter,
+            width_mm: 215.9,
+            height_mm: 279.4,
+            margin_l_mm: 38.1,
+            margin_t_mm: 23.0,
+            margin_r_mm: 25.4,
+            margin_b_mm: 23.0,
+            metrics: &FINAL_DRAFT_LETTER,
+            geometry: &FINAL_DRAFT_LETTER_GEOMETRY,
+        },
+    }
+}
 
 /// What kind of grid row a [`PlacedLine`] is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -666,5 +734,19 @@ mod tests {
         let rows = (text_h / ROW_MM).floor() as usize;
         assert_eq!(rows, 58, "A4 text area must hold 58 rows");
         assert!(FINAL_DRAFT_A4.lines_per_page <= rows);
+    }
+
+    #[test]
+    fn us_letter_grid_holds_55_lines_and_is_not_default() {
+        assert_eq!(PageSize::default(), PageSize::A4);
+        let spec = page_spec(PageSize::UsLetter);
+        let text_h = spec.height_mm - spec.margin_t_mm - spec.margin_b_mm;
+        let rows = (text_h / ROW_MM).floor() as usize;
+        assert_eq!(rows, 55, "US Letter text area must hold 55 rows");
+        assert_eq!(spec.metrics.lines_per_page, 55);
+        assert!(
+            (spec.width_mm - spec.margin_l_mm - spec.margin_r_mm - spec.geometry.text_w_mm).abs()
+                < 0.05
+        );
     }
 }

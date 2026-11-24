@@ -84,6 +84,11 @@ const SETTINGS_INDEX: &[SettingEntry] = &[
         keywords: "page face typeface courier new prime plex mono typography",
     },
     SettingEntry {
+        page: SettingsPage::Appearance,
+        title: "Page size",
+        keywords: "paper size a4 us letter format template dimensions",
+    },
+    SettingEntry {
         page: SettingsPage::Writing,
         title: "Show scene numbers",
         keywords: "margin numbering page",
@@ -270,6 +275,9 @@ pub struct AppSettings {
     pub theme: Theme,
     /// Face used for the page (editor and exported PDF).
     pub script_face: ScriptFace,
+    /// Paper size and template metrics for the editor and PDF export.
+    /// Defaults to A4; US Letter is opt-in.
+    pub page_size: scriptcraft_core::editing::PageSize,
     /// Keep the page white with black ink whatever the theme does. The rest
     /// of the UI keeps its palette, and revision marks stay coloured.
     pub paper_mono: bool,
@@ -302,6 +310,7 @@ impl Default for AppSettings {
             backups_dir: crate::app::default_backups_dir(),
             theme: Theme::Midnight,
             script_face: ScriptFace::default(),
+            page_size: scriptcraft_core::editing::PageSize::A4,
             paper_mono: false,
             show_scene_numbers: true,
             highlight_current_line: false,
@@ -321,6 +330,7 @@ impl Default for AppSettings {
 impl AppSettings {
     pub fn editor_options(&self) -> crate::script_view::EditorOptions {
         crate::script_view::EditorOptions {
+            page_size: self.page_size,
             show_scene_numbers: self.show_scene_numbers,
             highlight_current_line: self.highlight_current_line,
             capitalize_first_word: self.capitalize_first_word,
@@ -352,6 +362,10 @@ impl AppSettings {
                     "paper_mono" => s.paper_mono = v == "1",
                     "script_face" => {
                         s.script_face = ScriptFace::from_key(v).unwrap_or(s.script_face);
+                    }
+                    "page_size" => {
+                        s.page_size =
+                            scriptcraft_core::editing::PageSize::from_key(v).unwrap_or(s.page_size);
                     }
                     "show_scene_numbers" => s.show_scene_numbers = v != "0",
                     "highlight_current_line" => s.highlight_current_line = v == "1",
@@ -391,7 +405,7 @@ impl AppSettings {
         let _ = std::fs::create_dir_all(crate::app::config_dir());
         let text = format!(
             "autosave={}\nautosave_minutes={}\nbackups={}\nbackups_dir={}\ntheme={}\n\
-             script_face={}\npaper_mono={}\nshow_scene_numbers={}\nhighlight_current_line={}\ncapitalize_first_word={}\n\
+             script_face={}\npage_size={}\npaper_mono={}\nshow_scene_numbers={}\nhighlight_current_line={}\ncapitalize_first_word={}\n\
              correct_double_capitals={}\nreplace_three_dots={}\nsmart_quotes={}\nnavigator_preview={}\n\
              navigator_show_numbers={}\nspellcheck={}\nspell_language={}\nspell_ignore_caps={}\n",
             self.autosave as u8,
@@ -400,6 +414,7 @@ impl AppSettings {
             self.backups_dir,
             self.theme.key(),
             self.script_face.key(),
+            self.page_size.key(),
             self.paper_mono as u8,
             self.show_scene_numbers as u8,
             self.highlight_current_line as u8,
@@ -847,6 +862,39 @@ fn settings_appearance(ui: &mut Ui, settings: &mut AppSettings) -> (bool, bool, 
             );
         });
     }
+    ui.add_space(14.0);
+    ui.horizontal(|ui| {
+        ui.add_space(16.0);
+        ui.label("Page size:");
+        ui.add_space(6.0);
+        changed |= egui::ComboBox::from_id_salt("page_size")
+            .selected_text(settings.page_size.label())
+            .width(220.0)
+            .show_ui(ui, |ui| {
+                let mut picked = false;
+                for size in scriptcraft_core::editing::PageSize::ALL {
+                    picked |= ui
+                        .selectable_value(&mut settings.page_size, size, size.label())
+                        .changed();
+                }
+                picked
+            })
+            .inner
+            .unwrap_or(false);
+    });
+    ui.add_space(4.0);
+    ui.horizontal_wrapped(|ui| {
+        ui.add_space(16.0);
+        ui.label(
+            egui::RichText::new(
+                "A4 (58 lines/page) is the default. Switch to US Letter (55 lines/page, \
+                 Hollywood standard) for North American submissions; you can also override \
+                 the template per export.",
+            )
+            .size(11.0)
+            .color(kit().disabled_text),
+        );
+    });
     (changed, false, false)
 }
 

@@ -857,11 +857,17 @@ pub fn show(
 
             // Selection row: what is compared, how it is displayed, and how to
             // move through it.
+            let c = kit();
             ui.horizontal(|ui| {
-                ui.label(RichText::new("Base").small().color(kit().disabled_text));
+                ui.label(
+                    RichText::new("BASE")
+                        .size(10.5)
+                        .strong()
+                        .color(c.disabled_text),
+                );
                 let mut base = state.base;
                 egui::ComboBox::from_id_salt("compare_base")
-                    .width(190.0)
+                    .width(196.0)
                     .selected_text(history.sets.get(base).map(set_label).unwrap_or_default())
                     .show_ui(ui, |ui| {
                         for (index, set) in history.sets.iter().enumerate() {
@@ -871,10 +877,15 @@ pub fn show(
                 if base != state.base {
                     state.set_base(base, history);
                 }
-                ui.label(RichText::new("to").small().color(kit().disabled_text));
+                ui.label(
+                    RichText::new("TO")
+                        .size(10.5)
+                        .strong()
+                        .color(c.disabled_text),
+                );
                 let mut target = state.target;
                 egui::ComboBox::from_id_salt("compare_target")
-                    .width(180.0)
+                    .width(184.0)
                     .selected_text(target_label(target, history))
                     .show_ui(ui, |ui| {
                         ui.selectable_value(&mut target, CompareTarget::Current, "Current draft");
@@ -893,28 +904,33 @@ pub fn show(
                     state.set_target(target);
                 }
 
-                ui.add_space(4.0);
+                ui.add_space(6.0);
                 egui::Frame::new()
-                    .fill(kit().base)
-                    .stroke(Stroke::new(1.0_f32, kit().field_stroke))
+                    .fill(c.surface)
+                    .stroke(Stroke::new(1.0_f32, c.sep))
                     .corner_radius(7)
                     .inner_margin(egui::Margin::same(2))
                     .show(ui, |ui| {
                         ui.spacing_mut().item_spacing.x = 2.0;
-                        if ui
-                            .selectable_label(state.view == CompareView::Unified, "Unified")
-                            .clicked()
-                        {
-                            state.set_view(CompareView::Unified);
-                        }
-                        if ui
-                            .selectable_label(
-                                state.view == CompareView::SideBySide,
-                                "Side by side",
+                        for (mode, label) in [
+                            (CompareView::Unified, "Unified"),
+                            (CompareView::SideBySide, "Side by side"),
+                        ] {
+                            let active = state.view == mode;
+                            let btn = egui::Button::new(
+                                RichText::new(label)
+                                    .size(12.0)
+                                    .color(if active { c.accent_text } else { c.text }),
                             )
-                            .clicked()
-                        {
-                            state.set_view(CompareView::SideBySide);
+                            .fill(if active {
+                                c.accent_soft
+                            } else {
+                                Color32::TRANSPARENT
+                            })
+                            .stroke(Stroke::NONE);
+                            if ui.add(btn).clicked() {
+                                state.set_view(mode);
+                            }
                         }
                     });
 
@@ -930,10 +946,17 @@ pub fn show(
 
                 ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                     let can_jump = state.selected.is_some();
-                    if ui
-                        .add_enabled(can_jump, egui::Button::new("Open in editor"))
-                        .clicked()
-                    {
+                    let open_btn = if can_jump {
+                        egui::Button::new(
+                            RichText::new("Open in editor")
+                                .strong()
+                                .color(crate::theme::ink_on_accent(c.accent)),
+                        )
+                        .fill(c.accent)
+                    } else {
+                        egui::Button::new("Open in editor")
+                    };
+                    if ui.add_enabled(can_jump, open_btn).clicked() {
                         if let Some(block) = state.jump_block(project) {
                             action = CompareAction::Jump(block);
                         }
@@ -1083,15 +1106,31 @@ pub fn show(
                             .inner_margin(egui::Margin::symmetric(8, 5))
                             .show(ui, |ui| {
                                 let header = collapsing.show_header(ui, |ui| {
-                                    scene_badge(ui, &scene_number(group, scene_count));
-                                    ui.add_space(2.0);
-                                    ui.label(RichText::new(scene_heading(group)).small().strong());
                                     ui.with_layout(
                                         egui::Layout::right_to_left(Align::Center),
                                         |ui| {
                                             scene_count_label(ui, group.changed, DiffKind::Changed);
                                             scene_count_label(ui, group.removed, DiffKind::Removed);
                                             scene_count_label(ui, group.added, DiffKind::Added);
+                                            ui.add_space(4.0);
+                                            ui.with_layout(
+                                                egui::Layout::left_to_right(Align::Center),
+                                                |ui| {
+                                                    scene_badge(
+                                                        ui,
+                                                        &scene_number(group, scene_count),
+                                                    );
+                                                    ui.add_space(2.0);
+                                                    ui.add(
+                                                        Label::new(
+                                                            RichText::new(scene_heading(group))
+                                                                .small()
+                                                                .strong(),
+                                                        )
+                                                        .truncate(),
+                                                    );
+                                                },
+                                            );
                                         },
                                     );
                                 });

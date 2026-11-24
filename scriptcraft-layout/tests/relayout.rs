@@ -56,6 +56,7 @@ fn hint_for(cmd: &EditCommand) -> (usize, Option<usize>) {
         EditCommand::SetText { bi, .. } => (bi, Some(bi)),
         EditCommand::SetType { bi, .. } => (bi, None),
         EditCommand::SetDual { bi, .. } => (bi, None),
+        EditCommand::SetStyles { bi, .. } => (bi, Some(bi)),
         EditCommand::SplitBlock { at, .. } => (at.bi, None),
         EditCommand::MergeBlocks { bi, .. } => (bi, None),
         EditCommand::InsertBlock { at, .. } => (at.saturating_sub(1), None),

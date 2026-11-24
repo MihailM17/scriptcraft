@@ -201,6 +201,7 @@ fn revision_to_script(b: &RevisionBlock) -> ScriptBlock {
         element_type: b.element_type,
         text: b.text.clone(),
         dual: None,
+        styles: Vec::new(),
     }
 }
 

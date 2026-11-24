@@ -21,8 +21,10 @@ fn main() {
     let fonts = pdf::ExportFonts {
         regular: &read("CourierPrime-Regular.ttf"),
         bold: &read("CourierPrime-Bold.ttf"),
+        italic: Some(&read("CourierPrime-Italic.ttf")),
         fallback_regular: &read("IBMPlexMono-Regular.ttf"),
         fallback_bold: &read("IBMPlexMono-Bold.ttf"),
+        fallback_italic: Some(&read("LiberationMono-Italic.ttf")),
     };
     let mut opts = pdf::ExportOptions::default();
     if args.iter().any(|a| a == "--no-title") {

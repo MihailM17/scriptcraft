@@ -20,13 +20,14 @@ use eframe::egui;
 use scriptcraft_core::edit::{char_index, clamp_pos, pos_at_char, EditCommand, History, Pos};
 use scriptcraft_core::editing::{
     auto_upper, candidates, complete_at, complete_line_at, enter_next, same_name,
-    script_characters, tab_next, tab_prev, TemplateMetrics,
+    script_characters, tab_next, tab_prev, PageSize, TemplateMetrics,
 };
-use scriptcraft_core::model::{ElementType, ScriptBlock};
+use scriptcraft_core::model::{ElementType, InlineStyle, ScriptBlock};
 use scriptcraft_core::revision::RevisionColor;
 use scriptcraft_layout::pdf::{REVISION_BAR_W_MM, REVISION_BAR_X_MM};
 use scriptcraft_layout::place::{
-    self, DocLayout, LineRole, PageLayout, PlacedLine, FINAL_DRAFT_A4_GEOMETRY, MM_PER_CELL, ROW_MM,
+    self, page_spec, DocLayout, LineRole, PageLayout, PageSpec, PlacedLine,
+    FINAL_DRAFT_A4_GEOMETRY, MM_PER_CELL, ROW_MM,
 };
 
 use crate::app::{bold_mono, italic_mono, MONO};
@@ -36,36 +37,57 @@ use crate::theme::{kit, paint_page, paint_revision, KitColors};
 /// Russian template's text column exactly A4 width at 72 dpi.
 pub const PT_PER_MM: f32 = 72.0 / 25.4;
 
-/// Template margins in mm: left / top / right / bottom of the A4 page, as
-/// KIT's default export template stores them.
-const PAD_L_MM: f32 = 38.0;
+/// Default A4 margins in mm (kept for unit tests and A4 helpers).
+#[cfg(test)]
 const PAD_T_MM: f32 = 24.0;
-const PAD_R_MM: f32 = 17.0;
 
-/// Page size in egui points at the given zoom.
+/// Page size in egui points at the given zoom for the chosen [`PageSize`].
+pub fn page_size_pt_for(page_size: PageSize, zoom: f32) -> egui::Vec2 {
+    let spec = page_spec(page_size);
+    egui::vec2(
+        spec.width_mm * PT_PER_MM * zoom,
+        spec.height_mm * PT_PER_MM * zoom,
+    )
+}
+
+/// A4 page size in egui points at the given zoom.
 pub fn page_size_pt(zoom: f32) -> egui::Vec2 {
-    egui::vec2(210.0 * PT_PER_MM * zoom, 297.0 * PT_PER_MM * zoom)
+    page_size_pt_for(PageSize::A4, zoom)
 }
 
 /// Scroll-content paddings around the page stack, at zoom 1.0.
 const VIEW_TOP_PAD_PT: f32 = 22.0;
 const VIEW_BOTTOM_PAD_PT: f32 = 24.0;
 
-/// Zoom at which a whole A4 page (plus the view's top/bottom padding) fits
-/// into `avail` (points). Used by View ▸ Fit Page.
-pub fn fit_page_zoom(avail: egui::Vec2) -> f32 {
-    let z = (avail.y - 8.0) / (page_size_pt(1.0).y + VIEW_TOP_PAD_PT + VIEW_BOTTOM_PAD_PT);
+/// Zoom at which a whole page of `page_size` (plus the view's top/bottom
+/// padding) fits into `avail` (points). Used by View ▸ Fit Page.
+pub fn fit_page_zoom_for(page_size: PageSize, avail: egui::Vec2) -> f32 {
+    let z = (avail.y - 8.0)
+        / (page_size_pt_for(page_size, 1.0).y + VIEW_TOP_PAD_PT + VIEW_BOTTOM_PAD_PT);
     z.clamp(0.25, 4.0)
+}
+
+/// Zoom at which a whole A4 page fits into `avail`.
+#[allow(dead_code)]
+pub fn fit_page_zoom(avail: egui::Vec2) -> f32 {
+    fit_page_zoom_for(PageSize::A4, avail)
 }
 
 /// Zoom at which the page width spans `avail` (points, scrollbar slack
 /// included). Used by View ▸ Fit Width.
-pub fn fit_width_zoom(avail: egui::Vec2) -> f32 {
-    let z = (avail.x - 16.0) / page_size_pt(1.0).x;
+pub fn fit_width_zoom_for(page_size: PageSize, avail: egui::Vec2) -> f32 {
+    let z = (avail.x - 16.0) / page_size_pt_for(page_size, 1.0).x;
     z.clamp(0.25, 4.0)
 }
 
+/// Zoom at which an A4 page width spans `avail`.
+#[allow(dead_code)]
+pub fn fit_width_zoom(avail: egui::Vec2) -> f32 {
+    fit_width_zoom_for(PageSize::A4, avail)
+}
+
 /// Paginate and place a whole document (no zoom input by design).
+#[allow(dead_code)]
 pub fn document_layout(
     blocks: &[ScriptBlock],
     m: &TemplateMetrics,
@@ -74,7 +96,19 @@ pub fn document_layout(
     place::layout(blocks, m, &FINAL_DRAFT_A4_GEOMETRY, scene_labels)
 }
 
-/// [`document_layout`] with production page locks.
+/// [`document_layout`] with production page locks and explicit [`PageSize`].
+pub fn document_layout_for(
+    blocks: &[ScriptBlock],
+    page_size: PageSize,
+    scene_labels: &[String],
+    page_lock: Option<&scriptcraft_core::page_lock::PageLock>,
+) -> DocLayout {
+    let spec = page_spec(page_size);
+    place::layout_with_page_lock(blocks, spec.metrics, spec.geometry, scene_labels, page_lock)
+}
+
+/// [`document_layout`] with production page locks (A4).
+#[allow(dead_code)]
 pub fn document_layout_with_page_lock(
     blocks: &[ScriptBlock],
     m: &TemplateMetrics,
@@ -182,6 +216,7 @@ pub struct EditState {
 /// KIT Scenario Editor preferences that change typing or painting.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EditorOptions {
+    pub page_size: PageSize,
     pub show_scene_numbers: bool,
     pub highlight_current_line: bool,
     pub capitalize_first_word: bool,
@@ -193,6 +228,7 @@ pub struct EditorOptions {
 impl Default for EditorOptions {
     fn default() -> Self {
         Self {
+            page_size: PageSize::A4,
             show_scene_numbers: true,
             highlight_current_line: false,
             capitalize_first_word: false,
@@ -250,7 +286,8 @@ pub fn script_view(
         paper_mono,
         picker_characters,
     } = style;
-    let page = page_size_pt(zoom);
+    let spec = page_spec(options.page_size);
+    let page = page_size_pt_for(options.page_size, zoom);
     let scale = PT_PER_MM * zoom;
     let body = 12.0 * zoom;
     let row_h = ROW_MM * scale;
@@ -276,6 +313,7 @@ pub fn script_view(
                 zoom,
                 anchor,
                 view_rect,
+                options.page_size,
             ));
         }
     }
@@ -389,7 +427,7 @@ pub fn script_view(
                 caret_moved = true;
                 let anchor = state.press_pos.or_else(|| resp.interact_pointer_pos());
                 if let Some(p) = anchor {
-                    if let Some(at) = hit_test(doc, &page_rects, scale, row_h, cell_w, p) {
+                    if let Some(at) = hit_test(doc, &page_rects, spec, scale, row_h, cell_w, p) {
                         if triple {
                             // Whole paragraph, like every text editor.
                             let len = paragraph_len(ed.blocks(), at.bi, at.para);
@@ -419,7 +457,7 @@ pub fn script_view(
                     .or_else(|| ui.input(|i| i.pointer.press_origin()))
                     .or_else(|| resp.interact_pointer_pos());
                 if let Some(p) = origin {
-                    if let Some(at) = hit_test(doc, &page_rects, scale, row_h, cell_w, p) {
+                    if let Some(at) = hit_test(doc, &page_rects, spec, scale, row_h, cell_w, p) {
                         ed.set_selection(at, at);
                     }
                 }
@@ -427,7 +465,7 @@ pub fn script_view(
             if resp.dragged() {
                 caret_moved = true;
                 if let Some(p) = resp.interact_pointer_pos() {
-                    if let Some(at) = hit_test(doc, &page_rects, scale, row_h, cell_w, p) {
+                    if let Some(at) = hit_test(doc, &page_rects, spec, scale, row_h, cell_w, p) {
                         let anchor = ed.sel.map_or(at, |s| s.anchor);
                         ed.set_selection(anchor, at);
                         ed.scroll = true;
@@ -473,8 +511,8 @@ pub fn script_view(
             .filter(|s| s.anchor != s.focus)
             .map(|s| s.sorted());
         let caret_at = state.selection.map(|s| s.focus);
-        let caret_geo =
-            caret_at.and_then(|at| caret_geometry(doc, &page_rects, scale, row_h, cell_w, at));
+        let caret_geo = caret_at
+            .and_then(|at| caret_geometry(doc, &page_rects, spec, scale, row_h, cell_w, at));
         state.caret_rect = if focused {
             caret_geo.map(|(_, _, r)| r)
         } else {
@@ -531,19 +569,24 @@ pub fn script_view(
                 continue;
             }
             paint_page(painter, prect, paper_mono);
-            paint_page_number(painter, prect, page_lay, body, row_h, scale, paper_mono);
+            paint_page_number(
+                painter, prect, page_lay, spec, body, row_h, scale, paper_mono,
+            );
             if focused && options.highlight_current_line {
                 if let Some((cpi, page_rect, caret)) = caret_geo {
                     if cpi == pi {
                         let band = egui::Rect::from_min_max(
-                            egui::pos2(page_rect.left() + PAD_L_MM * scale, caret.top()),
-                            egui::pos2(page_rect.right() - PAD_R_MM * scale, caret.top() + row_h),
+                            egui::pos2(page_rect.left() + spec.margin_l_mm * scale, caret.top()),
+                            egui::pos2(
+                                page_rect.right() - spec.margin_r_mm * scale,
+                                caret.top() + row_h,
+                            ),
                         );
                         painter.rect_filled(band, 2.0, line_band);
                     }
                 }
             }
-            let content_top = prect.top() + PAD_T_MM * scale;
+            let content_top = prect.top() + spec.margin_t_mm * scale;
             for line in &page_lay.lines {
                 if line.role == LineRole::SceneNumber && !options.show_scene_numbers {
                     continue;
@@ -551,7 +594,7 @@ pub fn script_view(
                 let y = content_top + line.row as f32 * row_h;
                 if let Some((a, f)) = selection {
                     if let Some((c0, c1)) = selection_columns(line, a, f) {
-                        let x0 = line_origin_x(prect, line, scale, cell_w);
+                        let x0 = line_origin_x(prect, spec, line, scale, cell_w);
                         let highlight = egui::Rect::from_min_size(
                             egui::pos2(x0 + c0 as f32 * cell_w, y),
                             egui::vec2((c1 - c0) as f32 * cell_w, row_h),
@@ -563,6 +606,7 @@ pub fn script_view(
                     .source_bi
                     .and_then(|bi| revision_colors.get(bi).copied().flatten());
                 let paint = LinePaint {
+                    spec,
                     body,
                     scale,
                     row_h,
@@ -593,7 +637,9 @@ pub fn script_view(
         if resp.secondary_clicked() {
             state.spell_menu = resp
                 .interact_pointer_pos()
-                .and_then(|p| hit_test(doc, &page_rects, scale, row_h, cell_w, p).map(|at| (at, p)))
+                .and_then(|p| {
+                    hit_test(doc, &page_rects, spec, scale, row_h, cell_w, p).map(|at| (at, p))
+                })
                 .and_then(|(at, p)| {
                     let text = blocks.get(at.bi)?.text.split('\n').nth(at.para)?;
                     let token = crate::spell::word_at(text, at.ch)?;
@@ -738,10 +784,11 @@ fn anchored_scroll_offset(
     new_zoom: f32,
     anchor: egui::Pos2,
     viewport: egui::Rect,
+    page_size: PageSize,
 ) -> egui::Vec2 {
     let a = anchor - viewport.min;
-    let prev_page = page_size_pt(prev_zoom);
-    let new_page = page_size_pt(new_zoom);
+    let prev_page = page_size_pt_for(page_size, prev_zoom);
+    let new_page = page_size_pt_for(page_size, new_zoom);
     let prev_left = (viewport.width().max(prev_page.x + 2.0) - prev_page.x) * 0.5;
     let new_left = (viewport.width().max(new_page.x + 2.0) - new_page.x) * 0.5;
     // Page-space coordinates (zoom 1.0) under the anchor.
@@ -850,6 +897,23 @@ fn handle_events(
                     }
                     caret_moved = true;
                     continue;
+                }
+                // Inline bold / italic / underline shortcuts (Cmd/Ctrl+B/I/U).
+                if modifiers.command && !modifiers.shift && !modifiers.alt {
+                    let style = match key {
+                        egui::Key::B => Some(InlineStyle::Bold),
+                        egui::Key::I => Some(InlineStyle::Italic),
+                        egui::Key::U => Some(InlineStyle::Underline),
+                        _ => None,
+                    };
+                    if let (Some(style), Some(sel)) = (style, ed.sel) {
+                        let cmds = toggle_inline_style(ed.blocks(), sel, style);
+                        if !cmds.is_empty() {
+                            ed.press(cmds);
+                            text_edited = true;
+                        }
+                        continue;
+                    }
                 }
                 // Tab in an empty character cue asks which character speaks
                 // instead of cycling the element type: the writer picks a
@@ -2228,8 +2292,14 @@ fn caret_line_index(lines: &[&PlacedLine], caret: Pos) -> Option<usize> {
 }
 
 /// Horizontal origin (left edge of the first character) of a placed line.
-fn line_origin_x(prect: egui::Rect, line: &PlacedLine, scale: f32, cell_w: f32) -> f32 {
-    let anchor = prect.left() + PAD_L_MM * scale + line.x_mm * scale;
+fn line_origin_x(
+    prect: egui::Rect,
+    spec: PageSpec,
+    line: &PlacedLine,
+    scale: f32,
+    cell_w: f32,
+) -> f32 {
+    let anchor = prect.left() + spec.margin_l_mm * scale + line.x_mm * scale;
     if line.right_aligned {
         let len = display_len(line);
         anchor - len as f32 * cell_w
@@ -2249,6 +2319,7 @@ pub fn char_point(
     cell_w: f32,
     at: Pos,
 ) -> Option<egui::Pos2> {
+    let spec = page_spec(PageSize::A4);
     for (pi, page) in doc.pages.iter().enumerate() {
         for line in &page.lines {
             let Some(span) = line.span else {
@@ -2256,9 +2327,10 @@ pub fn char_point(
             };
             if span.bi == at.bi && span.para == at.para && span.start <= at.ch && at.ch < span.end {
                 let prect = *page_rects.get(pi)?;
-                let origin = line_origin_x(prect, line, scale, cell_w);
+                let origin = line_origin_x(prect, spec, line, scale, cell_w);
                 let x = origin + display_col(line, at.ch) as f32 * cell_w + cell_w * 0.5;
-                let y = prect.top() + PAD_T_MM * scale + line.row as f32 * row_h + row_h * 0.5;
+                let y =
+                    prect.top() + spec.margin_t_mm * scale + line.row as f32 * row_h + row_h * 0.5;
                 return Some(egui::pos2(x, y));
             }
         }
@@ -2281,14 +2353,16 @@ pub fn display_point(
     para: usize,
     col: usize,
 ) -> Option<egui::Pos2> {
+    let spec = page_spec(PageSize::A4);
     for (pi, page) in doc.pages.iter().enumerate() {
         for line in &page.lines {
             let Some(span) = line.span else { continue };
             if span.bi == bi && span.para == para && col < display_len(line) {
                 let prect = *page_rects.get(pi)?;
-                let origin = line_origin_x(prect, line, scale, cell_w);
+                let origin = line_origin_x(prect, spec, line, scale, cell_w);
                 let x = origin + col as f32 * cell_w + cell_w * 0.5;
-                let y = prect.top() + PAD_T_MM * scale + line.row as f32 * row_h + row_h * 0.5;
+                let y =
+                    prect.top() + spec.margin_t_mm * scale + line.row as f32 * row_h + row_h * 0.5;
                 return Some(egui::pos2(x, y));
             }
         }
@@ -2337,9 +2411,11 @@ fn word_bounds_at(blocks: &[ScriptBlock], at: Pos) -> Option<(usize, usize)> {
 }
 
 /// Map a pointer position to a caret position (nearest body line and cell).
+#[allow(clippy::too_many_arguments)]
 fn hit_test(
     doc: &DocLayout,
     page_rects: &[egui::Rect],
+    spec: PageSpec,
     scale: f32,
     row_h: f32,
     cell_w: f32,
@@ -2363,7 +2439,7 @@ fn hit_test(
         .min_by(|(_, a), (_, b)| dist(a).total_cmp(&dist(b)))
         .map(|(i, _)| i)?;
     let prect = page_rects[pi];
-    let content_top = prect.top() + PAD_T_MM * scale;
+    let content_top = prect.top() + spec.margin_t_mm * scale;
     let row = (((pos.y - content_top) / row_h).floor()).max(0.0) as usize;
     if let Some(line) = doc.pages[pi]
         .lines
@@ -2371,7 +2447,7 @@ fn hit_test(
         .filter(|l| l.role == LineRole::Body && l.span.is_some())
         .min_by_key(|l| l.row.abs_diff(row))
     {
-        return position_in_line(line, prect, scale, cell_w, pos.x);
+        return position_in_line(line, prect, spec, scale, cell_w, pos.x);
     }
     // Empty page (only synthetic rows): use the next page's first body line,
     // else the previous page's last one.
@@ -2410,13 +2486,14 @@ fn hit_test(
 fn position_in_line(
     line: &PlacedLine,
     prect: egui::Rect,
+    spec: PageSpec,
     scale: f32,
     cell_w: f32,
     x: f32,
 ) -> Option<Pos> {
     let span = line.span?;
     let len = display_len(line);
-    let origin = line_origin_x(prect, line, scale, cell_w);
+    let origin = line_origin_x(prect, spec, line, scale, cell_w);
     let col = ((x - origin) / cell_w).round().clamp(0.0, len as f32) as usize;
     Some(Pos {
         bi: span.bi,
@@ -2426,9 +2503,11 @@ fn position_in_line(
 }
 
 /// Screen rectangle of the caret plus its page (caret, page, page index).
+#[allow(clippy::too_many_arguments)]
 fn caret_geometry(
     doc: &DocLayout,
     page_rects: &[egui::Rect],
+    spec: PageSpec,
     scale: f32,
     row_h: f32,
     cell_w: f32,
@@ -2447,8 +2526,8 @@ fn caret_geometry(
     let (pi, line) = found?;
     let prect = *page_rects.get(pi)?;
     let col = display_col(line, at.ch);
-    let x = line_origin_x(prect, line, scale, cell_w) + col as f32 * cell_w;
-    let y = prect.top() + PAD_T_MM * scale + line.row as f32 * row_h;
+    let x = line_origin_x(prect, spec, line, scale, cell_w) + col as f32 * cell_w;
+    let y = prect.top() + spec.margin_t_mm * scale + line.row as f32 * row_h;
     let caret = egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(2.0, row_h));
     Some((pi, prect, caret))
 }
@@ -2459,6 +2538,7 @@ fn paint_page_number(
     painter: &egui::Painter,
     prect: egui::Rect,
     page: &PageLayout,
+    spec: PageSpec,
     body: f32,
     row_h: f32,
     scale: f32,
@@ -2469,8 +2549,8 @@ fn paint_page_number(
     };
     painter.text(
         egui::pos2(
-            prect.right() - PAD_R_MM * scale,
-            prect.top() + PAD_T_MM * scale - row_h * 0.4,
+            prect.right() - spec.margin_r_mm * scale,
+            prect.top() + spec.margin_t_mm * scale - row_h * 0.4,
         ),
         egui::Align2::RIGHT_BOTTOM,
         format!("{n}."),
@@ -2485,11 +2565,125 @@ fn paint_page_number(
 
 #[derive(Clone, Copy)]
 struct LinePaint {
+    spec: PageSpec,
     body: f32,
     scale: f32,
     row_h: f32,
     revision: Option<RevisionColor>,
     paper_mono: bool,
+}
+
+/// Resolve the per-block char ranges affected by toggling an inline style for
+/// `sel`: a non-empty selection uses its exact span(s); a collapsed caret
+/// targets the word under the caret.
+fn style_target_ranges(blocks: &[ScriptBlock], sel: Selection) -> Vec<(usize, usize, usize)> {
+    let (a, f) = sel.sorted();
+    if a == f {
+        let Some((ws, we)) = word_bounds_at(blocks, a) else {
+            return Vec::new();
+        };
+        let Some(b) = blocks.get(a.bi) else {
+            return Vec::new();
+        };
+        let s = char_index(&b.text, Pos { ch: ws, ..a });
+        let e = char_index(&b.text, Pos { ch: we, ..a });
+        return if s < e {
+            vec![(a.bi, s, e)]
+        } else {
+            Vec::new()
+        };
+    }
+    let mut out = Vec::new();
+    for bi in a.bi..=f.bi {
+        let Some(b) = blocks.get(bi) else {
+            continue;
+        };
+        let len = b.text.chars().count();
+        let s = if bi == a.bi {
+            char_index(&b.text, a)
+        } else {
+            0
+        };
+        let e = if bi == f.bi {
+            char_index(&b.text, f)
+        } else {
+            len
+        };
+        if s < e {
+            out.push((bi, s, e));
+        }
+    }
+    out
+}
+
+/// Build undoable [`EditCommand::SetStyles`] commands that toggle `style`
+/// across the active selection (or the word under a collapsed caret).
+pub fn toggle_inline_style(
+    blocks: &[ScriptBlock],
+    sel: Selection,
+    style: InlineStyle,
+) -> Vec<EditCommand> {
+    let ranges = style_target_ranges(blocks, sel);
+    if ranges.is_empty() {
+        return Vec::new();
+    }
+    let all_have = ranges
+        .iter()
+        .all(|&(bi, s, e)| blocks[bi].has_style_over(s, e, style));
+    let mut cmds = Vec::with_capacity(ranges.len());
+    for (bi, s, e) in ranges {
+        let b = &blocks[bi];
+        let next = if all_have {
+            // Remove `style` over `[s, e)` (guaranteed covered when `all_have`).
+            b.toggle_style_range(s, e, style)
+        } else if b.has_style_over(s, e, style) {
+            continue;
+        } else {
+            b.toggle_style_range(s, e, style)
+        };
+        if next != b.styles {
+            cmds.push(EditCommand::SetStyles { bi, styles: next });
+        }
+    }
+    cmds
+}
+
+/// Active `(bold, italic, underline)` indicator for the Script toolbar based
+/// on the current selection or caret word.
+pub fn active_inline_styles(blocks: &[ScriptBlock], sel: Option<Selection>) -> (bool, bool, bool) {
+    let Some(sel) = sel else {
+        return (false, false, false);
+    };
+    let ranges = style_target_ranges(blocks, sel);
+    if ranges.is_empty() {
+        let at = sel.focus;
+        let Some(b) = blocks.get(at.bi) else {
+            return (false, false, false);
+        };
+        let abs = char_index(&b.text, at);
+        return b.styles_at(abs.saturating_sub(1));
+    }
+    let check = |style: InlineStyle| {
+        ranges
+            .iter()
+            .all(|&(bi, s, e)| blocks[bi].has_style_over(s, e, style))
+    };
+    (
+        check(InlineStyle::Bold),
+        check(InlineStyle::Italic),
+        check(InlineStyle::Underline),
+    )
+}
+
+fn para_char_offset(text: &str, para: usize) -> usize {
+    let mut off = 0usize;
+    for (i, p) in text.split('\n').enumerate() {
+        if i == para {
+            return off;
+        }
+        off += p.chars().count() + 1;
+    }
+    off
 }
 
 fn paint_line(
@@ -2500,6 +2694,7 @@ fn paint_line(
     paint: LinePaint,
 ) {
     let LinePaint {
+        spec,
         body,
         scale,
         row_h,
@@ -2507,20 +2702,10 @@ fn paint_line(
         paper_mono,
     } = paint;
     let c = kit();
-    let family = if line.bold {
-        bold_mono()
-    } else if line.italic {
-        italic_mono()
-    } else {
-        MONO
-    };
-    let font = egui::FontId::new(body, family);
     let color = line_color(line, blocks, &c, paper_mono);
     let cell = MM_PER_CELL * scale;
-    let galley = line_galley(painter, &line.text, font, color, cell);
-    let size = galley.size();
-    let x = prect.left() + PAD_L_MM * scale + line.x_mm * scale;
-    let y = prect.top() + PAD_T_MM * scale + line.row as f32 * row_h;
+    let x = prect.left() + spec.margin_l_mm * scale + line.x_mm * scale;
+    let y = prect.top() + spec.margin_t_mm * scale + line.row as f32 * row_h;
     if matches!(line.role, LineRole::Body | LineRole::Omitted) {
         if let Some(revision) = revision {
             let mark = egui::Rect::from_min_size(
@@ -2530,6 +2715,86 @@ fn paint_line(
             paint_revision(painter, mark, revision, 0.0);
         }
     }
+    let styled_block = line.span.and_then(|sp| {
+        blocks
+            .get(sp.bi)
+            .filter(|b| !b.styles.is_empty())
+            .map(|b| (sp, b))
+    });
+    if let Some((span, block)) = styled_block {
+        if !line.text.is_empty() {
+            let para_off = para_char_offset(&block.text, span.para);
+            let total_cols = line.text.chars().count();
+            let total_w = total_cols as f32 * cell;
+            let base_x = if line.right_aligned { x - total_w } else { x };
+            // Partition display characters into uniform-style runs.
+            let mut runs: Vec<(usize, usize, String, bool, bool, bool)> = Vec::new();
+            let mut cur_start = 0usize;
+            let mut cur_text = String::new();
+            let mut cur_flags: Option<(bool, bool, bool)> = None;
+            for (ci, ch) in line.text.chars().enumerate() {
+                let src_in_para = line.cols.get(ci).copied().unwrap_or(span.start + ci);
+                let (sb, si, su) = block.styles_at(para_off + src_in_para);
+                let flags = (line.bold || sb, line.italic || si, su);
+                if cur_flags == Some(flags) {
+                    cur_text.push(ch);
+                } else {
+                    if let Some((b, i, u)) = cur_flags {
+                        runs.push((cur_start, ci, std::mem::take(&mut cur_text), b, i, u));
+                    }
+                    cur_start = ci;
+                    cur_text.push(ch);
+                    cur_flags = Some(flags);
+                }
+            }
+            if let Some((b, i, u)) = cur_flags {
+                runs.push((cur_start, total_cols, cur_text, b, i, u));
+            }
+            let underline_y = y + row_h * 0.78;
+            let underline_w = (1.0 * body / 12.0).max(0.8);
+            let bold_italic_nudge = 0.45 * (body / 12.0);
+            for (c0, c1, seg, b, i, u) in runs {
+                let family = if i {
+                    italic_mono()
+                } else if b {
+                    bold_mono()
+                } else {
+                    MONO
+                };
+                let font = egui::FontId::new(body, family);
+                let galley = line_galley(painter, &seg, font, color, cell);
+                let seg_x = base_x + c0 as f32 * cell;
+                if b && i {
+                    painter.galley(
+                        egui::pos2(seg_x + bold_italic_nudge, y),
+                        galley.clone(),
+                        color,
+                    );
+                }
+                painter.galley(egui::pos2(seg_x, y), galley, color);
+                if u {
+                    painter.line_segment(
+                        [
+                            egui::pos2(seg_x, underline_y),
+                            egui::pos2(base_x + c1 as f32 * cell, underline_y),
+                        ],
+                        egui::Stroke::new(underline_w, color),
+                    );
+                }
+            }
+            return;
+        }
+    }
+    let family = if line.bold {
+        bold_mono()
+    } else if line.italic {
+        italic_mono()
+    } else {
+        MONO
+    };
+    let font = egui::FontId::new(body, family);
+    let galley = line_galley(painter, &line.text, font, color, cell);
+    let size = galley.size();
     let pos = match line.role {
         // Hanging scene number: right-aligned in the margin, centered on
         // its heading row like the old editor.
@@ -2570,8 +2835,8 @@ fn paint_spelling(
         return;
     }
     let color = kit().spell_error;
-    let origin = line_origin_x(prect, line, paint.scale, cell_w);
-    let y = prect.top() + PAD_T_MM * paint.scale + line.row as f32 * paint.row_h;
+    let origin = line_origin_x(prect, paint.spec, line, paint.scale, cell_w);
+    let y = prect.top() + paint.spec.margin_t_mm * paint.scale + line.row as f32 * paint.row_h;
     let underline_y = y + paint.row_h * 0.82;
     for mark in marks {
         let c0 = mark.start.max(span.start);
@@ -2855,7 +3120,7 @@ mod tests {
         let a = anchor - viewport.min;
         // Scrolled down to page 1 at 100%; zoom in about the pointer.
         let prev_offset = egui::vec2(0.0, 300.0);
-        let new = anchored_scroll_offset(prev_offset, 1.0, 2.0, anchor, viewport);
+        let new = anchored_scroll_offset(prev_offset, 1.0, 2.0, anchor, viewport, PageSize::A4);
         let prev_page = page_size_pt(1.0);
         let new_page = page_size_pt(2.0);
         let prev_left = (viewport.width().max(prev_page.x + 2.0) - prev_page.x) * 0.5;
@@ -2869,7 +3134,7 @@ mod tests {
 
         // Zooming out from an overflowing page recenters it (offset clamps
         // to zero) instead of leaving a negative scroll.
-        let out = anchored_scroll_offset(new, 2.0, 1.0, anchor, viewport);
+        let out = anchored_scroll_offset(new, 2.0, 1.0, anchor, viewport, PageSize::A4);
         assert!(out.x >= 0.0 && out.y >= 0.0);
     }
 
@@ -3145,12 +3410,14 @@ mod tests {
         let rects: Vec<egui::Rect> = vec![egui::Rect::from_min_size(egui::Pos2::ZERO, page_pt)];
         let line = body_lines(&doc)[0];
         let span = line.span.unwrap();
-        let origin = line_origin_x(rects[0], line, scale, cell_w);
+        let spec = page_spec(PageSize::A4);
+        let origin = line_origin_x(rects[0], spec, line, scale, cell_w);
         let prect = rects[0];
         let y = prect.top() + PAD_T_MM * scale + line.row as f32 * row_h + row_h * 0.5;
         let at = hit_test(
             &doc,
             &rects,
+            spec,
             scale,
             row_h,
             cell_w,
@@ -3201,12 +3468,14 @@ mod tests {
         )];
         let line = body_lines(&doc)[0];
         assert_eq!(line.text, "alpha    beta gamma");
-        let origin = line_origin_x(rects[0], line, scale, cell_w);
+        let spec = page_spec(PageSize::A4);
+        let origin = line_origin_x(rects[0], spec, line, scale, cell_w);
         let y = rects[0].top() + PAD_T_MM * scale + line.row as f32 * row_h + row_h * 0.5;
         let click = |col: f32| {
             hit_test(
                 &doc,
                 &rects,
+                spec,
                 scale,
                 row_h,
                 cell_w,

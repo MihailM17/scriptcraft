@@ -23,8 +23,10 @@ fn plex_primary_exports_the_same_page_count_and_both_scripts() {
     let fonts = pdf::ExportFonts {
         regular: &read("IBMPlexMono-Regular.ttf"),
         bold: &read("IBMPlexMono-Bold.ttf"),
+        italic: Some(&read("CourierPrime-Italic.ttf")),
         fallback_regular: &read("CourierPrime-Regular.ttf"),
         fallback_bold: &read("CourierPrime-Bold.ttf"),
+        fallback_italic: Some(&read("LiberationMono-Italic.ttf")),
     };
     let meta = kitsp::load_metadata(FIXTURE).expect("load metadata");
     let opts = pdf::ExportOptions::default();
@@ -59,8 +61,10 @@ fn a95_exports_valid_pdf() {
     let fonts = pdf::ExportFonts {
         regular: &read("CourierPrime-Regular.ttf"),
         bold: &read("CourierPrime-Bold.ttf"),
+        italic: Some(&read("CourierPrime-Italic.ttf")),
         fallback_regular: &read("IBMPlexMono-Regular.ttf"),
         fallback_bold: &read("IBMPlexMono-Bold.ttf"),
+        fallback_italic: Some(&read("LiberationMono-Italic.ttf")),
     };
     let meta = kitsp::load_metadata(FIXTURE).expect("load metadata");
     let bytes =
@@ -210,8 +214,10 @@ fn title_page_preview_matches_exported_first_page() {
     let fonts = pdf::ExportFonts {
         regular: &read("CourierPrime-Regular.ttf"),
         bold: &read("CourierPrime-Bold.ttf"),
+        italic: Some(&read("CourierPrime-Italic.ttf")),
         fallback_regular: &read("IBMPlexMono-Regular.ttf"),
         fallback_bold: &read("IBMPlexMono-Bold.ttf"),
+        fallback_italic: Some(&read("LiberationMono-Italic.ttf")),
     };
 
     let mut history = RevisionHistory::default();
@@ -291,8 +297,10 @@ fn summary_pdf_is_printable_and_cyrillic_safe() {
     let fonts = pdf::ExportFonts {
         regular: &read("CourierPrime-Regular.ttf"),
         bold: &read("CourierPrime-Bold.ttf"),
+        italic: Some(&read("CourierPrime-Italic.ttf")),
         fallback_regular: &read("IBMPlexMono-Regular.ttf"),
         fallback_bold: &read("IBMPlexMono-Bold.ttf"),
+        fallback_italic: Some(&read("LiberationMono-Italic.ttf")),
     };
     let bytes = pdf::to_summary_pdf_bytes(&summary, "A95", &fonts).expect("summary renders");
     assert!(bytes.starts_with(b"%PDF-"));
@@ -357,8 +365,10 @@ fn summary_pdf_paginates() {
     let fonts = pdf::ExportFonts {
         regular: &read("CourierPrime-Regular.ttf"),
         bold: &read("CourierPrime-Bold.ttf"),
+        italic: Some(&read("CourierPrime-Italic.ttf")),
         fallback_regular: &read("IBMPlexMono-Regular.ttf"),
         fallback_bold: &read("IBMPlexMono-Bold.ttf"),
+        fallback_italic: Some(&read("LiberationMono-Italic.ttf")),
     };
     let bytes = pdf::to_summary_pdf_bytes(&summary, "A95", &fonts).expect("summary renders");
     let doc = lopdf::Document::load_mem(&bytes).expect("summary PDF must parse");
@@ -391,8 +401,10 @@ fn liberation_mono_exports_latin_and_cyrillic() {
     let fonts = pdf::ExportFonts {
         regular: &read("LiberationMono-Regular.ttf"),
         bold: &read("LiberationMono-Bold.ttf"),
+        italic: Some(&read("LiberationMono-Italic.ttf")),
         fallback_regular: &read("IBMPlexMono-Regular.ttf"),
         fallback_bold: &read("IBMPlexMono-Bold.ttf"),
+        fallback_italic: Some(&read("LiberationMono-Italic.ttf")),
     };
     let opts = pdf::ExportOptions::default();
     let bytes = pdf::to_pdf_bytes(&p, &meta, &opts, &fonts).expect("pdf renders");

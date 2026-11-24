@@ -13,7 +13,9 @@
 //! small: one deflated entry, no ZIP64, no encryption.
 
 use crate::kitsp::Metadata;
-use crate::model::{speech_unit_end, DualMark, DualSide, ElementType, Project, ScriptBlock};
+use crate::model::{
+    speech_unit_end, DualMark, DualSide, ElementType, InlineStyle, Project, ScriptBlock, StyleSpan,
+};
 use flate2::read::DeflateDecoder;
 use flate2::write::DeflateEncoder;
 use flate2::Compression;
@@ -271,9 +273,43 @@ pub fn to_osf(p: &Project, meta: &Metadata) -> String {
         if left_cues[bi] {
             out.push_str(" dualdialogue=\"1\"");
         }
-        out.push_str("/>\n    <text>");
-        out.push_str(&esc_text(&body));
-        out.push_str("</text>\n  </para>\n");
+        out.push_str("/>\n");
+        if b.styles.is_empty() {
+            out.push_str("    <text>");
+            out.push_str(&esc_text(&body));
+            out.push_str("</text>\n  </para>\n");
+        } else {
+            let leading_trim = b.text.chars().count() - b.text.trim_start().chars().count();
+            let paren_strip = usize::from(
+                b.element_type == ElementType::Parenthetical
+                    && text.starts_with('(')
+                    && body.len() + 2 == text.len(),
+            );
+            let base_off = leading_trim + paren_strip;
+            let body_chars: Vec<char> = body.chars().collect();
+            let runs = b.style_runs_in(base_off, base_off + body_chars.len());
+            for (a, z, bold, italic, underline) in runs {
+                let slice: String = body_chars[a - base_off..z - base_off].iter().collect();
+                let mut parts: Vec<&'static str> = Vec::new();
+                if bold {
+                    parts.push("bold");
+                }
+                if italic {
+                    parts.push("italic");
+                }
+                if underline {
+                    parts.push("underline");
+                }
+                if parts.is_empty() {
+                    out.push_str("    <text>");
+                } else {
+                    out.push_str(&format!("    <text style=\"{}\">", parts.join("+")));
+                }
+                out.push_str(&esc_text(&slice));
+                out.push_str("</text>\n");
+            }
+            out.push_str("  </para>\n");
+        }
     }
     out.push_str("  </paragraphs>\n");
 
@@ -327,6 +363,30 @@ struct Para {
     align: String,
     dual: bool,
     text: String,
+    styles: Vec<StyleSpan>,
+}
+
+fn parse_osf_text_style(
+    e: &quick_xml::events::BytesStart<'_>,
+    reader: &Reader<&[u8]>,
+) -> (bool, bool, bool) {
+    let mut bold =
+        attr(e, reader, "bold").is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true"));
+    let mut italic =
+        attr(e, reader, "italic").is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true"));
+    let mut underline =
+        attr(e, reader, "underline").is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true"));
+    if let Some(style) = attr(e, reader, "style") {
+        for tok in style.split(['+', ',', ' ']) {
+            match tok.trim().to_ascii_lowercase().as_str() {
+                "bold" => bold = true,
+                "italic" => italic = true,
+                "underline" => underline = true,
+                _ => {}
+            }
+        }
+    }
+    (bold, italic, underline)
 }
 
 fn attr(
@@ -369,6 +429,8 @@ pub fn from_osf(xml: &str) -> Result<(Project, Metadata), FadeInError> {
     let mut saw_root = false;
     let mut in_titlepage = false;
     let mut in_text = false;
+    let mut cur_text_style = (false, false, false);
+    let mut cur_text_start = 0usize;
     let mut para: Option<Para> = None;
 
     let mut blocks: Vec<ScriptBlock> = Vec::new();
@@ -395,7 +457,11 @@ pub fn from_osf(xml: &str) -> Result<(Project, Metadata), FadeInError> {
                             apply_style(&e, &reader, p);
                         }
                     }
-                    "text" => in_text = true,
+                    "text" => {
+                        in_text = true;
+                        cur_text_start = para.as_ref().map(|p| p.text.chars().count()).unwrap_or(0);
+                        cur_text_style = parse_osf_text_style(&e, &reader);
+                    }
                     _ => {}
                 }
             }
@@ -459,7 +525,39 @@ pub fn from_osf(xml: &str) -> Result<(Project, Metadata), FadeInError> {
                 let name = String::from_utf8_lossy(e.name().as_ref()).into_owned();
                 match name.as_str() {
                     "titlepage" => in_titlepage = false,
-                    "text" => in_text = false,
+                    "text" => {
+                        if in_text {
+                            if let Some(p) = para.as_mut() {
+                                let end = p.text.chars().count();
+                                if end > cur_text_start {
+                                    let (bold, italic, underline) = cur_text_style;
+                                    if bold {
+                                        p.styles.push(StyleSpan {
+                                            start: cur_text_start,
+                                            end,
+                                            style: InlineStyle::Bold,
+                                        });
+                                    }
+                                    if italic {
+                                        p.styles.push(StyleSpan {
+                                            start: cur_text_start,
+                                            end,
+                                            style: InlineStyle::Italic,
+                                        });
+                                    }
+                                    if underline {
+                                        p.styles.push(StyleSpan {
+                                            start: cur_text_start,
+                                            end,
+                                            style: InlineStyle::Underline,
+                                        });
+                                    }
+                                }
+                            }
+                            in_text = false;
+                            cur_text_style = (false, false, false);
+                        }
+                    }
                     "para" => {
                         if let Some(p) = para.take() {
                             dispatch(
@@ -576,6 +674,7 @@ fn dispatch(
     dual_lefts: &mut Vec<usize>,
     title_paras: &mut Vec<(String, String, String)>,
 ) {
+    let leading_trim = p.text.chars().count() - p.text.trim_start().chars().count();
     let text = p.text.trim().to_string();
     if in_titlepage {
         title_paras.push((p.bookmark, text, p.align));
@@ -590,13 +689,33 @@ fn dispatch(
         if el == ElementType::SceneHeading {
             scene_numbers.push(p.number.trim().to_string());
         }
+        let added_paren =
+            el == ElementType::Parenthetical && !text.starts_with('(') && !text.ends_with(')');
         let body = if el == ElementType::Parenthetical {
             wrap_parenthetical(&text)
         } else {
             text
         };
         let bi = blocks.len();
-        blocks.push(ScriptBlock::new(el, body));
+        let mut blk = ScriptBlock::new(el, body);
+        if !p.styles.is_empty() {
+            let shift = usize::from(added_paren);
+            blk.styles = p
+                .styles
+                .into_iter()
+                .filter_map(|s| {
+                    let a = s.start.saturating_sub(leading_trim) + shift;
+                    let z = s.end.saturating_sub(leading_trim) + shift;
+                    (a < z).then_some(StyleSpan {
+                        start: a,
+                        end: z,
+                        style: s.style,
+                    })
+                })
+                .collect();
+            blk.normalize_styles();
+        }
+        blocks.push(blk);
         if el == ElementType::Character && p.dual {
             dual_lefts.push(bi);
         }
@@ -969,5 +1088,37 @@ mod tests {
             strip_outer_parentheses("(angry) (sotto)"),
             "(angry) (sotto)"
         );
+    }
+
+    #[test]
+    fn inline_styles_round_trip_through_osf() {
+        let mut blk = ScriptBlock::new(ElementType::Action, "Bold italic under.".into());
+        blk.styles = vec![
+            StyleSpan {
+                start: 0,
+                end: 4,
+                style: InlineStyle::Bold,
+            },
+            StyleSpan {
+                start: 5,
+                end: 11,
+                style: InlineStyle::Italic,
+            },
+            StyleSpan {
+                start: 12,
+                end: 17,
+                style: InlineStyle::Underline,
+            },
+        ];
+        blk.normalize_styles();
+        let p = Project {
+            title: "T".into(),
+            blocks: vec![blk.clone()],
+            ..Default::default()
+        };
+        let bytes = to_fadein_bytes(&p, &sample_meta()).unwrap();
+        let (back, _) = from_fadein_bytes(&bytes).unwrap();
+        assert_eq!(back.blocks[0].text, blk.text);
+        assert_eq!(back.blocks[0].styles, blk.styles);
     }
 }

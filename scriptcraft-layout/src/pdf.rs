@@ -1,12 +1,16 @@
 use crate::dual;
 use crate::paginate::{page_labels, paginate, paginate_with_breaks};
-use crate::place::{FINAL_DRAFT_A4_GEOMETRY, FINAL_DRAFT_A4_TEXT_W_MM, ROW_MM};
+#[cfg(test)]
+use crate::place::FINAL_DRAFT_A4_GEOMETRY;
+use crate::place::{page_spec, ROW_MM};
 use crate::wrap::wrap_lines;
 use printpdf::{
     Color, Greyscale, Line, LinePoint, Mm, Op, ParsedFont, PdfDocument, PdfFontHandle, PdfPage,
     PdfSaveOptions, Point, Pt, Rect as PdfRect, Rgb, TextItem, TextMatrix,
 };
-use scriptcraft_core::editing::{cue_name_for, FINAL_DRAFT_A4};
+#[cfg(test)]
+use scriptcraft_core::editing::FINAL_DRAFT_A4;
+use scriptcraft_core::editing::{cue_name_for, PageSize};
 use scriptcraft_core::kitsp::Metadata;
 use scriptcraft_core::model::{ElementType, Project};
 use scriptcraft_core::page_lock::PageLock;
@@ -30,9 +34,9 @@ pub enum PdfError {
 /// at 10 cpi Courier).
 const PAGE_W: f32 = 210.0;
 const PAGE_H: f32 = 297.0;
+#[cfg(test)]
 const MARGIN_L: f32 = 38.0;
 const MARGIN_T: f32 = 24.0;
-const MARGIN_R: f32 = 17.0;
 const FONT_PT: f32 = 12.0;
 /// 0.6em advance at 12pt = 7.2pt = 2.54mm per column.
 const CHAR_MM: f32 = 2.54;
@@ -45,19 +49,15 @@ const ASCENT_MM: f32 = 1600.0 / 2048.0 * 12.0 / 72.0 * 25.4;
 const DESCENT_MM: f32 = 700.0 / 2048.0 * 12.0 / 72.0 * 25.4;
 /// Baseline offset below the slot top under the top margin.
 const BASELINE_OFF: f32 = ASCENT_MM;
-/// Right edge of the text column.
-const TEXT_RIGHT: f32 = PAGE_W - MARGIN_R;
-/// Block columns in from the left margin: character 51 mm, parenthetical
-/// 36 mm, dialogue 26 mm — KIT's Final Draft template.
+#[cfg(test)]
 const X_CUE: f32 = MARGIN_L + FINAL_DRAFT_A4_GEOMETRY.cue_mm;
+#[cfg(test)]
 const X_PAREN: f32 = MARGIN_L + FINAL_DRAFT_A4_GEOMETRY.paren_mm;
+#[cfg(test)]
 const X_DLG: f32 = MARGIN_L + FINAL_DRAFT_A4_GEOMETRY.dialog_mm;
-/// Baseline of the top-right page number: the editor bottom-aligns it 0.4
-/// rows above the first content row.
-const PAGE_NUM_BASELINE: f32 = MARGIN_T - 0.4 * PITCH_MM - DESCENT_MM;
-/// Scene numbers sit 4mm left of the text margin (measured from KIT).
+#[cfg(test)]
 const SCENE_NUM_GAP: f32 = FINAL_DRAFT_A4_GEOMETRY.scene_num_gap_mm;
-/// Footer baseline, inside the 24 mm bottom margin.
+/// Footer baseline, inside the bottom margin.
 const FOOTER_BASELINE_MM: f32 = 12.0;
 /// Revision margin bars shared with the editor (mm from the page edge).
 pub const REVISION_BAR_X_MM: f32 = 10.0;
@@ -112,6 +112,7 @@ pub fn title_page_line_y_mm(index: usize, line: &PrintLine) -> f32 {
 /// Toggles mirrored by KIT's Export Script dialog.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExportOptions {
+    pub page_size: PageSize,
     pub title_page: bool,
     pub page_numbers: bool,
     pub scene_numbers: bool,
@@ -124,6 +125,7 @@ pub struct ExportOptions {
 impl Default for ExportOptions {
     fn default() -> Self {
         Self {
+            page_size: PageSize::A4,
             title_page: true,
             page_numbers: true,
             scene_numbers: true,
@@ -140,6 +142,15 @@ impl Default for ExportOptions {
 pub enum MarginBand {
     Header,
     Footer,
+}
+
+/// One uniformly-styled segment inside a [`PrintLine`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StyledRun {
+    pub text: String,
+    pub bold: bool,
+    pub italic: bool,
+    pub underline: bool,
 }
 
 /// One printable text line on a page.
@@ -166,6 +177,9 @@ pub struct PrintLine {
     /// KIT's draft-date slot, so the date and the REVISED block are anchored
     /// to the bottom edge explicitly (see [`title_page_line_y_mm`]).
     pub y_from_bottom_mm: Option<f32>,
+    /// Optional inline-styled runs covering `text` (populated only when the
+    /// source block carries inline bold / italic / underline spans).
+    pub runs: Vec<StyledRun>,
 }
 
 impl PrintLine {
@@ -182,16 +196,79 @@ impl PrintLine {
             revision: None,
             margin: None,
             y_from_bottom_mm: None,
+            runs: Vec::new(),
         }
-    }
-
-    fn blank() -> Self {
-        Self::text_line(MARGIN_L, String::new(), false)
     }
 }
 
+/// Build inline [`StyledRun`]s for one wrapped display line of `block`
+/// given the paragraph's char offset in `block.text` and the display line's
+/// `cols` mapping (source offset per display char).
+fn styled_runs_for_line(
+    block: &scriptcraft_core::model::ScriptBlock,
+    para_offset: usize,
+    display_text: &str,
+    cols: &[usize],
+    base_bold: bool,
+    base_italic: bool,
+) -> Vec<StyledRun> {
+    if block.styles.is_empty() || display_text.is_empty() {
+        return Vec::new();
+    }
+    let mut runs: Vec<StyledRun> = Vec::new();
+    let mut cur_text = String::new();
+    let mut cur_flags: Option<(bool, bool, bool)> = None;
+    for (ci, ch) in display_text.chars().enumerate() {
+        let src_in_para = cols.get(ci).copied().unwrap_or(ci);
+        let (sb, si, su) = block.styles_at(para_offset + src_in_para);
+        let flags = (base_bold || sb, base_italic || si, su);
+        if cur_flags == Some(flags) {
+            cur_text.push(ch);
+        } else {
+            if let Some((b, i, u)) = cur_flags {
+                runs.push(StyledRun {
+                    text: std::mem::take(&mut cur_text),
+                    bold: b,
+                    italic: i,
+                    underline: u,
+                });
+            }
+            cur_text.push(ch);
+            cur_flags = Some(flags);
+        }
+    }
+    if let Some((b, i, u)) = cur_flags {
+        runs.push(StyledRun {
+            text: cur_text,
+            bold: b,
+            italic: i,
+            underline: u,
+        });
+    }
+    // Only keep `runs` when at least one char differs from unstyled plain text.
+    if runs
+        .iter()
+        .any(|r| r.bold != base_bold || r.italic != base_italic || r.underline)
+    {
+        runs
+    } else {
+        Vec::new()
+    }
+}
+
+/// Char offset of paragraph `para` inside `text` (splitting on `'\n'`).
+fn para_char_offset(text: &str, para: usize) -> usize {
+    let mut off = 0usize;
+    for (i, p) in text.split('\n').enumerate() {
+        if i == para {
+            return off;
+        }
+        off += p.chars().count() + 1;
+    }
+    off
+}
+
 /// The number shown ahead of scene `i`: locked label when numbering is
-/// frozen, else `{prefix}{start + i}.`
 fn scene_label(locked: &Option<Vec<String>>, prefix: &str, start: u32, i: usize) -> String {
     if let Some(l) = locked.as_ref().and_then(|v| v.get(i)) {
         return format!("{l}.");
@@ -253,8 +330,8 @@ fn expand_margin_text(text: &str, latest: Option<&RevisionSet>, page: &str) -> S
         .replace("{page}", page)
 }
 
-fn fit_margin_text(text: String, reserved: usize) -> Option<String> {
-    let max = ((FINAL_DRAFT_A4_TEXT_W_MM / CHAR_MM) as usize).saturating_sub(reserved);
+fn fit_margin_text(text: String, text_w_mm: f32, reserved: usize) -> Option<String> {
+    let max = ((text_w_mm / CHAR_MM) as usize).saturating_sub(reserved);
     let text = text.trim().to_string();
     if text.is_empty() {
         return None;
@@ -267,10 +344,10 @@ fn fit_margin_text(text: String, reserved: usize) -> Option<String> {
     Some(out)
 }
 
-fn margin_line(text: String, band: MarginBand) -> PrintLine {
+fn margin_line(margin_l_mm: f32, text: String, band: MarginBand) -> PrintLine {
     PrintLine {
         margin: Some(band),
-        ..PrintLine::text_line(MARGIN_L, text, false)
+        ..PrintLine::text_line(margin_l_mm, text, false)
     }
 }
 
@@ -282,6 +359,7 @@ fn page_header(
     latest: Option<&RevisionSet>,
     show_revision: bool,
     page: &str,
+    text_w_mm: f32,
 ) -> Option<String> {
     let raw = meta.header.trim();
     let text = if raw.is_empty() {
@@ -302,15 +380,20 @@ fn page_header(
     } else {
         expand_margin_text(raw, latest, page)
     };
-    fit_margin_text(text, 8)
+    fit_margin_text(text, text_w_mm, 8)
 }
 
-fn page_footer(meta: &Metadata, latest: Option<&RevisionSet>, page: &str) -> Option<String> {
+fn page_footer(
+    meta: &Metadata,
+    latest: Option<&RevisionSet>,
+    page: &str,
+    text_w_mm: f32,
+) -> Option<String> {
     let raw = meta.footer.trim();
     if raw.is_empty() {
         return None;
     }
-    fit_margin_text(expand_margin_text(raw, latest, page), 0)
+    fit_margin_text(expand_margin_text(raw, latest, page), text_w_mm, 0)
 }
 
 /// Typeset a project into positioned lines per page (pure function of the
@@ -390,11 +473,18 @@ pub fn layout_pages_with_marks_and_latest(
         (Some(lock), None) => lock.resolve(&renum),
         (None, _) => Vec::new(),
     };
+    let spec = page_spec(opts.page_size);
+    let margin_l = spec.margin_l_mm;
+    let text_right = spec.text_right_mm();
+    let x_cue = margin_l + spec.geometry.cue_mm;
+    let x_paren = margin_l + spec.geometry.paren_mm;
+    let x_dlg = margin_l + spec.geometry.dialog_mm;
+    let scene_num_gap = spec.geometry.scene_num_gap_mm;
     let breaks: Vec<(usize, usize)> = page_anchors.iter().map(|a| (a.bi, a.para)).collect();
     let pages = if page_lock.is_some() {
-        paginate_with_breaks(&renum, &FINAL_DRAFT_A4, &breaks)
+        paginate_with_breaks(&renum, spec.metrics, &breaks)
     } else {
-        paginate(&renum, &FINAL_DRAFT_A4)
+        paginate(&renum, spec.metrics)
     };
     let page_labels = if page_lock.is_some() {
         page_labels(&pages, &page_anchors)
@@ -423,22 +513,24 @@ pub fn layout_pages_with_marks_and_latest(
                 is_page_number: true,
                 bold: true,
                 right_aligned: true,
-                ..PrintLine::blank()
+                ..PrintLine::text_line(margin_l, String::new(), false)
             });
         }
         let show_revision = opts.revision_marks || opts.revision_pages_only;
-        if let Some(header) = page_header(meta, latest, show_revision, label) {
-            lines.push(margin_line(header, MarginBand::Header));
+        if let Some(header) =
+            page_header(meta, latest, show_revision, label, spec.geometry.text_w_mm)
+        {
+            lines.push(margin_line(margin_l, header, MarginBand::Header));
         }
-        if let Some(footer) = page_footer(meta, latest, label) {
-            lines.push(margin_line(footer, MarginBand::Footer));
+        if let Some(footer) = page_footer(meta, latest, label, spec.geometry.text_w_mm) {
+            lines.push(margin_line(margin_l, footer, MarginBand::Footer));
         }
         for chunk in &page.chunks {
             for _ in 0..chunk.top {
-                lines.push(PrintLine::blank());
+                lines.push(PrintLine::text_line(margin_l, String::new(), false));
             }
             if let Some(dual_chunk) = &chunk.dual {
-                let rows = dual::build_rows(&renum, dual_chunk.pair, &FINAL_DRAFT_A4);
+                let rows = dual::build_rows(&renum, dual_chunk.pair, spec.metrics);
                 if dual_chunk.contd_left || dual_chunk.contd_right {
                     for (right, cue_bi, contd) in [
                         (false, dual_chunk.pair.left, dual_chunk.contd_left),
@@ -450,7 +542,7 @@ pub fn layout_pages_with_marks_and_latest(
                         if let Some(cue) = cue_name_for(&renum, cue_bi + 1) {
                             let text = format!("{cue} (CONT'D)");
                             let mut line = PrintLine::text_line(
-                                MARGIN_L + dual::cue_x_mm(&text, right),
+                                margin_l + dual::cue_x_mm(&text, right),
                                 text,
                                 false,
                             );
@@ -464,17 +556,31 @@ pub fn layout_pages_with_marks_and_latest(
                 for row in &rows.rows[start..end] {
                     for cell in [&row.left, &row.right].into_iter().flatten() {
                         let mut line = PrintLine::text_line(
-                            MARGIN_L + cell.x_mm,
+                            margin_l + cell.x_mm,
                             cell.text.clone(),
                             cell.bold,
                         );
                         line.revision = cell.span.map(|span| revisions[span.bi]).unwrap_or(None);
+                        if let Some(span) = cell.span {
+                            let src = &renum[span.bi];
+                            if !src.styles.is_empty() {
+                                let off = para_char_offset(&src.text, span.para);
+                                line.runs = styled_runs_for_line(
+                                    src,
+                                    off,
+                                    &cell.text,
+                                    &cell.cols,
+                                    cell.bold,
+                                    cell.italic,
+                                );
+                            }
+                        }
                         lines.push(line);
                     }
                 }
                 let mut more = |right: bool, cue_bi: usize| {
                     let text = "(MORE)".to_string();
-                    let x = MARGIN_L + dual::more_x_mm(right) - 6.0 * CHAR_MM;
+                    let x = margin_l + dual::more_x_mm(right) - 6.0 * CHAR_MM;
                     let mut line = PrintLine::text_line(x, text, false);
                     line.revision = revisions[cue_bi];
                     lines.push(line);
@@ -492,19 +598,19 @@ pub fn layout_pages_with_marks_and_latest(
             // `final_draft_a4.kitss` sets bold="false" on every block;
             // transitions are the only block aligned to the right edge.
             let (x, bold, right_aligned) = match b.element_type {
-                ElementType::SceneHeading => (MARGIN_L, false, false),
-                ElementType::SceneCharacters => (MARGIN_L, false, false),
-                ElementType::Action | ElementType::Shot => (MARGIN_L, false, false),
-                ElementType::Character => (X_CUE, false, false),
-                ElementType::Parenthetical => (X_PAREN, false, false),
-                ElementType::Dialogue => (X_DLG, false, false),
-                ElementType::Lyrics => (X_DLG, false, false),
-                ElementType::Transition => (TEXT_RIGHT, false, true),
-                ElementType::NonPrintable => (X_CUE, false, false),
+                ElementType::SceneHeading => (margin_l, false, false),
+                ElementType::SceneCharacters => (margin_l, false, false),
+                ElementType::Action | ElementType::Shot => (margin_l, false, false),
+                ElementType::Character => (x_cue, false, false),
+                ElementType::Parenthetical => (x_paren, false, false),
+                ElementType::Dialogue => (x_dlg, false, false),
+                ElementType::Lyrics => (x_dlg, false, false),
+                ElementType::Transition => (text_right, false, true),
+                ElementType::NonPrintable => (x_cue, false, false),
             };
             if chunk.contd {
                 if let Some(cue) = cue_name_for(&renum, chunk.bi) {
-                    let mut line = PrintLine::text_line(X_CUE, format!("{cue} (CONT'D)"), false);
+                    let mut line = PrintLine::text_line(x_cue, format!("{cue} (CONT'D)"), false);
                     line.revision = revision;
                     lines.push(line);
                 }
@@ -516,7 +622,7 @@ pub fn layout_pages_with_marks_and_latest(
                 let label = scene_label(&locked, &prefix, start, scene_i);
                 let w = label.chars().count() as f32 * CHAR_MM;
                 lines.push(PrintLine::text_line(
-                    MARGIN_L - SCENE_NUM_GAP - w,
+                    margin_l - scene_num_gap - w,
                     label,
                     false,
                 ));
@@ -525,26 +631,67 @@ pub fn layout_pages_with_marks_and_latest(
             if b.element_type == ElementType::SceneHeading {
                 scene_i += 1;
             }
-            let mut text = b
-                .text
-                .split('\n')
-                .skip(chunk.start)
-                .take(chunk.end - chunk.start)
-                .collect::<Vec<_>>()
-                .join("\n");
-            if b.element_type == ElementType::Character && !counts.is_empty() {
-                if let Some(n) = counts.get(b.text.trim()) {
-                    text = format!("{} ({n})", text.trim_end());
+            if b.styles.is_empty() {
+                let mut text = b
+                    .text
+                    .split('\n')
+                    .skip(chunk.start)
+                    .take(chunk.end - chunk.start)
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                if b.element_type == ElementType::Character && !counts.is_empty() {
+                    if let Some(n) = counts.get(b.text.trim()) {
+                        text = format!("{} ({n})", text.trim_end());
+                    }
                 }
-            }
-            // Same wrap budget as the paginator: identical line breaks.
-            let wrapped = wrap_lines(&text, FINAL_DRAFT_A4.col_chars(b.element_type));
-            for (li, line) in wrapped.into_iter().enumerate() {
-                let mut l = PrintLine::text_line(x, line, bold);
-                l.right_aligned = right_aligned;
-                l.share_row = li == 0 && number_pushed;
-                l.revision = revision;
-                lines.push(l);
+                // Same wrap budget as the paginator: identical line breaks.
+                let wrapped = wrap_lines(&text, spec.metrics.col_chars(b.element_type));
+                for (li, line) in wrapped.into_iter().enumerate() {
+                    let mut l = PrintLine::text_line(x, line, bold);
+                    l.right_aligned = right_aligned;
+                    l.share_row = li == 0 && number_pushed;
+                    l.revision = revision;
+                    lines.push(l);
+                }
+            } else {
+                let col_chars = spec.metrics.col_chars(b.element_type);
+                let mut li = 0usize;
+                let mut para_off = para_char_offset(&b.text, chunk.start);
+                for (pi_rel, para_text) in b
+                    .text
+                    .split('\n')
+                    .skip(chunk.start)
+                    .take(chunk.end - chunk.start)
+                    .enumerate()
+                {
+                    let is_last_para = chunk.start + pi_rel + 1 == chunk.end;
+                    let owned;
+                    let slice = if is_last_para
+                        && b.element_type == ElementType::Character
+                        && !counts.is_empty()
+                    {
+                        if let Some(n) = counts.get(b.text.trim()) {
+                            owned = format!("{} ({n})", para_text.trim_end());
+                            owned.as_str()
+                        } else {
+                            para_text
+                        }
+                    } else {
+                        para_text
+                    };
+                    for wl in crate::wrap::wrap_paragraph(slice, col_chars) {
+                        let runs =
+                            styled_runs_for_line(b, para_off, &wl.text, &wl.cols, bold, false);
+                        let mut l = PrintLine::text_line(x, wl.text, bold);
+                        l.right_aligned = right_aligned;
+                        l.share_row = li == 0 && number_pushed;
+                        l.revision = revision;
+                        l.runs = runs;
+                        lines.push(l);
+                        li += 1;
+                    }
+                    para_off += para_text.chars().count() + 1;
+                }
             }
             if chunk.more {
                 let mut line = PrintLine {
@@ -619,10 +766,21 @@ pub fn layout_title_page_with_latest(
     meta: &Metadata,
     latest: Option<&RevisionSet>,
 ) -> Vec<PrintLine> {
-    fn centered(text: String, bold: bool, underline: bool, dy_mm: f32) -> PrintLine {
+    layout_title_page_for(meta, latest, PageSize::A4)
+}
+
+pub fn layout_title_page_for(
+    meta: &Metadata,
+    latest: Option<&RevisionSet>,
+    page_size: PageSize,
+) -> Vec<PrintLine> {
+    let spec = page_spec(page_size);
+    let page_w = spec.width_mm;
+    let margin_l = spec.margin_l_mm;
+    let centered = |text: String, bold: bool, underline: bool, dy_mm: f32| -> PrintLine {
         let w = text.chars().count() as f32 * CHAR_MM;
         PrintLine {
-            x_mm: (PAGE_W - w) / 2.0,
+            x_mm: (page_w - w) / 2.0,
             text,
             bold,
             right_aligned: false,
@@ -633,12 +791,14 @@ pub fn layout_title_page_with_latest(
             revision: None,
             margin: None,
             y_from_bottom_mm: None,
+            runs: Vec::new(),
         }
-    }
-    let max_chars = (FINAL_DRAFT_A4_TEXT_W_MM / CHAR_MM) as usize;
+    };
+    let blank = || PrintLine::text_line(margin_l, String::new(), false);
+    let max_chars = (spec.geometry.text_w_mm / CHAR_MM) as usize;
     let mut lines: Vec<PrintLine> = Vec::new();
     while lines.len() < 16 {
-        lines.push(PrintLine::blank());
+        lines.push(blank());
     }
     let title_lines = wrap_title_line(&meta.title.to_uppercase(), max_chars);
     for part in &title_lines {
@@ -658,7 +818,7 @@ pub fn layout_title_page_with_latest(
         let parts = wrap_title_line(v, max_chars);
         slot = slot.max(lines.len());
         while lines.len() < slot {
-            lines.push(PrintLine::blank());
+            lines.push(blank());
         }
         for part in &parts {
             lines.push(centered(part.clone(), false, false, TITLE_VALUE_DY));
@@ -666,7 +826,7 @@ pub fn layout_title_page_with_latest(
         slot += parts.len() + 1;
     }
     while lines.len() < 39 {
-        lines.push(PrintLine::blank());
+        lines.push(blank());
     }
     for raw in meta.contacts.lines() {
         let line = raw.trim();
@@ -677,13 +837,13 @@ pub fn layout_title_page_with_latest(
             lines.push(PrintLine {
                 text: part,
                 dy_mm: TITLE_CONTACT_DY,
-                ..PrintLine::blank()
+                ..blank()
             });
         }
     }
     let year_slot = lines.len().max(57);
     while lines.len() < year_slot {
-        lines.push(PrintLine::blank());
+        lines.push(blank());
     }
     // The draft date keeps KIT's slot index (so the line list shape is
     // unchanged) but is painted at a fixed height above the page bottom: slot
@@ -694,7 +854,7 @@ pub fn layout_title_page_with_latest(
     if let Some(set) = latest {
         let revised_slot = lines.len().max(60);
         while lines.len() < revised_slot {
-            lines.push(PrintLine::blank());
+            lines.push(blank());
         }
         let mut heading = centered("REVISED".to_string(), true, false, 0.0);
         heading.y_from_bottom_mm = Some(TITLE_REVISED_Y_MM);
@@ -723,8 +883,10 @@ pub fn layout_title_page_with_latest(
 pub struct ExportFonts<'a> {
     pub regular: &'a [u8],
     pub bold: &'a [u8],
+    pub italic: Option<&'a [u8]>,
     pub fallback_regular: &'a [u8],
     pub fallback_bold: &'a [u8],
+    pub fallback_italic: Option<&'a [u8]>,
 }
 
 struct Face {
@@ -822,9 +984,27 @@ pub fn to_pdf_bytes_with_marks_and_latest(
         id: doc.add_font(&fallback_bold_font),
         font: fallback_bold_font,
     };
+    let italic_opt: Option<Face> = fonts.italic.and_then(&mut parse).map(|font| Face {
+        id: doc.add_font(&font),
+        font,
+    });
+    let fallback_italic_opt: Option<Face> =
+        fonts.fallback_italic.and_then(&mut parse).map(|font| Face {
+            id: doc.add_font(&font),
+            font,
+        });
+    let italic_face = italic_opt.as_ref().unwrap_or(&regular);
+    let fallback_italic_face = fallback_italic_opt.as_ref().unwrap_or(&fallback_regular);
+    let spec = page_spec(opts.page_size);
+    let page_w = spec.width_mm;
+    let page_h = spec.height_mm;
+    let margin_l = spec.margin_l_mm;
+    let margin_t = spec.margin_t_mm;
+    let text_right = spec.text_right_mm();
+    let page_num_baseline = margin_t - 0.4 * PITCH_MM - DESCENT_MM;
     let mut pages: Vec<Vec<PrintLine>> = Vec::new();
     if opts.title_page {
-        pages.push(layout_title_page_with_latest(meta, latest));
+        pages.push(layout_title_page_for(meta, latest, opts.page_size));
     }
     pages.extend(layout_pages_with_marks_and_latest(
         p, meta, opts, marks, latest,
@@ -859,18 +1039,18 @@ pub fn to_pdf_bytes_with_marks_and_latest(
             ops.push(Op::SetFillColor {
                 col: Color::Greyscale(Greyscale::new(0.82, None)),
             });
-            let mut cx = ((PAGE_W - w) / 2.0).max(0.0);
+            let mut cx = ((page_w - w) / 2.0).max(0.0);
             for (use_fb, run) in split_runs(wm, &regular.font, &fallback_regular.font) {
                 let id = if use_fb {
                     &fallback_regular.id
                 } else {
                     &regular.id
                 };
-                show(&mut ops, id, size, cx, PAGE_H / 2.0, run);
+                show(&mut ops, id, size, cx, page_h / 2.0, run);
                 cx += run.chars().count() as f32 * CHAR_MM * (size / FONT_PT);
             }
         }
-        let mut y = PAGE_H - MARGIN_T - BASELINE_OFF;
+        let mut y = page_h - margin_t - BASELINE_OFF;
         for line in lines.iter() {
             if line.share_row {
                 y += PITCH_MM;
@@ -878,7 +1058,7 @@ pub fn to_pdf_bytes_with_marks_and_latest(
             ops.push(Op::SetFillColor { col: black.clone() });
             if let Some(band) = line.margin {
                 let yy = match band {
-                    MarginBand::Header => PAGE_H - PAGE_NUM_BASELINE,
+                    MarginBand::Header => page_h - page_num_baseline,
                     MarginBand::Footer => FOOTER_BASELINE_MM,
                 };
                 let (face, fb_face) = if line.bold {
@@ -896,7 +1076,7 @@ pub fn to_pdf_bytes_with_marks_and_latest(
             }
             if line.is_page_number {
                 let w = line.text.chars().count() as f32 * CHAR_MM;
-                let mut cx = TEXT_RIGHT - w;
+                let mut cx = text_right - w;
                 let (face, fb_face) = if line.bold {
                     (&bold, &fallback_bold)
                 } else {
@@ -904,7 +1084,7 @@ pub fn to_pdf_bytes_with_marks_and_latest(
                 };
                 for (use_fb, run) in split_runs(&line.text, &face.font, &fb_face.font) {
                     let id = if use_fb { &fb_face.id } else { &face.id };
-                    show(&mut ops, id, FONT_PT, cx, PAGE_H - PAGE_NUM_BASELINE, run);
+                    show(&mut ops, id, FONT_PT, cx, page_h - page_num_baseline, run);
                     cx += run.chars().count() as f32 * CHAR_MM;
                 }
                 continue;
@@ -932,42 +1112,83 @@ pub fn to_pdf_bytes_with_marks_and_latest(
             if !line.text.is_empty() {
                 let w = line.text.chars().count() as f32 * CHAR_MM;
                 let x = if line.right_aligned {
-                    (TEXT_RIGHT - w).max(MARGIN_L)
+                    (text_right - w).max(margin_l)
                 } else {
                     line.x_mm
                 };
-                let (face, fb_face) = if line.bold {
-                    (&bold, &fallback_bold)
+                if line.runs.is_empty() {
+                    let (face, fb_face) = if line.bold {
+                        (&bold, &fallback_bold)
+                    } else {
+                        (&regular, &fallback_regular)
+                    };
+                    let mut cx = x;
+                    for (use_fb, run) in split_runs(&line.text, &face.font, &fb_face.font) {
+                        let id = if use_fb { &fb_face.id } else { &face.id };
+                        show(&mut ops, id, FONT_PT, cx, yy, run);
+                        cx += run.chars().count() as f32 * CHAR_MM;
+                    }
+                    if line.underline {
+                        ops.push(Op::DrawLine {
+                            line: Line {
+                                points: vec![
+                                    LinePoint {
+                                        p: Point::new(Mm(x), Mm(yy - 1.2)),
+                                        bezier: false,
+                                    },
+                                    LinePoint {
+                                        p: Point::new(Mm(x + w), Mm(yy - 1.2)),
+                                        bezier: false,
+                                    },
+                                ],
+                                is_closed: false,
+                            },
+                        });
+                    }
                 } else {
-                    (&regular, &fallback_regular)
-                };
-                let mut cx = x;
-                for (use_fb, run) in split_runs(&line.text, &face.font, &fb_face.font) {
-                    let id = if use_fb { &fb_face.id } else { &face.id };
-                    show(&mut ops, id, FONT_PT, cx, yy, run);
-                    cx += run.chars().count() as f32 * CHAR_MM;
-                }
-                if line.underline {
-                    ops.push(Op::DrawLine {
-                        line: Line {
-                            points: vec![
-                                LinePoint {
-                                    p: Point::new(Mm(x), Mm(yy - 1.2)),
-                                    bezier: false,
+                    let mut cx = x;
+                    for styled in &line.runs {
+                        let rw = styled.text.chars().count() as f32 * CHAR_MM;
+                        let run_start_x = cx;
+                        let (face, fb_face) = if styled.italic {
+                            (italic_face, fallback_italic_face)
+                        } else if styled.bold {
+                            (&bold, &fallback_bold)
+                        } else {
+                            (&regular, &fallback_regular)
+                        };
+                        let faux_bold_italic = styled.bold && styled.italic;
+                        for (use_fb, seg) in split_runs(&styled.text, &face.font, &fb_face.font) {
+                            let id = if use_fb { &fb_face.id } else { &face.id };
+                            show(&mut ops, id, FONT_PT, cx, yy, seg);
+                            if faux_bold_italic {
+                                show(&mut ops, id, FONT_PT, cx + 0.09, yy, seg);
+                            }
+                            cx += seg.chars().count() as f32 * CHAR_MM;
+                        }
+                        if styled.underline || line.underline {
+                            ops.push(Op::DrawLine {
+                                line: Line {
+                                    points: vec![
+                                        LinePoint {
+                                            p: Point::new(Mm(run_start_x), Mm(yy - 1.2)),
+                                            bezier: false,
+                                        },
+                                        LinePoint {
+                                            p: Point::new(Mm(run_start_x + rw), Mm(yy - 1.2)),
+                                            bezier: false,
+                                        },
+                                    ],
+                                    is_closed: false,
                                 },
-                                LinePoint {
-                                    p: Point::new(Mm(x + w), Mm(yy - 1.2)),
-                                    bezier: false,
-                                },
-                            ],
-                            is_closed: false,
-                        },
-                    });
+                            });
+                        }
+                    }
                 }
             }
             y -= PITCH_MM;
         }
-        doc_pages.push(PdfPage::new(Mm(PAGE_W), Mm(PAGE_H), ops));
+        doc_pages.push(PdfPage::new(Mm(page_w), Mm(page_h), ops));
     }
     doc.with_pages(doc_pages);
     let mut warnings = Vec::new();
@@ -1708,5 +1929,74 @@ mod tests {
         };
         let laid = layout_pages(&p, &Default::default(), &opts);
         assert!(!laid.iter().flatten().any(|l| l.is_page_number));
+    }
+
+    #[test]
+    fn us_letter_paginates_at_55_lines_and_defaults_stay_a4() {
+        assert_eq!(ExportOptions::default().page_size, PageSize::A4);
+        let mut p = sample();
+        for i in 0..60 {
+            p.blocks.push(ScriptBlock::new(
+                ElementType::Action,
+                format!("Action beat {i} describing a steady walk down the corridor."),
+            ));
+        }
+        let a4_pages = layout_pages(&p, &Default::default(), &default_opts());
+        let letter_opts = ExportOptions {
+            page_size: PageSize::UsLetter,
+            ..default_opts()
+        };
+        let letter_pages = layout_pages(&p, &Default::default(), &letter_opts);
+        // US Letter holds 55 lines/page vs A4's 58, so the same long script
+        // needs at least as many (typically more) pages on US Letter.
+        assert!(letter_pages.len() >= a4_pages.len());
+        let spec = page_spec(PageSize::UsLetter);
+        for page in &letter_pages {
+            let body_rows = page
+                .iter()
+                .filter(|l| !l.is_page_number && l.margin.is_none() && !l.share_row)
+                .count();
+            assert!(
+                body_rows <= spec.metrics.lines_per_page,
+                "US Letter page overflowed 55 lines: {body_rows}"
+            );
+        }
+    }
+
+    #[test]
+    fn inline_styles_split_print_lines_into_styled_runs() {
+        use scriptcraft_core::model::{InlineStyle, StyleSpan};
+        let mut blk = ScriptBlock::new(ElementType::Action, "She whispers loudly now.".into());
+        blk.styles = vec![
+            StyleSpan {
+                start: 4,
+                end: 12,
+                style: InlineStyle::Italic,
+            },
+            StyleSpan {
+                start: 13,
+                end: 19,
+                style: InlineStyle::Bold,
+            },
+            StyleSpan {
+                start: 20,
+                end: 23,
+                style: InlineStyle::Underline,
+            },
+        ];
+        blk.normalize_styles();
+        let p = Project {
+            title: "Styled".into(),
+            blocks: vec![blk],
+            ..Default::default()
+        };
+        let pages = layout_pages(&p, &Default::default(), &default_opts());
+        let line = pages[0]
+            .iter()
+            .find(|l| l.text.contains("whispers"))
+            .expect("action line present");
+        assert!(line.runs.iter().any(|r| r.text == "whispers" && r.italic));
+        assert!(line.runs.iter().any(|r| r.text == "loudly" && r.bold));
+        assert!(line.runs.iter().any(|r| r.text == "now" && r.underline));
     }
 }

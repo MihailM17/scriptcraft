@@ -7,7 +7,9 @@
 //! written for other tools; importing it is deferred.
 
 use crate::kitsp::Metadata;
-use crate::model::{speech_unit_end, DualMark, DualSide, ElementType, Project, ScriptBlock};
+use crate::model::{
+    speech_unit_end, DualMark, DualSide, ElementType, InlineStyle, Project, ScriptBlock, StyleSpan,
+};
 use crate::revision::{RevisionColor, RevisionSet};
 use quick_xml::events::Event;
 use quick_xml::{Reader, XmlVersion};
@@ -102,12 +104,26 @@ fn esc_text(s: &str) -> String {
         .replace(['\r', '\n'], " ")
 }
 
+fn fdx_style_attr(bold: bool, italic: bool, underline: bool) -> String {
+    let mut parts: Vec<&'static str> = Vec::new();
+    if bold {
+        parts.push("Bold");
+    }
+    if italic {
+        parts.push("Italic");
+    }
+    if underline {
+        parts.push("Underline");
+    }
+    parts.join("+")
+}
+
 fn push_paragraph(
     out: &mut String,
     kind: &str,
     number: Option<&str>,
     revision: Option<RevisionColor>,
-    text: &str,
+    block: &ScriptBlock,
 ) {
     out.push_str("<Paragraph Type=\"");
     out.push_str(kind);
@@ -122,9 +138,33 @@ fn push_paragraph(
         out.push_str(&revision_id(color).to_string());
         out.push('"');
     }
-    out.push_str(">\n<Text>");
-    out.push_str(&esc_text(text));
-    out.push_str("</Text>\n</Paragraph>\n");
+    out.push_str(">\n");
+    if block.styles.is_empty() {
+        out.push_str("<Text>");
+        out.push_str(&esc_text(&block.text));
+        out.push_str("</Text>\n");
+    } else {
+        let chars: Vec<char> = block.text.chars().collect();
+        let runs = block.style_runs_in(0, chars.len());
+        if runs.is_empty() {
+            out.push_str("<Text></Text>\n");
+        } else {
+            for (a, z, bold, italic, underline) in runs {
+                let slice: String = chars[a..z].iter().collect();
+                let style = fdx_style_attr(bold, italic, underline);
+                if style.is_empty() {
+                    out.push_str("<Text>");
+                } else {
+                    out.push_str("<Text Style=\"");
+                    out.push_str(&style);
+                    out.push_str("\">");
+                }
+                out.push_str(&esc_text(&slice));
+                out.push_str("</Text>\n");
+            }
+        }
+    }
+    out.push_str("</Paragraph>\n");
 }
 
 /// Stable FDX revision IDs; White (0) is Final Draft's base revision.
@@ -210,7 +250,7 @@ pub fn to_fdx_with_revisions_and_latest(
                     fdx_type(b.element_type),
                     None,
                     marks.get(bi).copied().flatten(),
-                    &b.text,
+                    b,
                 );
             }
             out.push_str("</DualDialogue>\n</Paragraph>\n");
@@ -228,7 +268,7 @@ pub fn to_fdx_with_revisions_and_latest(
             fdx_type(b.element_type),
             number.as_deref(),
             marks.get(i).copied().flatten(),
-            &b.text,
+            b,
         );
         i += 1;
     }
@@ -316,12 +356,28 @@ fn draft_date_value(s: &str) -> Option<String> {
     None
 }
 
+fn parse_fdx_style(attr: &str) -> (bool, bool, bool) {
+    let mut bold = false;
+    let mut italic = false;
+    let mut underline = false;
+    for tok in attr.split(['+', ',', ' ']) {
+        match tok.trim().to_ascii_lowercase().as_str() {
+            "bold" => bold = true,
+            "italic" => italic = true,
+            "underline" => underline = true,
+            _ => {}
+        }
+    }
+    (bold, italic, underline)
+}
+
 #[derive(Default)]
 struct Para {
     kind: String,
     number: String,
     alignment: String,
     text: String,
+    styles: Vec<StyleSpan>,
     notes: Vec<String>,
 }
 
@@ -335,6 +391,8 @@ pub fn from_fdx(xml: &str) -> Result<(Project, Metadata), FdxError> {
     let mut saw_root = false;
     let mut in_title_page = false;
     let mut in_text = false;
+    let mut cur_text_style = (false, false, false);
+    let mut cur_text_start = 0usize;
     let mut in_note = false;
     let mut in_dual = false;
 
@@ -382,7 +440,23 @@ pub fn from_fdx(xml: &str) -> Result<(Project, Metadata), FdxError> {
                         }
                         para = Some(p);
                     }
-                    "Text" if para.is_some() && !in_note => in_text = true,
+                    "Text" if para.is_some() && !in_note => {
+                        in_text = true;
+                        cur_text_start = para.as_ref().map(|p| p.text.chars().count()).unwrap_or(0);
+                        cur_text_style = e
+                            .try_get_attribute("Style")
+                            .ok()
+                            .flatten()
+                            .and_then(|a| {
+                                a.decoded_and_normalized_value(
+                                    XmlVersion::Implicit1_0,
+                                    reader.decoder(),
+                                )
+                                .ok()
+                            })
+                            .map(|v| parse_fdx_style(&v))
+                            .unwrap_or((false, false, false));
+                    }
                     "ScriptNote" => {
                         in_note = true;
                         note_buf.clear();
@@ -451,7 +525,39 @@ pub fn from_fdx(xml: &str) -> Result<(Project, Metadata), FdxError> {
                 let name = String::from_utf8_lossy(e.name().as_ref()).into_owned();
                 match name.as_str() {
                     "TitlePage" => in_title_page = false,
-                    "Text" => in_text = false,
+                    "Text" => {
+                        if in_text {
+                            if let Some(p) = para.as_mut() {
+                                let end = p.text.chars().count();
+                                if end > cur_text_start {
+                                    let (bold, italic, underline) = cur_text_style;
+                                    if bold {
+                                        p.styles.push(StyleSpan {
+                                            start: cur_text_start,
+                                            end,
+                                            style: InlineStyle::Bold,
+                                        });
+                                    }
+                                    if italic {
+                                        p.styles.push(StyleSpan {
+                                            start: cur_text_start,
+                                            end,
+                                            style: InlineStyle::Italic,
+                                        });
+                                    }
+                                    if underline {
+                                        p.styles.push(StyleSpan {
+                                            start: cur_text_start,
+                                            end,
+                                            style: InlineStyle::Underline,
+                                        });
+                                    }
+                                }
+                            }
+                            in_text = false;
+                            cur_text_style = (false, false, false);
+                        }
+                    }
                     "ScriptNote" => {
                         in_note = false;
                         let note = note_buf.trim().to_string();
@@ -468,6 +574,8 @@ pub fn from_fdx(xml: &str) -> Result<(Project, Metadata), FdxError> {
                             title_paras.push((p.alignment, p.text));
                             continue;
                         }
+                        let leading_trim =
+                            p.text.chars().count() - p.text.trim_start().chars().count();
                         let text = p.text.trim().to_string();
                         if text.is_empty() && p.notes.is_empty() {
                             continue;
@@ -478,7 +586,24 @@ pub fn from_fdx(xml: &str) -> Result<(Project, Metadata), FdxError> {
                         }
                         let first_new = blocks.len();
                         if !text.is_empty() {
-                            blocks.push(ScriptBlock::new(el, text));
+                            let mut blk = ScriptBlock::new(el, text);
+                            if !p.styles.is_empty() {
+                                blk.styles = p
+                                    .styles
+                                    .into_iter()
+                                    .filter_map(|s| {
+                                        let a = s.start.saturating_sub(leading_trim);
+                                        let z = s.end.saturating_sub(leading_trim);
+                                        (a < z).then_some(StyleSpan {
+                                            start: a,
+                                            end: z,
+                                            style: s.style,
+                                        })
+                                    })
+                                    .collect();
+                                blk.normalize_styles();
+                            }
+                            blocks.push(blk);
                         }
                         for note in p.notes {
                             blocks.push(ScriptBlock::new(ElementType::NonPrintable, note));
@@ -878,5 +1003,40 @@ mod tests {
         assert!(xml2.contains("<Paragraph Type=\"General\">"));
         let (q, _) = from_fdx(&xml2).unwrap();
         assert_eq!(q.blocks.len(), p.blocks.len());
+    }
+
+    #[test]
+    fn inline_styles_round_trip_through_fdx() {
+        let mut blk = ScriptBlock::new(ElementType::Action, "Bold italic under.".into());
+        blk.styles = vec![
+            StyleSpan {
+                start: 0,
+                end: 4,
+                style: InlineStyle::Bold,
+            },
+            StyleSpan {
+                start: 5,
+                end: 11,
+                style: InlineStyle::Italic,
+            },
+            StyleSpan {
+                start: 12,
+                end: 17,
+                style: InlineStyle::Underline,
+            },
+        ];
+        blk.normalize_styles();
+        let p = Project {
+            title: "Styled".into(),
+            blocks: vec![blk.clone()],
+            ..Default::default()
+        };
+        let xml = to_fdx(&p, &Metadata::default());
+        assert!(xml.contains("Style=\"Bold\""));
+        assert!(xml.contains("Style=\"Italic\""));
+        assert!(xml.contains("Style=\"Underline\""));
+        let (q, _) = from_fdx(&xml).unwrap();
+        assert_eq!(q.blocks[0].text, blk.text);
+        assert_eq!(q.blocks[0].styles, blk.styles);
     }
 }

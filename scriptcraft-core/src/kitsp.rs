@@ -691,6 +691,7 @@ pub fn project_to_scenario_xml(p: &Project) -> String {
     for b in &p.blocks {
         // CDATA cannot contain "]]>" — soften it (same rule as the Python fixer).
         let safe = b.text.replace("]]>", "]] >");
+        let fmt_xml = format_spans_xml(b);
         match b.element_type {
             ElementType::SceneHeading => {
                 let uuid = b
@@ -698,17 +699,52 @@ pub fn project_to_scenario_xml(p: &Project) -> String {
                     .as_deref()
                     .unwrap_or("{00000000-0000-0000-0000-000000000000}");
                 s.push_str(&format!(
-                    "<scene_heading uuid=\"{uuid}\">\n<v><![CDATA[{safe}]]></v>\n</scene_heading>\n"
+                    "<scene_heading uuid=\"{uuid}\">\n<v><![CDATA[{safe}]]></v>\n{fmt_xml}</scene_heading>\n"
                 ));
             }
             other => {
                 let tag = other.tag();
-                s.push_str(&format!("<{tag}>\n<v><![CDATA[{safe}]]></v>\n</{tag}>\n"));
+                s.push_str(&format!(
+                    "<{tag}>\n<v><![CDATA[{safe}]]></v>\n{fmt_xml}</{tag}>\n"
+                ));
             }
         }
     }
     s.push_str("</scenario>\n");
     s
+}
+
+/// KIT Scenarist `<formatting>` block for inline bold/italic/underline runs.
+/// Returns empty when the block carries no inline styles so untouched blocks
+/// emit byte-for-byte identical XML.
+fn format_spans_xml(b: &ScriptBlock) -> String {
+    if b.styles.is_empty() {
+        return String::new();
+    }
+    let len = b.text.chars().count();
+    let runs = b.style_runs_in(0, len);
+    let mut body = String::new();
+    for (a, z, bold, italic, underline) in runs {
+        if !(bold || italic || underline) {
+            continue;
+        }
+        body.push_str(&format!("<format from=\"{a}\" length=\"{}\"", z - a));
+        if bold {
+            body.push_str(" bold=\"true\"");
+        }
+        if italic {
+            body.push_str(" italic=\"true\"");
+        }
+        if underline {
+            body.push_str(" underline=\"true\"");
+        }
+        body.push_str("/>\n");
+    }
+    if body.is_empty() {
+        String::new()
+    } else {
+        format!("<formatting>\n{body}</formatting>\n")
+    }
 }
 
 /// Rename `from` over `to`, replacing `to` if it exists.
@@ -1159,6 +1195,7 @@ fn project_from_baseline(set: &RevisionSet, source: &Project) -> Project {
             element_type: baseline.element_type,
             text: baseline.text.clone(),
             dual: None,
+            styles: Vec::new(),
         });
     }
 
@@ -2024,12 +2061,60 @@ fn parse_cards(xml: &str) -> Result<Vec<Card>, KitspError> {
     Ok(cards)
 }
 pub fn parse_scenario(xml: &str) -> Result<Project, KitspError> {
+    use crate::model::{InlineStyle, StyleSpan};
+
+    fn parse_format_tag(
+        e: &quick_xml::events::BytesStart<'_>,
+        reader: &Reader<&[u8]>,
+        out: &mut Vec<StyleSpan>,
+    ) {
+        let attr_str = |key: &str| -> Option<String> {
+            let a = e.try_get_attribute(key).ok().flatten()?;
+            a.decoded_and_normalized_value(XmlVersion::Implicit1_0, reader.decoder())
+                .ok()
+                .map(|v| v.into_owned())
+        };
+        let from: usize = match attr_str("from").and_then(|s| s.parse().ok()) {
+            Some(v) => v,
+            None => return,
+        };
+        let length: usize = match attr_str("length").and_then(|s| s.parse().ok()) {
+            Some(v) if v > 0 => v,
+            _ => return,
+        };
+        let is_true =
+            |key: &str| attr_str(key).is_some_and(|v| v.eq_ignore_ascii_case("true") || v == "1");
+        let end = from.saturating_add(length);
+        if is_true("bold") {
+            out.push(StyleSpan {
+                start: from,
+                end,
+                style: InlineStyle::Bold,
+            });
+        }
+        if is_true("italic") {
+            out.push(StyleSpan {
+                start: from,
+                end,
+                style: InlineStyle::Italic,
+            });
+        }
+        if is_true("underline") {
+            out.push(StyleSpan {
+                start: from,
+                end,
+                style: InlineStyle::Underline,
+            });
+        }
+    }
+
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
 
     let mut blocks: Vec<ScriptBlock> = Vec::new();
     let mut current_tag: Option<String> = None;
     let mut current_uuid: Option<String> = None;
+    let mut current_styles: Vec<StyleSpan> = Vec::new();
     let mut inside_v = false;
     let mut text_buf = String::new();
 
@@ -2055,15 +2140,20 @@ pub fn parse_scenario(xml: &str) -> Result<Project, KitspError> {
                         None
                     };
                     text_buf.clear();
+                    current_styles.clear();
                 } else if name == "v" && current_tag.is_some() {
                     inside_v = true;
                     text_buf.clear();
+                } else if name == "format" && current_tag.is_some() {
+                    parse_format_tag(&e, &reader, &mut current_styles);
                 }
             }
             Event::Empty(e) => {
                 let name = String::from_utf8_lossy(e.name().as_ref()).into_owned();
                 if name == "v" && current_tag.is_some() {
                     // empty <v/> — keep empty text
+                } else if name == "format" && current_tag.is_some() {
+                    parse_format_tag(&e, &reader, &mut current_styles);
                 }
             }
             Event::Text(e) => {
@@ -2087,10 +2177,13 @@ pub fn parse_scenario(xml: &str) -> Result<Project, KitspError> {
                         if let Some(el) = ElementType::from_tag(&tag) {
                             let mut b = ScriptBlock::new(el, text_buf.trim().to_string());
                             b.kit_uuid = current_uuid.take();
+                            b.styles = std::mem::take(&mut current_styles);
+                            b.normalize_styles();
                             blocks.push(b);
                         }
                     }
                     text_buf.clear();
+                    current_styles.clear();
                 }
             }
             Event::Eof => break,
@@ -2280,5 +2373,40 @@ mod tests {
         );
         assert_eq!(load_version_scripts(&path).unwrap().len(), 1);
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn inline_styles_round_trip_through_scenario_xml() {
+        use crate::model::{InlineStyle, StyleSpan};
+        let mut blk = ScriptBlock::new(ElementType::Dialogue, "Really quiet now.".into());
+        blk.styles = vec![
+            StyleSpan {
+                start: 0,
+                end: 6,
+                style: InlineStyle::Bold,
+            },
+            StyleSpan {
+                start: 7,
+                end: 12,
+                style: InlineStyle::Italic,
+            },
+            StyleSpan {
+                start: 13,
+                end: 16,
+                style: InlineStyle::Underline,
+            },
+        ];
+        blk.normalize_styles();
+        let p = Project {
+            title: "Styled".into(),
+            blocks: vec![blk.clone()],
+            ..Default::default()
+        };
+        let xml = project_to_scenario_xml(&p);
+        assert!(xml.contains("<formatting>"));
+        let parsed = parse_scenario(&xml).unwrap();
+        assert_eq!(parsed.blocks.len(), 1);
+        assert_eq!(parsed.blocks[0].text, blk.text);
+        assert_eq!(parsed.blocks[0].styles, blk.styles);
     }
 }

@@ -1,7 +1,7 @@
 use eframe::egui;
 use scriptcraft_core::{
     edit,
-    editing::{auto_upper, format_duration, FINAL_DRAFT_A4},
+    editing::{auto_upper, format_duration},
     format::{validate, Issue},
     kitsp::{self, Card, Metadata},
     model::{ElementType, Project, Scene, ScriptBlock},
@@ -393,10 +393,10 @@ pub(crate) fn shortcut(key: &str) -> String {
     format!("{}{key}", shortcut_prefix())
 }
 
-/// A shift-modified shortcut label ("⇧⌘S" / "Shift+Ctrl+S").
+/// A shift-modified shortcut label ("Shift+⌘S" / "Shift+Ctrl+S").
 pub(crate) fn shift_shortcut(key: &str) -> String {
     if cfg!(target_os = "macos") {
-        format!("⇧⌘{key}")
+        format!("Shift+⌘{key}")
     } else {
         format!("Shift+Ctrl+{key}")
     }
@@ -579,6 +579,30 @@ fn menu_row(
 
 fn menu_item(ui: &mut egui::Ui, label: &str, shortcut: Option<&str>, enabled: bool) -> bool {
     menu_row(ui, label, shortcut, enabled, None)
+}
+
+fn menu_section_label(ui: &mut egui::Ui, title: &str) {
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 20.0), egui::Sense::hover());
+    ui.painter().text(
+        egui::pos2(rect.left() + 14.0, rect.center().y + 1.0),
+        egui::Align2::LEFT_CENTER,
+        title.to_ascii_uppercase(),
+        egui::FontId::proportional(10.0),
+        kit().disabled_text,
+    );
+}
+
+fn menu_hairline(ui: &mut egui::Ui) {
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 9.0), egui::Sense::hover());
+    ui.painter().line_segment(
+        [
+            egui::pos2(rect.left() + 8.0, rect.center().y),
+            egui::pos2(rect.right() - 8.0, rect.center().y),
+        ],
+        egui::Stroke::new(1.0_f32, kit().sep),
+    );
 }
 
 fn menu_check(
@@ -1344,6 +1368,7 @@ impl ScriptCraftApp {
     /// Called by the real app only — tests stay disk-free.
     pub fn load_persistent(&mut self) {
         self.settings = AppSettings::load();
+        self.export_options.page_size = self.settings.page_size;
         self.recent = load_recent();
         self.persist = true;
         self.recovery = Self::scan_recovery_files();
@@ -1431,6 +1456,31 @@ impl ScriptCraftApp {
     #[doc(hidden)]
     pub fn set_script_face_for_test(&mut self, face: crate::settings::ScriptFace) {
         self.settings.script_face = face;
+    }
+
+    /// Test hook: current paper size setting.
+    #[doc(hidden)]
+    pub fn page_size_for_test(&self) -> scriptcraft_core::editing::PageSize {
+        self.settings.page_size
+    }
+
+    /// Test hook: switch paper size and relayout.
+    #[doc(hidden)]
+    pub fn set_page_size_for_test(&mut self, size: scriptcraft_core::editing::PageSize) {
+        self.settings.page_size = size;
+        self.export_options.page_size = size;
+        self.doc_hint = None;
+        self.refresh_derived();
+    }
+
+    /// Test hook: inline style spans on block `bi`.
+    #[doc(hidden)]
+    pub fn block_styles_for_test(&self, bi: usize) -> Vec<scriptcraft_core::model::StyleSpan> {
+        self.project
+            .as_ref()
+            .and_then(|p| p.blocks.get(bi))
+            .map(|b| b.styles.clone())
+            .unwrap_or_default()
     }
 
     /// Test hook: draw the in-window menu bar on macOS too, where the native
@@ -2358,6 +2408,7 @@ impl ScriptCraftApp {
             Some(p) => {
                 let labels: Vec<String> =
                     (0..p.scenes().len()).map(|i| self.scene_label(i)).collect();
+                let spec = scriptcraft_layout::page_spec(self.settings.page_size);
                 let page_lock =
                     scriptcraft_core::page_lock::PageLock::from_json(&self.meta.locked_pages)
                         .ok()
@@ -2369,8 +2420,8 @@ impl ScriptCraftApp {
                     Some(scriptcraft_layout::place::layout_document_view(
                         &view,
                         &p.blocks,
-                        &FINAL_DRAFT_A4,
-                        &scriptcraft_layout::place::FINAL_DRAFT_A4_GEOMETRY,
+                        spec.metrics,
+                        spec.geometry,
                         &labels,
                         page_lock.as_ref(),
                     ))
@@ -2382,8 +2433,8 @@ impl ScriptCraftApp {
                             (Some((first, upto)), Some(prev)) => {
                                 scriptcraft_layout::place::relayout_from(
                                     &p.blocks,
-                                    &FINAL_DRAFT_A4,
-                                    &scriptcraft_layout::place::FINAL_DRAFT_A4_GEOMETRY,
+                                    spec.metrics,
+                                    spec.geometry,
                                     &labels,
                                     prev,
                                     first,
@@ -2394,9 +2445,9 @@ impl ScriptCraftApp {
                         }
                     };
                     incremental.or_else(|| {
-                        Some(crate::script_view::document_layout_with_page_lock(
+                        Some(crate::script_view::document_layout_for(
                             &p.blocks,
-                            &FINAL_DRAFT_A4,
+                            self.settings.page_size,
                             &labels,
                             page_lock.as_ref(),
                         ))
@@ -2418,7 +2469,8 @@ impl ScriptCraftApp {
                 edit::EditCommand::DeleteRange { start, .. } => start.bi,
                 edit::EditCommand::SetText { bi, .. }
                 | edit::EditCommand::SetType { bi, .. }
-                | edit::EditCommand::SetDual { bi, .. } => *bi,
+                | edit::EditCommand::SetDual { bi, .. }
+                | edit::EditCommand::SetStyles { bi, .. } => *bi,
                 edit::EditCommand::SplitBlock { at, .. } => at.bi,
                 edit::EditCommand::MergeBlocks { bi, .. } => *bi,
                 // The block inserted at `at` lands after block `at - 1`, and
@@ -2474,10 +2526,11 @@ impl ScriptCraftApp {
 
     /// Capture every current page start as a production page lock.
     fn lock_pages(&mut self) {
+        let metrics = self.settings.page_size.metrics();
         let starts = match &self.project {
             Some(p) if p.has_omitted_scenes() => {
                 let view = p.document_view();
-                scriptcraft_layout::paginate::page_starts(&view.blocks, &FINAL_DRAFT_A4)
+                scriptcraft_layout::paginate::page_starts(&view.blocks, metrics)
                     .into_iter()
                     .filter_map(|(vi, para)| {
                         let bi = view.sources.get(vi).copied().flatten()?;
@@ -2485,7 +2538,7 @@ impl ScriptCraftApp {
                     })
                     .collect()
             }
-            Some(p) => scriptcraft_layout::paginate::page_starts(&p.blocks, &FINAL_DRAFT_A4),
+            Some(p) => scriptcraft_layout::paginate::page_starts(&p.blocks, metrics),
             None => Vec::new(),
         };
         if starts.is_empty() {
@@ -2586,7 +2639,8 @@ impl ScriptCraftApp {
             }
             edit::EditCommand::SetText { bi, .. }
             | edit::EditCommand::SetType { bi, .. }
-            | edit::EditCommand::SetDual { bi, .. } => is_hidden(*bi),
+            | edit::EditCommand::SetDual { bi, .. }
+            | edit::EditCommand::SetStyles { bi, .. } => is_hidden(*bi),
             edit::EditCommand::SplitBlock { at, .. } => is_hidden(at.bi) || is_heading(at.bi),
             edit::EditCommand::MergeBlocks { bi, .. } => {
                 is_hidden(*bi) || is_hidden(bi.saturating_sub(1))
@@ -2597,6 +2651,25 @@ impl ScriptCraftApp {
             edit::EditCommand::DeleteBlock { bi } => is_hidden(*bi),
             edit::EditCommand::ReplaceAll { .. } => false,
         })
+    }
+
+    /// Toggle inline bold / italic / underline over the active selection or
+    /// the word under the caret (recorded as one undoable command step).
+    fn toggle_inline_style(&mut self, style: scriptcraft_core::model::InlineStyle) {
+        let Some(sel) = self.editor2.selection else {
+            return;
+        };
+        let cmds = match &self.project {
+            Some(p) => crate::script_view::toggle_inline_style(&p.blocks, sel, style),
+            None => Vec::new(),
+        };
+        if !cmds.is_empty() {
+            self.apply_editor2_output(crate::script_view::ScriptViewOutput {
+                commands: cmds,
+                undo: false,
+                redo: false,
+            });
+        }
     }
 
     /// Apply Editor 2.0's frame output through its command history.
@@ -2623,6 +2696,7 @@ impl ScriptCraftApp {
                 edit::EditCommand::SetType { bi, .. } => Some(*bi),
                 edit::EditCommand::SetText { bi, .. } => Some(*bi),
                 edit::EditCommand::SetDual { bi, .. } => Some(*bi),
+                edit::EditCommand::SetStyles { bi, .. } => Some(*bi),
                 edit::EditCommand::InsertBlock { at, .. } => Some(*at),
                 _ => None,
             })
@@ -3438,27 +3512,36 @@ impl ScriptCraftApp {
         const PLEX_BOLD: &[u8] = include_bytes!("../assets/fonts/IBMPlexMono-Bold.ttf");
         const COURIER_REGULAR: &[u8] = include_bytes!("../assets/fonts/CourierPrime-Regular.ttf");
         const COURIER_BOLD: &[u8] = include_bytes!("../assets/fonts/CourierPrime-Bold.ttf");
+        const COURIER_ITALIC: &[u8] = include_bytes!("../assets/fonts/CourierPrime-Italic.ttf");
         const LIBERATION_REGULAR: &[u8] =
             include_bytes!("../assets/fonts/LiberationMono-Regular.ttf");
         const LIBERATION_BOLD: &[u8] = include_bytes!("../assets/fonts/LiberationMono-Bold.ttf");
+        const LIBERATION_ITALIC: &[u8] =
+            include_bytes!("../assets/fonts/LiberationMono-Italic.ttf");
         let face = self.settings.script_face;
         // Courier New comes from the OS. When it isn't installed the PDF uses
         // Courier Prime, exactly like the editor does; the two share their
         // 0.6 em advance, so the exported line breaks match what was on screen.
-        let (regular, bold): (&[u8], &[u8]) = match face {
-            crate::settings::ScriptFace::PlexMono => (PLEX_REGULAR, PLEX_BOLD),
-            crate::settings::ScriptFace::CourierPrime => (COURIER_REGULAR, COURIER_BOLD),
-            crate::settings::ScriptFace::LiberationMono => (LIBERATION_REGULAR, LIBERATION_BOLD),
+        let (regular, bold, italic): (&[u8], &[u8], &[u8]) = match face {
+            crate::settings::ScriptFace::PlexMono => (PLEX_REGULAR, PLEX_BOLD, COURIER_ITALIC),
+            crate::settings::ScriptFace::CourierPrime => {
+                (COURIER_REGULAR, COURIER_BOLD, COURIER_ITALIC)
+            }
+            crate::settings::ScriptFace::LiberationMono => {
+                (LIBERATION_REGULAR, LIBERATION_BOLD, LIBERATION_ITALIC)
+            }
             crate::settings::ScriptFace::CourierNew => match crate::system_font::courier_new() {
                 Some(system) => (
                     system.regular.as_slice(),
                     system.bold.as_deref().unwrap_or(system.regular.as_slice()),
+                    system.italic.as_deref().unwrap_or(COURIER_ITALIC),
                 ),
-                None => (COURIER_REGULAR, COURIER_BOLD),
+                None => (COURIER_REGULAR, COURIER_BOLD, COURIER_ITALIC),
             },
         };
         // Plex is the only face with Cyrillic, so it shadows the chosen face
-        // whenever a glyph is missing.
+        // whenever a glyph is missing. Liberation Mono Italic supplies Cyrillic
+        // italics with the exact same 0.6 em advance.
         let (fallback_regular, fallback_bold): (&[u8], &[u8]) =
             if face == crate::settings::ScriptFace::PlexMono {
                 (COURIER_REGULAR, COURIER_BOLD)
@@ -3468,8 +3551,10 @@ impl ScriptCraftApp {
         let fonts = scriptcraft_layout::pdf::ExportFonts {
             regular,
             bold,
+            italic: Some(italic),
             fallback_regular,
             fallback_bold,
+            fallback_italic: Some(LIBERATION_ITALIC),
         };
         let latest = self.revisions.latest();
         match scriptcraft_layout::pdf::to_pdf_bytes_with_marks_and_latest(
@@ -5738,6 +5823,111 @@ impl ScriptCraftApp {
                                 self.insert_below(t);
                             }
                         }
+                        toolbar_sep(ui);
+                        let (is_bold, is_italic, is_under) = self
+                            .project
+                            .as_ref()
+                            .map(|p| {
+                                crate::script_view::active_inline_styles(
+                                    &p.blocks,
+                                    self.editor2.selection,
+                                )
+                            })
+                            .unwrap_or((false, false, false));
+                        let can_style = editable && self.editor2.selection.is_some();
+                        for (style, glyph, active, tip, key) in [
+                            (
+                                scriptcraft_core::model::InlineStyle::Bold,
+                                "B",
+                                is_bold,
+                                "Bold",
+                                "B",
+                            ),
+                            (
+                                scriptcraft_core::model::InlineStyle::Italic,
+                                "I",
+                                is_italic,
+                                "Italic",
+                                "I",
+                            ),
+                            (
+                                scriptcraft_core::model::InlineStyle::Underline,
+                                "U",
+                                is_under,
+                                "Underline",
+                                "U",
+                            ),
+                        ] {
+                            let c = kit();
+                            let sense = if can_style {
+                                egui::Sense::click()
+                            } else {
+                                egui::Sense::hover()
+                            };
+                            let (rect, resp) =
+                                ui.allocate_exact_size(egui::vec2(26.0, 26.0), sense);
+                            let bg = if active && can_style {
+                                c.accent_soft
+                            } else if resp.hovered() && can_style {
+                                c.button_hover
+                            } else {
+                                egui::Color32::TRANSPARENT
+                            };
+                            if bg != egui::Color32::TRANSPARENT {
+                                ui.painter().rect_filled(rect, 5.0, bg);
+                            }
+                            let fg = if !can_style {
+                                c.disabled_text
+                            } else if active {
+                                c.accent_text
+                            } else {
+                                c.text
+                            };
+                            let font = match style {
+                                scriptcraft_core::model::InlineStyle::Bold => {
+                                    egui::FontId::new(13.0, bold_mono())
+                                }
+                                scriptcraft_core::model::InlineStyle::Italic => {
+                                    egui::FontId::new(13.0, italic_mono())
+                                }
+                                scriptcraft_core::model::InlineStyle::Underline => {
+                                    egui::FontId::new(13.0, MONO)
+                                }
+                            };
+                            ui.painter().text(
+                                rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                glyph,
+                                font,
+                                fg,
+                            );
+                            if style == scriptcraft_core::model::InlineStyle::Underline {
+                                ui.painter().line_segment(
+                                    [
+                                        egui::pos2(rect.center().x - 4.5, rect.center().y + 6.0),
+                                        egui::pos2(rect.center().x + 4.5, rect.center().y + 6.0),
+                                    ],
+                                    egui::Stroke::new(1.1_f32, fg),
+                                );
+                            }
+                            let resp = resp.on_hover_text(format!("{tip} ({})", shortcut(key)));
+                            let resp = if can_style {
+                                resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+                            } else {
+                                resp
+                            };
+                            let tip_owned = tip.to_string();
+                            resp.widget_info(|| {
+                                egui::WidgetInfo::labeled(
+                                    egui::WidgetType::Button,
+                                    can_style,
+                                    tip_owned.clone(),
+                                )
+                            });
+                            if resp.clicked() && can_style {
+                                self.toggle_inline_style(style);
+                            }
+                        }
                         // Page zoom cluster (script view only; pinch works too).
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             let mut z = self.zoom;
@@ -6224,11 +6414,12 @@ impl ScriptCraftApp {
             About,
         }
         let mut action: Option<M> = None;
-        ui.set_min_width(250.0);
+        ui.set_width(264.0);
         ui.spacing_mut().item_spacing.y = 2.0;
         {
             let has = self.project.is_some();
 
+            menu_section_label(ui, "Project");
             if menu_item(ui, "New", None, true) {
                 action = Some(M::New);
             }
@@ -6241,21 +6432,42 @@ impl ScriptCraftApp {
             if menu_item(ui, "Save as…", Some(&shift_shortcut("S")), true) {
                 action = Some(M::SaveAs);
             }
-            ui.separator();
+            menu_hairline(ui);
+            menu_section_label(ui, "Draft & Interchange");
             if menu_item(ui, "New Script Version…", None, has) {
                 action = Some(M::Version);
             }
-            ui.menu_button("Import", |ui| {
-                ui.set_min_width(220.0);
-                if menu_item(ui, "Fountain…", None, true) {
-                    action = Some(M::Import);
-                }
-                if menu_item(ui, "Final Draft (.fdx)…", None, true) {
-                    action = Some(M::ImportFdx);
-                }
-                if menu_item(ui, "Fade In (.fadein)…", None, true) {
-                    action = Some(M::ImportFadeIn);
-                }
+            // Custom-aligned submenu trigger matching `menu_item` geometry.
+            ui.scope(|ui| {
+                let c = kit();
+                let v = &mut ui.style_mut().visuals;
+                v.widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
+                v.widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
+                v.widgets.inactive.bg_stroke = egui::Stroke::NONE;
+                v.widgets.hovered.weak_bg_fill = c.button_hover;
+                v.widgets.hovered.bg_fill = c.button_hover;
+                v.widgets.hovered.bg_stroke = egui::Stroke::NONE;
+                v.widgets.open.weak_bg_fill = c.button_hover;
+                v.widgets.open.bg_fill = c.button_hover;
+                v.widgets.open.bg_stroke = egui::Stroke::NONE;
+                ui.spacing_mut().button_padding = egui::vec2(14.0, 5.0);
+                ui.menu_button(
+                    egui::RichText::new("Import").size(13.0).color(c.text),
+                    |ui| {
+                        ui.set_width(220.0);
+                        ui.spacing_mut().item_spacing.y = 2.0;
+                        menu_section_label(ui, "Import Format");
+                        if menu_item(ui, "Fountain…", None, true) {
+                            action = Some(M::Import);
+                        }
+                        if menu_item(ui, "Final Draft (.fdx)…", None, true) {
+                            action = Some(M::ImportFdx);
+                        }
+                        if menu_item(ui, "Fade In (.fadein)…", None, true) {
+                            action = Some(M::ImportFadeIn);
+                        }
+                    },
+                );
             });
             if menu_item(ui, "Export…", None, has) {
                 action = Some(M::Export);
@@ -6263,11 +6475,11 @@ impl ScriptCraftApp {
             if menu_item(ui, "Print preview script", Some("F12"), has) {
                 action = Some(M::Preview);
             }
-            ui.separator();
+            menu_hairline(ui);
+            menu_section_label(ui, "Application");
             if menu_item(ui, "Settings…", Some(&shortcut(",")), true) {
                 action = Some(M::Settings);
             }
-            ui.separator();
             if menu_item(ui, "Help", None, true) {
                 action = Some(M::Help);
             }
@@ -6720,8 +6932,10 @@ impl ScriptCraftApp {
         let fonts = scriptcraft_layout::pdf::ExportFonts {
             regular: include_bytes!("../assets/fonts/CourierPrime-Regular.ttf"),
             bold: include_bytes!("../assets/fonts/CourierPrime-Bold.ttf"),
+            italic: None,
             fallback_regular: include_bytes!("../assets/fonts/IBMPlexMono-Regular.ttf"),
             fallback_bold: include_bytes!("../assets/fonts/IBMPlexMono-Bold.ttf"),
+            fallback_italic: None,
         };
         match scriptcraft_layout::pdf::to_summary_pdf_bytes(&summary, &title, &fonts) {
             Ok(bytes) => Some(bytes),
@@ -8541,12 +8755,18 @@ impl ScriptCraftApp {
     /// Settings module: page list on the left, Common/Modules options right —
     /// KIT's Preferences dialog rendered as a full module.
     fn settings_view(&mut self, ctx: &egui::Context) {
+        let prev_page_size = self.settings.page_size;
         let outcome = crate::settings::show(
             ctx,
             &mut self.settings,
             &mut self.settings_ui,
             &self.update.check,
         );
+        if self.settings.page_size != prev_page_size {
+            self.export_options.page_size = self.settings.page_size;
+            self.doc_hint = None;
+            self.refresh_derived();
+        }
         if outcome.check_updates {
             self.update.start();
             ctx.request_repaint();
@@ -8594,8 +8814,12 @@ impl ScriptCraftApp {
                 let avail = ui.available_size();
                 let zoom = match self.fit {
                     FitMode::Off => self.zoom,
-                    FitMode::Page => crate::script_view::fit_page_zoom(avail),
-                    FitMode::Width => crate::script_view::fit_width_zoom(avail),
+                    FitMode::Page => {
+                        crate::script_view::fit_page_zoom_for(self.settings.page_size, avail)
+                    }
+                    FitMode::Width => {
+                        crate::script_view::fit_width_zoom_for(self.settings.page_size, avail)
+                    }
                 };
                 self.last_viewport = avail;
                 self.last_render_zoom = zoom;

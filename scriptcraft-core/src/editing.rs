@@ -481,6 +481,76 @@ pub const FINAL_DRAFT_A4: TemplateMetrics = TemplateMetrics {
     lines_per_page: 58,
 };
 
+/// Standard Hollywood / Final Draft US Letter screenplay template:
+/// 8.5 × 11 in (215.9 × 279.4 mm), 1.5 in left / 1.0 in right (6.0 in =
+/// 152.4 mm = 60 chars), 55 lines per page at 6 lines/inch.
+pub const FINAL_DRAFT_LETTER: TemplateMetrics = TemplateMetrics {
+    full: 60,
+    cue: 38,
+    paren: 24,
+    dialog: 35,
+    lyrics: 50,
+    head_space: 2,
+    scenechars_space: 0,
+    action_space: 1,
+    char_space: 1,
+    trans_space: 1,
+    note_space: 1,
+    lines_per_page: 55,
+};
+
+/// Screenplay paper size / template. A4 stays the default to preserve KIT
+/// Scenarist compatibility and existing European workflows; US Letter is
+/// opt-in in Settings and Export.
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize,
+)]
+pub enum PageSize {
+    #[default]
+    A4,
+    UsLetter,
+}
+
+impl PageSize {
+    pub const ALL: [Self; 2] = [Self::A4, Self::UsLetter];
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::A4 => "a4",
+            Self::UsLetter => "letter",
+        }
+    }
+
+    pub fn from_key(key: &str) -> Option<Self> {
+        match key.trim().to_ascii_lowercase().as_str() {
+            "a4" => Some(Self::A4),
+            "letter" | "us_letter" | "us-letter" => Some(Self::UsLetter),
+            _ => None,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::A4 => "A4 (210 × 297 mm)",
+            Self::UsLetter => "US Letter (8.5 × 11 in)",
+        }
+    }
+
+    pub fn template_label(self) -> &'static str {
+        match self {
+            Self::A4 => "Final Draft Screenplay (A4)",
+            Self::UsLetter => "Final Draft Screenplay (US Letter)",
+        }
+    }
+
+    pub fn metrics(self) -> &'static TemplateMetrics {
+        match self {
+            Self::A4 => &FINAL_DRAFT_A4,
+            Self::UsLetter => &FINAL_DRAFT_LETTER,
+        }
+    }
+}
+
 /// How many editor rows a text needs inside a column of `col_width_px`
 /// at `font_pt`. Greedy word wrap, matching the on-screen layout.
 pub fn wrap_rows(text: &str, col_width_px: f32, font_pt: f32) -> usize {

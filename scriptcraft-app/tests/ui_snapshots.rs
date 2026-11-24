@@ -654,3 +654,71 @@ fn snap_31_update_prompt() {
     h.run_steps(2);
     h.snapshot("31_update_prompt");
 }
+
+/// Redesigned Menu button popup with uppercase sections and hairlines.
+#[test]
+fn snap_37_menu_popup() {
+    use egui_kittest::kittest::Queryable;
+
+    let mut h = harness(SideTab::Script, None);
+    h.run();
+    h.get_by_label("Menu").click();
+    h.run();
+    h.snapshot("37_menu_popup");
+}
+
+/// Redesigned About ScriptCraft window.
+#[test]
+fn snap_38_about_dialog() {
+    use egui_kittest::kittest::Queryable;
+
+    let mut h = harness(SideTab::Script, None);
+    h.run();
+    h.get_by_label("Menu").click();
+    h.run();
+    h.get_by_label("About ScriptCraft").click();
+    h.run();
+    h.input_mut().events.push(egui::Event::PointerGone);
+    h.run();
+    h.snapshot("38_about_dialog");
+}
+
+/// Inline Bold, Italic, and Underline painted on the screenplay page with
+/// active B / I / U toolbar toggles.
+#[test]
+fn snap_39_inline_styles() {
+    use scriptcraft_core::edit::EditCommand;
+    use scriptcraft_core::model::{InlineStyle, StyleSpan};
+
+    let mut h = harness(SideTab::Script, None);
+    h.run();
+    let bi = h.state().find_first_heading_block().expect("heading") + 1;
+    let len = h.state().block_text(bi).unwrap().chars().count();
+    let a = (len / 4).max(4).min(len);
+    let b = (len / 2).max(a + 4).min(len);
+    let c = ((len * 3) / 4).max(b + 4).min(len);
+    h.state_mut()
+        .apply_editor_commands_for_test(vec![EditCommand::SetStyles {
+            bi,
+            styles: vec![
+                StyleSpan {
+                    start: 0,
+                    end: a,
+                    style: InlineStyle::Bold,
+                },
+                StyleSpan {
+                    start: a,
+                    end: b,
+                    style: InlineStyle::Italic,
+                },
+                StyleSpan {
+                    start: b,
+                    end: c,
+                    style: InlineStyle::Underline,
+                },
+            ],
+        }]);
+    h.state_mut().editor2_set_selection((bi, 0, 0), (bi, 0, a));
+    h.run();
+    h.snapshot("39_inline_styles");
+}

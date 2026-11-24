@@ -1,4 +1,176 @@
-use crate::model::{ElementType, Project, ScriptBlock};
+use crate::model::{ElementType, InlineStyle, Project, ScriptBlock, StyleSpan};
+
+/// Format a block's text with Fountain inline emphasis markers (`**bold**`,
+/// `*italic*`, `_underline_`) when the block carries inline styles.
+fn render_fountain_styled(b: &ScriptBlock) -> String {
+    let trimmed = b.text.trim();
+    if b.styles.is_empty() || trimmed.is_empty() {
+        return trimmed.to_string();
+    }
+    let leading = b.text.chars().count() - b.text.trim_start().chars().count();
+    let chars: Vec<char> = trimmed.chars().collect();
+    let runs = b.style_runs_in(leading, leading + chars.len());
+    let mut out = String::with_capacity(trimmed.len() + 16);
+    for (a, z, bold, italic, underline) in runs {
+        let seg: String = chars[a - leading..z - leading].iter().collect();
+        let stars = match (bold, italic) {
+            (true, true) => "***",
+            (true, false) => "**",
+            (false, true) => "*",
+            (false, false) => "",
+        };
+        if underline {
+            out.push('_');
+        }
+        out.push_str(stars);
+        out.push_str(&seg);
+        out.push_str(stars);
+        if underline {
+            out.push('_');
+        }
+    }
+    out
+}
+
+/// Parse balanced Fountain emphasis (`***`, `**`, `*`, `_`) out of `input`
+/// into plain text + normalized inline [`StyleSpan`]s. Unmatched delimiters
+/// stay literal.
+fn parse_fountain_emphasis(input: &str) -> (String, Vec<StyleSpan>) {
+    if !input.contains('*') && !input.contains('_') {
+        return (input.to_string(), Vec::new());
+    }
+    let chars: Vec<char> = input.chars().collect();
+    let n = chars.len();
+    let mut out = String::with_capacity(input.len());
+    let mut spans: Vec<StyleSpan> = Vec::new();
+    let mut bold_start: Option<usize> = None;
+    let mut italic_start: Option<usize> = None;
+    let mut under_start: Option<usize> = None;
+    let mut out_len = 0usize;
+    let mut i = 0usize;
+
+    // Look ahead for a matching closing delimiter before opening a new one,
+    // so stray `*` or `_` characters stay literal.
+    let has_later = |from: usize, pat: &[char]| -> bool {
+        if pat.is_empty() || from + pat.len() > n {
+            return false;
+        }
+        let mut j = from;
+        while j + pat.len() <= n {
+            if chars[j] == '\\' {
+                j += 2;
+                continue;
+            }
+            if &chars[j..j + pat.len()] == pat {
+                return true;
+            }
+            j += 1;
+        }
+        false
+    };
+
+    while i < n {
+        if chars[i] == '\\' && i + 1 < n && matches!(chars[i + 1], '*' | '_') {
+            out.push(chars[i + 1]);
+            out_len += 1;
+            i += 2;
+            continue;
+        }
+        // `***` toggles both bold and italic simultaneously.
+        if i + 2 < n && chars[i] == '*' && chars[i + 1] == '*' && chars[i + 2] == '*' {
+            if let (Some(bs), Some(is)) = (bold_start, italic_start) {
+                if out_len > bs {
+                    spans.push(StyleSpan {
+                        start: bs,
+                        end: out_len,
+                        style: InlineStyle::Bold,
+                    });
+                }
+                if out_len > is {
+                    spans.push(StyleSpan {
+                        start: is,
+                        end: out_len,
+                        style: InlineStyle::Italic,
+                    });
+                }
+                bold_start = None;
+                italic_start = None;
+                i += 3;
+                continue;
+            } else if bold_start.is_none()
+                && italic_start.is_none()
+                && has_later(i + 3, &['*', '*', '*'])
+            {
+                bold_start = Some(out_len);
+                italic_start = Some(out_len);
+                i += 3;
+                continue;
+            }
+        }
+        // `**` toggles bold.
+        if i + 1 < n && chars[i] == '*' && chars[i + 1] == '*' {
+            if let Some(bs) = bold_start {
+                if out_len > bs {
+                    spans.push(StyleSpan {
+                        start: bs,
+                        end: out_len,
+                        style: InlineStyle::Bold,
+                    });
+                }
+                bold_start = None;
+                i += 2;
+                continue;
+            } else if has_later(i + 2, &['*', '*']) {
+                bold_start = Some(out_len);
+                i += 2;
+                continue;
+            }
+        }
+        // `*` toggles italic.
+        if chars[i] == '*' {
+            if let Some(is) = italic_start {
+                if out_len > is {
+                    spans.push(StyleSpan {
+                        start: is,
+                        end: out_len,
+                        style: InlineStyle::Italic,
+                    });
+                }
+                italic_start = None;
+                i += 1;
+                continue;
+            } else if has_later(i + 1, &['*']) {
+                italic_start = Some(out_len);
+                i += 1;
+                continue;
+            }
+        }
+        // `_` toggles underline.
+        if chars[i] == '_' {
+            if let Some(us) = under_start {
+                if out_len > us {
+                    spans.push(StyleSpan {
+                        start: us,
+                        end: out_len,
+                        style: InlineStyle::Underline,
+                    });
+                }
+                under_start = None;
+                i += 1;
+                continue;
+            } else if has_later(i + 1, &['_']) {
+                under_start = Some(out_len);
+                i += 1;
+                continue;
+            }
+        }
+        out.push(chars[i]);
+        out_len += 1;
+        i += 1;
+    }
+
+    (out, crate::model::normalize_style_spans(spans, out_len))
+}
 
 /// Export a project to Fountain plain text (`.fountain`).
 ///
@@ -35,10 +207,12 @@ pub fn to_fountain(p: &Project, meta: &crate::kitsp::Metadata) -> String {
     }
     out.push('\n');
     for b in &p.blocks {
-        let text = b.text.trim();
-        if text.is_empty() {
+        let raw = b.text.trim();
+        if raw.is_empty() {
             continue;
         }
+        let styled = render_fountain_styled(b);
+        let text = styled.as_str();
         match b.element_type {
             ElementType::SceneHeading
             | ElementType::SceneCharacters
@@ -50,7 +224,7 @@ pub fn to_fountain(p: &Project, meta: &crate::kitsp::Metadata) -> String {
                 out.push('\n');
             }
             ElementType::Lyrics => {
-                if text.starts_with('~') {
+                if raw.starts_with('~') {
                     out.push_str(text);
                 } else {
                     out.push('~');
@@ -60,12 +234,12 @@ pub fn to_fountain(p: &Project, meta: &crate::kitsp::Metadata) -> String {
             }
             ElementType::NonPrintable => {
                 out.push_str("[[");
-                out.push_str(&text.replace('\n', " "));
+                out.push_str(&raw.replace('\n', " "));
                 out.push_str("]]\n");
             }
             ElementType::Action => {
                 // Escape action lines that Fountain would read as scenes.
-                let up = text.to_uppercase();
+                let up = raw.to_uppercase();
                 let looks_like_scene = ["INT.", "EXT.", "EST.", "INT ", "EXT ", "EST "]
                     .iter()
                     .any(|pre| up.starts_with(pre));
@@ -76,7 +250,7 @@ pub fn to_fountain(p: &Project, meta: &crate::kitsp::Metadata) -> String {
                 out.push('\n');
             }
             ElementType::Transition => {
-                if text.starts_with('>') {
+                if raw.starts_with('>') {
                     out.push_str(text);
                 } else {
                     out.push_str("> ");
@@ -241,6 +415,39 @@ mod tests {
             assert_eq!(a.element_type, b.element_type, "type for {:?}", a.text);
             assert_eq!(a.text, b.text);
         }
+    }
+
+    #[test]
+    fn inline_styles_round_trip_through_fountain() {
+        let mut blk = ScriptBlock::new(ElementType::Action, "Bold italic under.".into());
+        blk.styles = vec![
+            StyleSpan {
+                start: 0,
+                end: 4,
+                style: InlineStyle::Bold,
+            },
+            StyleSpan {
+                start: 5,
+                end: 11,
+                style: InlineStyle::Italic,
+            },
+            StyleSpan {
+                start: 12,
+                end: 17,
+                style: InlineStyle::Underline,
+            },
+        ];
+        blk.normalize_styles();
+        let p = Project {
+            title: "Styled".into(),
+            blocks: vec![blk.clone()],
+            ..Default::default()
+        };
+        let f = to_fountain(&p, &meta("Me"));
+        assert!(f.contains("**Bold** *italic* _under_."));
+        let (q, _) = parse_fountain(&f);
+        assert_eq!(q.blocks[0].text, blk.text);
+        assert_eq!(q.blocks[0].styles, blk.styles);
     }
 }
 
@@ -528,6 +735,16 @@ pub fn parse_fountain(text: &str) -> (Project, FountainMeta) {
                 ElementType::NonPrintable,
                 note.trim().to_string(),
             );
+        }
+    }
+
+    for b in &mut blocks {
+        if b.element_type.is_printable() {
+            let (plain, styles) = parse_fountain_emphasis(&b.text);
+            if !styles.is_empty() {
+                b.text = plain;
+                b.styles = styles;
+            }
         }
     }
 
