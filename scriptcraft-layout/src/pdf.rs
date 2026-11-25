@@ -793,10 +793,19 @@ fn layout_pages_inner(
                                 l.shot_highlights = hl;
                                 if let Some(&first_si) = line_shots.first() {
                                     if let Some(primary) = p.shots.shots.get(first_si) {
+                                        let short_code: String =
+                                            if primary.code.chars().count() > 10 {
+                                                let mut s: String =
+                                                    primary.code.chars().take(9).collect();
+                                                s.push('…');
+                                                s
+                                            } else {
+                                                primary.code.clone()
+                                            };
                                         let tag = if line_shots.len() > 1 {
-                                            format!("{} +{}", primary.code, line_shots.len() - 1)
+                                            format!("{short_code} +{}", line_shots.len() - 1)
                                         } else {
-                                            primary.code.clone()
+                                            short_code
                                         };
                                         if last_tagged_shot.as_deref() != Some(tag.as_str()) {
                                             l.shot_tag = Some((tag.clone(), primary.color.rgb()));

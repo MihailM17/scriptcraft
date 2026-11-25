@@ -799,6 +799,134 @@ impl ShotList {
         true
     }
 
+    /// Add `range` to `shot_id` and automatically coalesce any overlapping or
+    /// adjacent spans in `shot_id` into a single continuous span.
+    pub fn assign_range_merged(
+        &mut self,
+        shot_id: Uuid,
+        range: ShotRange,
+        blocks: &[ScriptBlock],
+    ) -> bool {
+        let index = block_index_map(blocks);
+        let Some(shot) = self.get_mut(shot_id) else {
+            return false;
+        };
+        let before = shot.spans.clone();
+
+        let mut unresolved: Vec<ShotRange> = Vec::new();
+        let mut intervals: Vec<((usize, usize), (usize, usize))> = Vec::new();
+        for sp in shot.spans.iter().chain(std::iter::once(&range)) {
+            if let Some(iv) = sp.resolve_chars(&index, blocks) {
+                if let Some(norm) = normalize_doc_interval(iv.0, iv.1, blocks) {
+                    intervals.push(norm);
+                }
+            } else {
+                unresolved.push(sp.clone());
+            }
+        }
+
+        intervals.sort_unstable();
+        let mut merged: Vec<((usize, usize), (usize, usize))> = Vec::new();
+        for (lo, hi) in intervals {
+            if let Some(last) = merged.last_mut() {
+                if intervals_touch_or_overlap(last.1, lo, blocks) {
+                    if hi > last.1 {
+                        last.1 = hi;
+                    }
+                    continue;
+                }
+            }
+            merged.push((lo, hi));
+        }
+
+        let mut next_spans: Vec<ShotRange> = merged
+            .into_iter()
+            .filter_map(|(lo, hi)| doc_interval_to_shot_range(lo, hi, blocks))
+            .collect();
+        next_spans.extend(unresolved);
+
+        if next_spans == before {
+            false
+        } else {
+            shot.spans = next_spans;
+            true
+        }
+    }
+
+    /// Carve `range` out of matching shot(s) (`None` = every shot covering it,
+    /// `Some(id)` = only that shot). Splits spans cleanly when carving from the
+    /// middle, or trims/removes them cleanly at the edges.
+    pub fn unassign_range(
+        &mut self,
+        shot_filter: Option<Uuid>,
+        range: &ShotRange,
+        blocks: &[ScriptBlock],
+    ) -> bool {
+        let index = block_index_map(blocks);
+        let Some(cut_raw) = range.resolve_chars(&index, blocks) else {
+            return false;
+        };
+        let Some((cut_lo, cut_hi)) = normalize_doc_interval(cut_raw.0, cut_raw.1, blocks) else {
+            return false;
+        };
+
+        let mut any_changed = false;
+        for shot in &mut self.shots {
+            if shot_filter.is_some_and(|id| shot.id != id) {
+                continue;
+            }
+            let mut next_spans: Vec<ShotRange> = Vec::new();
+            let mut shot_changed = false;
+            for sp in &shot.spans {
+                let Some(sp_raw) = sp.resolve_chars(&index, blocks) else {
+                    next_spans.push(sp.clone());
+                    continue;
+                };
+                let Some((s_lo, s_hi)) = normalize_doc_interval(sp_raw.0, sp_raw.1, blocks) else {
+                    shot_changed = true;
+                    continue;
+                };
+                if cut_hi <= s_lo || cut_lo >= s_hi {
+                    next_spans.push(sp.clone());
+                    continue;
+                }
+                shot_changed = true;
+                if s_lo < cut_lo {
+                    if let Some((l0, l1)) = normalize_doc_interval(s_lo, cut_lo, blocks) {
+                        if let Some(sr) = doc_interval_to_shot_range(l0, l1, blocks) {
+                            next_spans.push(sr);
+                        }
+                    }
+                }
+                if cut_hi < s_hi {
+                    if let Some((r0, r1)) = normalize_doc_interval(cut_hi, s_hi, blocks) {
+                        if let Some(sr) = doc_interval_to_shot_range(r0, r1, blocks) {
+                            next_spans.push(sr);
+                        }
+                    }
+                }
+            }
+            if shot_changed {
+                shot.spans = next_spans;
+                any_changed = true;
+            }
+        }
+        any_changed
+    }
+
+    /// Reassign `range` from whichever shot(s) currently cover it to
+    /// `target_shot_id` (carving it out of other shots and merging into target).
+    pub fn reassign_range(
+        &mut self,
+        target_shot_id: Uuid,
+        range: ShotRange,
+        blocks: &[ScriptBlock],
+    ) -> bool {
+        let removed = self.unassign_range(None, &range, blocks);
+        let added = self.assign_range_merged(target_shot_id, range, blocks);
+        removed || added
+    }
+
     /// Remove a span by index from `shot_id`. Returns `true` if removed.
     pub fn remove_span(&mut self, shot_id: Uuid, span_index: usize) -> bool {
         let Some(shot) = self.get_mut(shot_id) else {
@@ -1096,6 +1224,99 @@ fn merge_intervals(mut raw: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
     merged
 }
 
+/// Normalize a document `(block, char)` half-open interval so its start doesn't
+/// sit past the end of its block and its end doesn't sit at char 0 of a later
+/// block. Returns `None` if empty.
+fn normalize_doc_interval(
+    mut lo: (usize, usize),
+    mut hi: (usize, usize),
+    blocks: &[ScriptBlock],
+) -> Option<((usize, usize), (usize, usize))> {
+    if lo >= hi || blocks.is_empty() {
+        return None;
+    }
+    while lo.0 < hi.0 {
+        let len = blocks
+            .get(lo.0)
+            .map(|b| b.text.chars().count())
+            .unwrap_or(0);
+        if lo.1 >= len {
+            lo = (lo.0 + 1, 0);
+        } else {
+            break;
+        }
+    }
+    while hi.0 > lo.0 && hi.1 == 0 {
+        let prev = hi.0 - 1;
+        let plen = blocks
+            .get(prev)
+            .map(|b| b.text.chars().count())
+            .unwrap_or(0);
+        hi = (prev, plen);
+    }
+    if lo < hi {
+        Some((lo, hi))
+    } else {
+        None
+    }
+}
+
+/// True when two normalized document intervals `[a_lo, a_hi)` and `[b_lo, b_hi)`
+/// overlap, touch, are separated only by a single space within the same block,
+/// or are contiguous across consecutive printable blocks.
+fn intervals_touch_or_overlap(
+    a_hi: (usize, usize),
+    b_lo: (usize, usize),
+    blocks: &[ScriptBlock],
+) -> bool {
+    if b_lo <= a_hi {
+        return true;
+    }
+    if a_hi.0 == b_lo.0 {
+        if b_lo.1 <= a_hi.1 + 1 {
+            // Merge if touching or separated by at most 1 whitespace character
+            if b_lo.1 == a_hi.1 {
+                return true;
+            }
+            if let Some(b) = blocks.get(a_hi.0) {
+                if b.text.chars().nth(a_hi.1).is_some_and(char::is_whitespace) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+    // Check if a_hi is at the end of its block and b_lo starts at char 0 of the
+    // very next printable block (skipping any non-printable blocks in between).
+    let a_len = blocks
+        .get(a_hi.0)
+        .map(|b| b.text.chars().count())
+        .unwrap_or(0);
+    if a_hi.1 >= a_len && b_lo.1 == 0 {
+        let next_printable =
+            ((a_hi.0 + 1)..blocks.len()).find(|&bi| blocks[bi].element_type.is_printable());
+        if next_printable == Some(b_lo.0) {
+            return true;
+        }
+    }
+    false
+}
+
+fn doc_interval_to_shot_range(
+    lo: (usize, usize),
+    hi: (usize, usize),
+    blocks: &[ScriptBlock],
+) -> Option<ShotRange> {
+    let sb = blocks.get(lo.0)?;
+    let eb = blocks.get(hi.0)?;
+    let hi_len = eb.text.chars().count();
+    if lo.1 == 0 && hi.1 >= hi_len {
+        Some(ShotRange::blocks(sb.id, eb.id))
+    } else {
+        Some(ShotRange::chars(sb.id, lo.1, eb.id, hi.1))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1271,5 +1492,68 @@ mod tests {
         // Deleting the shot must prune its camera from the floor plan
         assert!(list.delete_shot(s1));
         assert!(list.plan_for_scene(scene.id).unwrap().cameras.is_empty());
+    }
+
+    #[test]
+    fn assign_range_merged_unassign_and_reassign_ranges() {
+        let p = sample_project();
+        let sid = p.blocks[0].id;
+        let b1 = p.blocks[1].id; // "Coffee boils on the stove." (26 chars)
+        let b2 = p.blocks[2].id; // "IVAN"
+        let b3 = p.blocks[3].id; // "We leave at dawn."
+
+        let mut list = ShotList::default();
+        let s1 = list.add_shot(
+            Some(sid),
+            "1",
+            ShotSize::Ws,
+            ShotMovement::Static,
+            "35mm".into(),
+            "Master".into(),
+            ShotRange::chars(b1, 0, b1, 12), // "Coffee boils"
+        );
+        // Extending the same sentence merges into 1 continuous span instead of 2
+        assert!(list.assign_range_merged(s1, ShotRange::chars(b1, 7, b1, 26), &p.blocks));
+        assert_eq!(list.get(s1).unwrap().spans.len(), 1);
+        assert_eq!(
+            list.covered_excerpt(list.get(s1).unwrap(), &p.blocks),
+            "Coffee boils on the stove."
+        );
+
+        // Extending contiguously onto the next block also merges into 1 span
+        assert!(list.assign_range_merged(s1, ShotRange::blocks(b2, b2), &p.blocks));
+        assert_eq!(list.get(s1).unwrap().spans.len(), 1);
+        assert_eq!(list.get(s1).unwrap().spans[0], ShotRange::blocks(b1, b2));
+
+        // Carving out the middle of b1 splits s1 cleanly and moves that part to s2
+        let s2 = list.add_shot(
+            Some(sid),
+            "1",
+            ShotSize::Cu,
+            ShotMovement::Static,
+            "85mm".into(),
+            "Detail".into(),
+            ShotRange::blocks(b3, b3),
+        );
+        assert!(list.reassign_range(s2, ShotRange::chars(b1, 7, b1, 15), &p.blocks));
+        // s1 no longer covers chars 7..15 ("boils on")
+        let s1_cov = list.resolve_block_char_coverage(&p.blocks);
+        assert!(
+            !s1_cov[1]
+                .iter()
+                .any(|&(si, c0, c1)| si == 0 && c0 <= 10 && c1 > 10),
+            "s1 must no longer cover reassigned slice"
+        );
+        assert!(
+            s1_cov[1]
+                .iter()
+                .any(|&(si, c0, c1)| si == 1 && c0 == 7 && c1 == 15),
+            "s2 must now cover reassigned slice"
+        );
+
+        // Unassigning clears coverage cleanly
+        assert!(list.unassign_range(None, &ShotRange::blocks(b3, b3), &p.blocks));
+        let cov_after = list.resolve_block_coverage(&p.blocks);
+        assert!(cov_after[3].is_empty());
     }
 }

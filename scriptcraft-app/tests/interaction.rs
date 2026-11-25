@@ -3804,13 +3804,32 @@ fn shots_phase_create_overlap_toggle_modes_and_export() {
     h.run();
     assert_eq!(h.state().shots_count_for_test(), 2);
 
-    // Highlight a specific partial character range inside block 2 and overlap it with shot 1B
+    // Highlight a specific partial character range inside block 2 and overlap it with shot 1B via "+ Add to"
     h.state_mut()
         .set_shots_char_selection_for_test((1, 5), (1, 28));
     h.run();
-    h.get_by_label("+ 1B").click();
+    h.get_by_label("+ Add to").click();
+    h.run();
+    h.get_by_label("1B  (WS · 35mm)").click();
     h.run();
     assert_eq!(h.state().shots_count_for_test(), 2);
+
+    // Highlight an already-covered slice and use 1-click "Unassign" to carve it out
+    h.state_mut()
+        .set_shots_char_selection_for_test((1, 5), (1, 12));
+    h.run();
+    h.get_by_label("Unassign").click();
+    h.run();
+    let p_after_unassign = h.state().project_for_test().unwrap();
+    let cov_after_unassign = p_after_unassign
+        .shots
+        .resolve_block_char_coverage(&p_after_unassign.blocks);
+    assert!(
+        !cov_after_unassign[1]
+            .iter()
+            .any(|&(_, c0, c1)| c0 <= 7 && c1 > 7),
+        "Unassign must carve coverage out of the selected characters"
+    );
 
     // Click 50mm quick-lens preset chip in Shot Inspector
     h.get_by_label("50mm").click();

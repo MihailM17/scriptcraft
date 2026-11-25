@@ -8255,11 +8255,12 @@ impl ScriptCraftApp {
         }
         let labels = self.shots_scene_labels();
         let bold_cues = self.settings.bold_character_cues;
+        let paper_mono = self.settings.paper_mono;
         let action = {
             let Some(p) = self.project.as_mut() else {
                 return;
             };
-            crate::shots_view::show(ctx, p, &labels, &mut self.shots_ui, bold_cues)
+            crate::shots_view::show(ctx, p, &labels, &mut self.shots_ui, bold_cues, paper_mono)
         };
         match action {
             crate::shots_view::ShotsAction::None => {}

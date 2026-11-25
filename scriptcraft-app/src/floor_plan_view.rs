@@ -548,9 +548,16 @@ pub fn show(
                                 let (dot, _) =
                                     ui.allocate_exact_size(Vec2::new(10.0, 10.0), Sense::hover());
                                 ui.painter().circle_filled(dot.center(), 4.5, col);
+                                let code_display: String = if code.chars().count() > 22 {
+                                    let mut s: String = code.chars().take(21).collect();
+                                    s.push('…');
+                                    s
+                                } else {
+                                    code.clone()
+                                };
                                 ui.label(
                                     RichText::new(format!(
-                                        "Camera {code}  ·  {}  ·  {:.0}° FOV",
+                                        "Camera {code_display}  ·  {}  ·  {:.0}° FOV",
                                         if lens.trim().is_empty() {
                                             "35mm"
                                         } else {
@@ -1516,12 +1523,15 @@ fn paint_camera(
         Stroke::new(1.4_f32, kit().page),
     ));
 
-    // Shot code centered right on the camera body
-    let g = p.layout_no_wrap(
-        shot.code.clone(),
-        FontId::monospace(10.0),
-        ink_on_accent(col),
-    );
+    // Shot code centered right on the camera body (clamped so long custom names never overflow)
+    let badge_code: String = if shot.code.chars().count() > 4 {
+        let mut s: String = shot.code.chars().take(3).collect();
+        s.push('…');
+        s
+    } else {
+        shot.code.clone()
+    };
+    let g = p.layout_no_wrap(badge_code, FontId::monospace(9.5), ink_on_accent(col));
     p.galley(
         Pos2::new(cp.x - g.size().x * 0.5, cp.y - g.size().y * 0.5),
         g,

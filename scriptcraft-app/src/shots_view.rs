@@ -20,7 +20,7 @@ use scriptcraft_core::{ElementType, Project, Scene, ScriptBlock};
 use uuid::Uuid;
 
 use crate::app::{bold_mono, MONO};
-use crate::theme::{ink_on_accent, kit, kit_is_light, overline, paint_ellipsized};
+use crate::theme::{ellipsized, ink_on_accent, kit, kit_is_light, overline, paint_ellipsized};
 
 const CUE_INDENT: f32 = scriptcraft_layout::FINAL_DRAFT_A4_GEOMETRY.cue_mm
     / scriptcraft_layout::FINAL_DRAFT_A4_TEXT_W_MM;
@@ -161,11 +161,11 @@ fn shot_color32(color: ShotColor) -> Color32 {
     Color32::from_rgb(r, g, b)
 }
 
-fn shot_tint32(color: ShotColor, strong: bool) -> Color32 {
+fn shot_tint32(color: ShotColor, strong: bool, light_paper: bool) -> Color32 {
     let (r, g, b) = color.rgb();
-    let alpha = match (kit_is_light(), strong) {
-        (true, true) => 64,
-        (true, false) => 42,
+    let alpha = match (light_paper, strong) {
+        (true, true) => 68,
+        (true, false) => 44,
         (false, true) => 62,
         (false, false) => 38,
     };
@@ -179,6 +179,7 @@ pub fn show(
     scene_labels: &[String],
     state: &mut ShotsUiState,
     bold_character_cues: bool,
+    paper_mono: bool,
 ) -> ShotsAction {
     let mut action = ShotsAction::None;
 
@@ -516,6 +517,7 @@ pub fn show(
                     &char_coverage,
                     state,
                     bold_character_cues,
+                    paper_mono,
                 );
                 if center_action != ShotsAction::None {
                     action = center_action;
@@ -560,6 +562,7 @@ pub fn show(
                     &char_coverage,
                     state,
                     bold_character_cues,
+                    paper_mono,
                 );
                 if center_action != ShotsAction::None {
                     action = center_action;
@@ -826,12 +829,20 @@ fn show_right_pane(
                                     ui.allocate_exact_size(Vec2::new(10.0, 10.0), Sense::hover());
                                 ui.painter().circle_filled(dot_rect.center(), 4.5, color);
 
+                                let short_code: String = if code.chars().count() > 16 {
+                                    let mut s: String = code.chars().take(15).collect();
+                                    s.push('…');
+                                    s
+                                } else {
+                                    code.clone()
+                                };
                                 ui.label(
-                                    RichText::new(&code)
+                                    RichText::new(&short_code)
                                         .font(FontId::monospace(13.0))
                                         .strong()
                                         .color(kit().heading_text),
-                                );
+                                )
+                                .on_hover_text(&code);
 
                                 let mut spec = size_short.to_string();
                                 if !lens.trim().is_empty() {
@@ -842,11 +853,18 @@ fn show_right_pane(
                                     spec.push_str(" · ");
                                     spec.push_str(movement_label);
                                 }
-                                ui.label(
-                                    RichText::new(spec)
-                                        .size(11.0)
-                                        .color(kit().disabled_text),
-                                );
+                                let spec_w = (ui.available_width() - 68.0).max(0.0);
+                                if spec_w > 24.0 {
+                                    ui.add_sized(
+                                        Vec2::new(spec_w, 16.0),
+                                        egui::Label::new(
+                                            RichText::new(spec)
+                                                .size(11.0)
+                                                .color(kit().disabled_text),
+                                        )
+                                        .truncate(),
+                                    );
+                                }
 
                                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                     ui.spacing_mut().item_spacing.x = 2.0;
@@ -1206,7 +1224,10 @@ fn show_right_pane(
                         .stroke(Stroke::NONE)
                         .corner_radius(CornerRadius::same(4));
                         if ui.add(add_span).clicked() {
-                            if project.shots.assign_range(sel_id, range) {
+                            if project
+                                .shots
+                                .assign_range_merged(sel_id, range, &project.blocks)
+                            {
                                 changed = true;
                             }
                             state.clear_selection();
@@ -1296,6 +1317,7 @@ fn show_center_pane(
     char_coverage: &[Vec<(usize, usize, usize)>],
     state: &mut ShotsUiState,
     bold_character_cues: bool,
+    paper_mono: bool,
 ) -> ShotsAction {
     let mut action = ShotsAction::None;
 
@@ -1382,32 +1404,171 @@ fn show_center_pane(
                         action = ShotsAction::Changed;
                     }
 
-                    // Quick-assign pills for existing shots in this scene (overlap!)
-                    for &si in scene_shot_indices.iter().take(4) {
-                        if let Some(shot) = project.shots.shots.get(si) {
-                            let sid = shot.id;
-                            let code = shot.code.clone();
-                            let col = shot_color32(shot.color);
-                            let btn = egui::Button::new(
-                                RichText::new(format!("+ {code}"))
-                                    .font(FontId::monospace(11.5))
-                                    .color(kit().text),
+                    // Scalable shot assignment controls (never overflow with many shots!)
+                    if !scene_shot_indices.is_empty() {
+                        // Snapshot shot options for dropdown menus
+                        let shot_choices: Vec<(Uuid, String, &'static str, String, Color32)> =
+                            scene_shot_indices
+                                .iter()
+                                .filter_map(|&si| {
+                                    project.shots.shots.get(si).map(|s| {
+                                        (
+                                            s.id,
+                                            s.code.clone(),
+                                            s.size.short(),
+                                            s.lens.clone(),
+                                            shot_color32(s.color),
+                                        )
+                                    })
+                                })
+                                .collect();
+
+                        // Check if any part of the current selection is already covered by a shot
+                        let sel_has_coverage = state.selection_range().is_some_and(
+                            |((lo_b, lo_c), (hi_b, hi_c))| {
+                                (lo_b..=hi_b).any(|bi| {
+                                    let blen = project
+                                        .blocks
+                                        .get(bi)
+                                        .map(|b| b.text.chars().count())
+                                        .unwrap_or(0);
+                                    let (sc0, sc1) = if lo_b == hi_b {
+                                        (lo_c, hi_c)
+                                    } else if bi == lo_b {
+                                        (lo_c, blen)
+                                    } else if bi == hi_b {
+                                        (0, hi_c)
+                                    } else {
+                                        (0, blen)
+                                    };
+                                    char_coverage.get(bi).is_some_and(|spans| {
+                                        spans.iter().any(|&(_, c0, c1)| c0 < sc1 && c1 > sc0)
+                                    })
+                                })
+                            },
+                        );
+
+                        let mut add_target: Option<Uuid> = None;
+                        let mut move_target: Option<Uuid> = None;
+
+                        // "+ Add to" scrollable dropdown (auto-merges overlapping/adjacent spans)
+                        ui.menu_button(
+                            RichText::new("+ Add to").size(11.5).color(kit().text),
+                            |ui| {
+                                ui.set_min_width(190.0);
+                                ScrollArea::vertical()
+                                    .max_height(260.0)
+                                    .show(ui, |ui| {
+                                        for &(sid, ref code, sz, ref lens, col) in &shot_choices {
+                                            let label = if lens.trim().is_empty() {
+                                                format!("{code}  ({sz})")
+                                            } else {
+                                                format!("{code}  ({sz} · {})", lens.trim())
+                                            };
+                                            let row = ui.horizontal(|ui| {
+                                                let (dot, _) = ui.allocate_exact_size(
+                                                    Vec2::new(8.0, 8.0),
+                                                    Sense::hover(),
+                                                );
+                                                ui.painter().circle_filled(dot.center(), 3.8, col);
+                                                ui.button(RichText::new(label).size(11.5))
+                                            });
+                                            if row.inner.clicked() {
+                                                add_target = Some(sid);
+                                                ui.close();
+                                            }
+                                        }
+                                    });
+                            },
+                        );
+
+                        if sel_has_coverage {
+                            // "Move to" dropdown (carves selection out of old shots & merges into target)
+                            ui.menu_button(
+                                RichText::new("Move to").size(11.5).color(kit().text),
+                                |ui| {
+                                    ui.set_min_width(190.0);
+                                    ScrollArea::vertical()
+                                        .max_height(260.0)
+                                        .show(ui, |ui| {
+                                            for &(sid, ref code, sz, ref lens, col) in
+                                                &shot_choices
+                                            {
+                                                let label = if lens.trim().is_empty() {
+                                                    format!("{code}  ({sz})")
+                                                } else {
+                                                    format!("{code}  ({sz} · {})", lens.trim())
+                                                };
+                                                let row = ui.horizontal(|ui| {
+                                                    let (dot, _) = ui.allocate_exact_size(
+                                                        Vec2::new(8.0, 8.0),
+                                                        Sense::hover(),
+                                                    );
+                                                    ui.painter()
+                                                        .circle_filled(dot.center(), 3.8, col);
+                                                    ui.button(RichText::new(label).size(11.5))
+                                                });
+                                                if row.inner.clicked() {
+                                                    move_target = Some(sid);
+                                                    ui.close();
+                                                }
+                                            }
+                                        });
+                                },
+                            );
+
+                            let unassign_btn = egui::Button::new(
+                                RichText::new("Unassign")
+                                    .size(11.5)
+                                    .color(kit().spell_error),
                             )
                             .fill(kit().button)
-                            .stroke(Stroke::new(1.0_f32, col))
+                            .stroke(Stroke::new(1.0_f32, kit().stroke))
                             .corner_radius(CornerRadius::same(6))
                             .min_size(Vec2::new(0.0, 24.0));
                             if ui
-                                .add(btn)
-                                .on_hover_text(format!("Add selected text to shot {code}"))
+                                .add(unassign_btn)
+                                .on_hover_text(
+                                    "Remove shot coverage from the selected text",
+                                )
                                 .clicked()
                             {
-                                if project.shots.assign_range(sid, shot_range.clone()) {
+                                if project.shots.unassign_range(
+                                    None,
+                                    &shot_range,
+                                    &project.blocks,
+                                ) {
                                     action = ShotsAction::Changed;
                                 }
-                                state.selected_shot = Some(sid);
                                 state.clear_selection();
                             }
+                        }
+
+                        if let Some(sid) = add_target {
+                            if project.shots.assign_range_merged(
+                                sid,
+                                shot_range.clone(),
+                                &project.blocks,
+                            ) {
+                                action = ShotsAction::Changed;
+                            }
+                            state.selected_shot = Some(sid);
+                            state.floor_plan.selected =
+                                Some(crate::floor_plan_view::PlanSelection::Camera(sid));
+                            state.clear_selection();
+                        }
+                        if let Some(sid) = move_target {
+                            if project.shots.reassign_range(
+                                sid,
+                                shot_range.clone(),
+                                &project.blocks,
+                            ) {
+                                action = ShotsAction::Changed;
+                            }
+                            state.selected_shot = Some(sid);
+                            state.floor_plan.selected =
+                                Some(crate::floor_plan_view::PlanSelection::Camera(sid));
+                            state.clear_selection();
                         }
                     }
 
@@ -1477,9 +1638,14 @@ fn show_center_pane(
         Stroke::new(1.0_f32, kit().sep),
     );
 
-    // 2. Centered Screenplay Paper Stage
+    // 2. Centered Screenplay Paper Stage (disable drag_to_scroll so dragging
+    // selects text cleanly instead of grabbing and pushing the page!)
     ScrollArea::vertical()
         .id_salt(("shots_script_scroll", state.selected_scene))
+        .scroll_source(egui::scroll_area::ScrollSource {
+            drag: false,
+            ..Default::default()
+        })
         .auto_shrink([false, false])
         .show(ui, |ui| {
             ui.add_space(18.0);
@@ -1495,6 +1661,27 @@ fn show_center_pane(
             let inner_x: i8 = if is_split { 14 } else { 28 };
             let inner_y: i8 = if is_split { 16 } else { 22 };
 
+            let paper_bg = if paper_mono {
+                Color32::WHITE
+            } else {
+                kit().page
+            };
+            let paper_edge = if paper_mono {
+                Color32::from_rgb(208, 212, 220)
+            } else {
+                kit().page_edge
+            };
+            let paper_accent = if paper_mono {
+                Color32::from_rgb(36, 98, 200)
+            } else {
+                kit().accent_text
+            };
+            let paper_muted = if paper_mono {
+                Color32::from_rgb(96, 102, 114)
+            } else {
+                kit().disabled_text
+            };
+
             ui.horizontal(|ui| {
                 ui.add_space(side_pad);
                 ui.vertical(|ui| {
@@ -1502,8 +1689,8 @@ fn show_center_pane(
 
                     // Paper card
                     egui::Frame::new()
-                        .fill(kit().page)
-                        .stroke(Stroke::new(1.0_f32, kit().page_edge))
+                        .fill(paper_bg)
+                        .stroke(Stroke::new(1.0_f32, paper_edge))
                         .corner_radius(CornerRadius::same(8))
                         .inner_margin(Margin::symmetric(inner_x, inner_y))
                         .show(ui, |ui| {
@@ -1525,7 +1712,7 @@ fn show_center_pane(
                                         ))
                                         .font(FontId::monospace(11.0))
                                         .strong()
-                                        .color(kit().accent_text),
+                                        .color(paper_accent),
                                     );
                                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                         ui.label(
@@ -1534,7 +1721,7 @@ fn show_center_pane(
                                                 if n_shots == 1 { "shot" } else { "shots" }
                                             ))
                                             .size(11.0)
-                                            .color(kit().disabled_text),
+                                            .color(paper_muted),
                                         );
                                     });
                                 });
@@ -1587,7 +1774,8 @@ fn show_center_pane(
                                             Id::new(("rail_hdr", sid)),
                                             Sense::click(),
                                         )
-                                        .on_hover_cursor(egui::CursorIcon::PointingHand);
+                                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                        .on_hover_text(code.clone());
                                     ui.painter().rect_filled(
                                         pill_rect,
                                         CornerRadius::same(3),
@@ -1597,10 +1785,12 @@ fn show_center_pane(
                                             col.gamma_multiply(0.24)
                                         },
                                     );
-                                    let g = ui.painter().layout_no_wrap(
-                                        code.clone(),
+                                    let g = ellipsized(
+                                        ui.painter(),
+                                        code,
                                         FontId::monospace(9.5),
                                         if active { ink_on_accent(col) } else { col },
+                                        (rail_col_w - 6.0).max(12.0),
                                     );
                                     ui.painter().galley(
                                         Pos2::new(
@@ -1621,9 +1811,9 @@ fn show_center_pane(
                             let total_w = ui.available_width();
                             let tag_area_w = if state.view_mode.is_color_map_script() {
                                 if is_split {
-                                    50.0
+                                    58.0
                                 } else {
-                                    68.0
+                                    82.0
                                 }
                             } else {
                                 rail_area_w
@@ -1673,11 +1863,13 @@ fn show_center_pane(
                                     shift_down,
                                     total_w,
                                     text_area_w,
+                                    tag_area_w,
                                     &rail_shots,
                                     rail_col_w,
                                     rail_area_w,
                                     state,
                                     bold_character_cues,
+                                    paper_mono,
                                 );
                                 prev_block_end_shots = block_end_shots;
                             }
@@ -1819,11 +2011,13 @@ fn render_script_block_row(
     shift_down: bool,
     total_w: f32,
     text_area_w: f32,
+    tag_area_w: f32,
     rail_shots: &[(usize, Uuid, String, Color32)],
     rail_col_w: f32,
     rail_area_w: f32,
     state: &mut ShotsUiState,
     bold_character_cues: bool,
+    paper_mono: bool,
 ) -> Vec<usize> {
     let (indent_frac, right_frac, uppercase, bold, align_right, top_pad, bot_pad) = match block
         .element_type
@@ -1856,7 +2050,18 @@ fn render_script_block_row(
     let left_pad = 12.0 + text_area_w * indent_frac;
     let wrap_w = (text_area_w * (1.0 - indent_frac - right_frac) - 16.0).max(120.0);
 
-    let text_color = if bold { kit().heading_text } else { kit().text };
+    let light_paper = kit_is_light() || paper_mono;
+    let text_color = if paper_mono {
+        if bold {
+            Color32::BLACK
+        } else {
+            Color32::from_rgb(24, 26, 30)
+        }
+    } else if bold {
+        kit().heading_text
+    } else {
+        kit().text
+    };
 
     let mut job = egui::text::LayoutJob::default();
     job.wrap.max_width = wrap_w;
@@ -1872,7 +2077,8 @@ fn render_script_block_row(
     let galley = ui.fonts(|f| f.layout_job(job));
     let row_h = (galley.size().y + top_pad + bot_pad).max(22.0);
 
-    let (row_rect, resp) = ui.allocate_exact_size(Vec2::new(total_w, row_h), Sense::click());
+    let (row_rect, resp) =
+        ui.allocate_exact_size(Vec2::new(total_w, row_h), Sense::click_and_drag());
     let resp = resp.on_hover_cursor(egui::CursorIcon::Text);
     resp.widget_info(|| {
         egui::WidgetInfo::labeled(
@@ -1942,12 +2148,13 @@ fn render_script_block_row(
                             text_pos,
                             c0,
                             c1,
-                            shot_tint32(shot.color, strong),
+                            shot_tint32(shot.color, strong, light_paper),
                             None,
                         );
                     }
                 }
                 // Crisp left color bar per visual row reflecting that visual row's primary shot
+                let max_pill_w = (tag_area_w - 8.0).max(28.0);
                 for &(r_start, r_end, r_rect) in &visual_rows {
                     let row_shots = shots_overlapping_range(spans_here, r_start, r_end);
                     let row_primary = pick_row_primary(project, &row_shots, state.selected_shot);
@@ -1961,20 +2168,24 @@ fn render_script_block_row(
                             p.rect_filled(bar, CornerRadius::same(2), col);
 
                             if *prev_visual_row_primary != Some(psi) {
-                                let tag_text = if row_shots.len() > 1 {
-                                    format!("{} +{}", shot.code, row_shots.len() - 1)
+                                let suffix = if row_shots.len() > 1 {
+                                    format!(" +{}", row_shots.len() - 1)
                                 } else {
-                                    shot.code.clone()
+                                    String::new()
                                 };
-                                let g = p.layout_no_wrap(
-                                    tag_text,
+                                let tag_text = format!("{}{suffix}", shot.code);
+                                // Strictly clamp pill text width so long custom codes never overlap the script
+                                let g = ellipsized(
+                                    p,
+                                    &tag_text,
                                     FontId::monospace(10.0),
                                     ink_on_accent(col),
+                                    (max_pill_w - 10.0).max(18.0),
                                 );
-                                let pill_w = (g.size().x + 10.0).max(28.0);
+                                let pill_w = (g.size().x + 10.0).clamp(28.0, max_pill_w);
                                 let pill_y = text_pos.y + r_rect.center().y - 8.0;
                                 let pill_rect = Rect::from_min_size(
-                                    Pos2::new(row_rect.right() - pill_w - 6.0, pill_y),
+                                    Pos2::new(row_rect.right() - pill_w - 4.0, pill_y),
                                     Vec2::new(pill_w, 16.0),
                                 );
                                 p.rect_filled(pill_rect, CornerRadius::same(4), col);
@@ -2004,7 +2215,7 @@ fn render_script_block_row(
                                     text_pos,
                                     c0,
                                     c1,
-                                    shot_tint32(shot.color, false),
+                                    shot_tint32(shot.color, false, light_paper),
                                     None,
                                 );
                             }
@@ -2016,13 +2227,18 @@ fn render_script_block_row(
 
         // 2. Live user character selection highlight
         if let Some((sc0, sc1)) = state.selection_in_block(bi, char_len) {
+            let sel_fill = if paper_mono {
+                Color32::from_rgba_unmultiplied(66, 148, 248, 52)
+            } else {
+                kit().accent_soft
+            };
             paint_char_highlight(
                 p,
                 &galley,
                 text_pos,
                 sc0,
                 sc1,
-                kit().accent_soft,
+                sel_fill,
                 Some(Stroke::new(1.2_f32, kit().accent)),
             );
         }
