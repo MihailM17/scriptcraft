@@ -3841,6 +3841,23 @@ fn shots_phase_create_overlap_toggle_modes_and_export() {
         .expect("shot list CSV renders");
     assert!(csv.starts_with('\u{FEFF}'), "CSV must include UTF-8 BOM");
     assert!(csv.contains("1A") && csv.contains("1B") && csv.contains("50mm"));
+
+    // Verify card reorder (^) and delete (x) buttons actually receive clicks
+    h.get_by_label("Move 1B up").click();
+    h.run();
+    assert_eq!(
+        h.state().project_for_test().unwrap().shots.shots[0].code,
+        "1B",
+        "clicking ^ on 1B must move it above 1A"
+    );
+
+    h.get_by_label("Delete 1B").click();
+    h.run();
+    assert_eq!(
+        h.state().shots_count_for_test(),
+        1,
+        "clicking x on 1B must delete it"
+    );
 }
 
 /// Shots created in the Shots workspace persist inside `.kitsp` across Save and

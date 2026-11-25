@@ -720,6 +720,7 @@ fn show_right_pane(
                         kit().surface
                     };
 
+                    let mut action_btns_rect = Rect::NOTHING;
                     let frame_resp = egui::Frame::new()
                         .fill(fill_col)
                         .stroke(Stroke::new(
@@ -769,6 +770,7 @@ fn show_right_pane(
                                             .stroke(Stroke::NONE)
                                             .min_size(Vec2::new(18.0, 18.0)),
                                         )
+                                        .on_hover_cursor(egui::CursorIcon::PointingHand)
                                         .on_hover_text(format!("Delete shot {code}"));
                                     del.widget_info(|| {
                                         egui::WidgetInfo::labeled(
@@ -794,7 +796,15 @@ fn show_right_pane(
                                             .stroke(Stroke::NONE)
                                             .min_size(Vec2::new(18.0, 18.0)),
                                         )
+                                        .on_hover_cursor(egui::CursorIcon::PointingHand)
                                         .on_hover_text("Move shot down");
+                                    dn.widget_info(|| {
+                                        egui::WidgetInfo::labeled(
+                                            egui::WidgetType::Button,
+                                            can_down,
+                                            format!("Move {code} down"),
+                                        )
+                                    });
                                     if dn.clicked() {
                                         move_req = Some((shot_id, 1));
                                     }
@@ -812,10 +822,20 @@ fn show_right_pane(
                                             .stroke(Stroke::NONE)
                                             .min_size(Vec2::new(18.0, 18.0)),
                                         )
+                                        .on_hover_cursor(egui::CursorIcon::PointingHand)
                                         .on_hover_text("Move shot up");
+                                    up.widget_info(|| {
+                                        egui::WidgetInfo::labeled(
+                                            egui::WidgetType::Button,
+                                            can_up,
+                                            format!("Move {code} up"),
+                                        )
+                                    });
                                     if up.clicked() {
                                         move_req = Some((shot_id, -1));
                                     }
+
+                                    action_btns_rect = del.rect.union(dn.rect).union(up.rect);
                                 });
                             });
 
@@ -837,13 +857,18 @@ fn show_right_pane(
                         })
                         .response;
 
-                    let card_click = ui.interact(
-                        frame_resp.rect,
-                        Id::new(("shot_card", shot_id)),
-                        Sense::click(),
-                    );
-                    if card_click.clicked() && delete_req.is_none() && move_req.is_none() {
+                    if ui.rect_contains_pointer(frame_resp.rect) {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    }
+                    let clicked_card_body = delete_req.is_none()
+                        && move_req.is_none()
+                        && ui.input(|i| i.pointer.primary_clicked())
+                        && ui.input(|i| i.pointer.interact_pos()).is_some_and(|p| {
+                            frame_resp.rect.contains(p) && !action_btns_rect.contains(p)
+                        });
+                    if clicked_card_body {
                         state.selected_shot = Some(shot_id);
+                        ui.ctx().request_repaint();
                     }
                 }
             }
@@ -1141,6 +1166,26 @@ fn show_right_pane(
                 if project.shots.remove_span(sel_id, rm_idx) {
                     changed = true;
                 }
+            }
+
+            ui.add_space(6.0);
+            let del_shot = egui::Button::new(
+                RichText::new("Delete Shot")
+                    .size(11.5)
+                    .color(kit().spell_error),
+            )
+            .fill(kit().base)
+            .stroke(Stroke::new(1.0_f32, kit().stroke))
+            .corner_radius(CornerRadius::same(6))
+            .min_size(Vec2::new(ui.available_width(), 26.0));
+            if ui
+                .add(del_shot)
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .clicked()
+                && project.shots.delete_shot(sel_id)
+            {
+                state.selected_shot = None;
+                changed = true;
             }
         });
 
