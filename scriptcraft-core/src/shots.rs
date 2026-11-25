@@ -352,13 +352,168 @@ pub struct Shot {
     pub spans: Vec<ShotRange>,
 }
 
-/// Versioned collection of shots persisted in `.kitsp` (`scriptcraft_shots`).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// Standard architectural & set prop types for the 2D top-down floor plan.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum PropKind {
+    #[default]
+    Wall,
+    Door,
+    Window,
+    Table,
+    Chair,
+    Bed,
+    Car,
+    Custom,
+}
+
+impl PropKind {
+    pub const ALL: [Self; 8] = [
+        Self::Wall,
+        Self::Door,
+        Self::Window,
+        Self::Table,
+        Self::Chair,
+        Self::Bed,
+        Self::Car,
+        Self::Custom,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Wall => "Wall",
+            Self::Door => "Door",
+            Self::Window => "Window",
+            Self::Table => "Table",
+            Self::Chair => "Chair",
+            Self::Bed => "Bed",
+            Self::Car => "Car",
+            Self::Custom => "Prop",
+        }
+    }
+
+    /// Default footprint `(width_m, height_m)` in meters.
+    pub fn default_size(self) -> (f32, f32) {
+        match self {
+            Self::Wall => (4.0, 0.22),
+            Self::Door => (1.0, 0.22),
+            Self::Window => (1.6, 0.22),
+            Self::Table => (1.8, 1.0),
+            Self::Chair => (0.55, 0.55),
+            Self::Bed => (2.0, 1.6),
+            Self::Car => (4.2, 1.8),
+            Self::Custom => (1.0, 1.0),
+        }
+    }
+}
+
+/// One actor mark placed on a scene's 2D top-down floor plan.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PlanActor {
+    pub id: Uuid,
+    pub name: String,
+    /// Position in meters (origin at canvas center).
+    pub x: f32,
+    pub y: f32,
+    /// Facing angle in degrees (`0` = right, `90` = down, `-90` = up).
+    #[serde(default)]
+    pub angle_deg: f32,
+    #[serde(default)]
+    pub color: ShotColor,
+    /// Optional blocking movement destination `(x, y)` in meters.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub move_to: Option<(f32, f32)>,
+}
+
+/// One architectural element or set prop on a scene's 2D top-down floor plan.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PlanProp {
+    pub id: Uuid,
+    #[serde(default)]
+    pub kind: PropKind,
+    #[serde(default)]
+    pub label: String,
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+    #[serde(default)]
+    pub angle_deg: f32,
+}
+
+/// One camera setup placed on a scene's 2D top-down floor plan, linked 1-to-1
+/// to a [`Shot`] via `shot_id` (inheriting its code, color, lens, and movement).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PlanCamera {
+    pub shot_id: Uuid,
+    pub x: f32,
+    pub y: f32,
+    /// Aim angle in degrees (`0` = right, `90` = down, `-90` = up).
+    #[serde(default)]
+    pub angle_deg: f32,
+    /// Optional explicit horizontal FOV override (degrees). When `None`,
+    /// derived automatically from the linked shot's `lens` string.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fov_deg: Option<f32>,
+    /// Optional dolly / tracking end position `(x, y)` in meters.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub track_to: Option<(f32, f32)>,
+}
+
+/// 2D top-down blocking diagram for one scene (anchored by `Scene::id`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SceneFloorPlan {
+    pub scene_id: Uuid,
+    #[serde(default)]
+    pub actors: Vec<PlanActor>,
+    #[serde(default)]
+    pub props: Vec<PlanProp>,
+    #[serde(default)]
+    pub cameras: Vec<PlanCamera>,
+}
+
+impl SceneFloorPlan {
+    pub fn empty(scene_id: Uuid) -> Self {
+        Self {
+            scene_id,
+            actors: Vec::new(),
+            props: Vec::new(),
+            cameras: Vec::new(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.actors.is_empty() && self.props.is_empty() && self.cameras.is_empty()
+    }
+}
+
+/// Estimate horizontal field-of-view (degrees) from a focal-length string like
+/// `"35mm"`, `"50"`, or `"24-70mm"` on a 35mm full-frame (36mm) sensor.
+pub fn lens_to_fov_deg(lens: &str) -> f32 {
+    let digits: String = lens
+        .chars()
+        .skip_while(|c| !c.is_ascii_digit())
+        .take_while(|c| c.is_ascii_digit() || *c == '.')
+        .collect();
+    let Ok(focal_mm) = digits.parse::<f32>() else {
+        return 50.0;
+    };
+    if focal_mm <= 1.0 {
+        return 50.0;
+    }
+    let fov = 2.0 * (18.0_f32 / focal_mm).atan().to_degrees();
+    fov.clamp(12.0, 115.0)
+}
+
+/// Versioned collection of shots and per-scene blocking floor plans persisted
+/// in `.kitsp` (`scriptcraft_shots`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ShotList {
     #[serde(default = "default_shots_schema")]
     pub schema: u32,
     #[serde(default)]
     pub shots: Vec<Shot>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scene_plans: Vec<SceneFloorPlan>,
 }
 
 impl Default for ShotList {
@@ -366,6 +521,7 @@ impl Default for ShotList {
         Self {
             schema: SHOTS_SCHEMA,
             shots: Vec::new(),
+            scene_plans: Vec::new(),
         }
     }
 }
@@ -397,7 +553,159 @@ pub fn block_index_map(blocks: &[ScriptBlock]) -> HashMap<Uuid, usize> {
 
 impl ShotList {
     pub fn is_empty(&self) -> bool {
-        self.shots.is_empty()
+        self.shots.is_empty() && self.scene_plans.iter().all(SceneFloorPlan::is_empty)
+    }
+
+    pub fn plan_for_scene(&self, scene_id: Uuid) -> Option<&SceneFloorPlan> {
+        self.scene_plans.iter().find(|p| p.scene_id == scene_id)
+    }
+
+    pub fn plan_for_scene_mut(&mut self, scene_id: Uuid) -> Option<&mut SceneFloorPlan> {
+        self.scene_plans.iter_mut().find(|p| p.scene_id == scene_id)
+    }
+
+    pub fn ensure_floor_plan(&mut self, scene_id: Uuid) -> &mut SceneFloorPlan {
+        if let Some(pos) = self.scene_plans.iter().position(|p| p.scene_id == scene_id) {
+            return &mut self.scene_plans[pos];
+        }
+        self.scene_plans.push(SceneFloorPlan::empty(scene_id));
+        self.scene_plans.last_mut().unwrap()
+    }
+
+    /// Place a default camera on `scene_id`'s floor plan (if a plan exists and
+    /// doesn't already have a camera for `shot_id`).
+    pub fn sync_camera_for_shot(&mut self, scene_id: Uuid, shot_id: Uuid) {
+        let Some(plan) = self.plan_for_scene_mut(scene_id) else {
+            return;
+        };
+        if plan.cameras.iter().any(|c| c.shot_id == shot_id) {
+            return;
+        }
+        let idx = plan.cameras.len();
+        let spread = (idx as f32 - 1.5) * 1.6;
+        let x = spread.clamp(-4.5, 4.5);
+        let y = 2.8 + (idx % 2) as f32 * 0.6;
+        let angle_deg = (-0.6_f32 - y).atan2(-x).to_degrees();
+        plan.cameras.push(PlanCamera {
+            shot_id,
+            x,
+            y,
+            angle_deg,
+            fov_deg: None,
+            track_to: None,
+        });
+    }
+
+    /// Populate (or refresh missing cast & cameras on) `scene`'s floor plan
+    /// from the screenplay's speaking characters and shots in `scene`.
+    pub fn auto_populate_floor_plan(
+        &mut self,
+        scene: &Scene,
+        blocks: &[ScriptBlock],
+    ) -> &mut SceneFloorPlan {
+        // Collect unique speaking character cues in this scene.
+        let mut cast: Vec<String> = Vec::new();
+        for &bi in &scene.blocks {
+            let Some(b) = blocks.get(bi) else { continue };
+            if b.element_type != ElementType::Character {
+                continue;
+            }
+            let raw = b.text.trim();
+            let base = raw.split('(').next().unwrap_or(raw).trim().to_uppercase();
+            if !base.is_empty() && !cast.contains(&base) {
+                cast.push(base);
+            }
+        }
+        let scene_shot_ids: Vec<(Uuid, ShotMovement)> = self
+            .shots_for_scene(scene, blocks)
+            .into_iter()
+            .filter_map(|i| self.shots.get(i).map(|s| (s.id, s.movement)))
+            .collect();
+
+        let plan = self.ensure_floor_plan(scene.id);
+
+        // Add any missing cast actors positioned cleanly around the center stage.
+        let existing_actors: HashSet<String> = plan
+            .actors
+            .iter()
+            .map(|a| a.name.trim().to_uppercase())
+            .collect();
+        let missing_cast: Vec<String> = cast
+            .into_iter()
+            .filter(|name| !existing_actors.contains(name))
+            .collect();
+        let total_new = missing_cast.len();
+        for (i, name) in missing_cast.into_iter().enumerate() {
+            let color = ShotColor::from_index(plan.actors.len());
+            let (x, y, angle_deg) = if total_new == 1 && plan.actors.is_empty() {
+                (0.0, -0.6, 90.0)
+            } else if total_new == 2 && plan.actors.is_empty() {
+                if i == 0 {
+                    (-1.4, -0.7, 15.0)
+                } else {
+                    (1.4, -0.7, 165.0)
+                }
+            } else {
+                let n = (plan.actors.len() + 1).max(3) as f32;
+                let a = std::f32::consts::PI * (i as f32 + 0.5) / n;
+                let rx = -a.cos() * 2.1;
+                let ry = -0.7 - a.sin() * 1.1;
+                let aim = (-0.4_f32 - ry).atan2(-rx).to_degrees();
+                (rx, ry, aim)
+            };
+            plan.actors.push(PlanActor {
+                id: Uuid::new_v4(),
+                name,
+                x,
+                y,
+                angle_deg,
+                color,
+                move_to: None,
+            });
+        }
+
+        // Compute focal center of actors so cameras aim directly at them.
+        let (focus_x, focus_y) = if plan.actors.is_empty() {
+            (0.0_f32, -0.6_f32)
+        } else {
+            let n = plan.actors.len() as f32;
+            let sx: f32 = plan.actors.iter().map(|a| a.x).sum();
+            let sy: f32 = plan.actors.iter().map(|a| a.y).sum();
+            (sx / n, sy / n)
+        };
+
+        // Add cameras for any scene shots not yet placed on the floor plan.
+        let existing_cams: HashSet<Uuid> = plan.cameras.iter().map(|c| c.shot_id).collect();
+        let missing_shots: Vec<(Uuid, ShotMovement)> = scene_shot_ids
+            .into_iter()
+            .filter(|(id, _)| !existing_cams.contains(id))
+            .collect();
+        let m = missing_shots.len();
+        for (i, (shot_id, movement)) in missing_shots.into_iter().enumerate() {
+            let t = if m <= 1 {
+                0.5
+            } else {
+                i as f32 / (m - 1) as f32
+            };
+            // Fan cameras smoothly across a 120-degree front arc below the actors.
+            let arc_angle = (30.0 + t * 120.0).to_radians();
+            let dist = if i % 2 == 0 { 3.3 } else { 2.7 };
+            let x = focus_x + arc_angle.cos() * dist;
+            let y = focus_y + arc_angle.sin() * dist;
+            let angle_deg = (focus_y - y).atan2(focus_x - x).to_degrees();
+            let track_to = matches!(movement, ShotMovement::Dolly | ShotMovement::Track)
+                .then(|| (x + (focus_x - x) * 0.28, y + (focus_y - y) * 0.28));
+            plan.cameras.push(PlanCamera {
+                shot_id,
+                x,
+                y,
+                angle_deg,
+                fov_deg: None,
+                track_to,
+            });
+        }
+
+        self.plan_for_scene_mut(scene.id).unwrap()
     }
 
     pub fn len(&self) -> usize {
@@ -504,10 +812,13 @@ impl ShotList {
         }
     }
 
-    /// Delete a shot by id.
+    /// Delete a shot by id (and remove any linked camera from floor plans).
     pub fn delete_shot(&mut self, shot_id: Uuid) -> bool {
         let before = self.shots.len();
         self.shots.retain(|s| s.id != shot_id);
+        for plan in &mut self.scene_plans {
+            plan.cameras.retain(|c| c.shot_id != shot_id);
+        }
         self.shots.len() != before
     }
 
@@ -925,5 +1236,40 @@ mod tests {
         let ex2 = list.covered_excerpt(shot2, &p.blocks);
         assert!(ex2.starts_with("stove."), "got: {ex2}");
         assert!(ex2.ends_with("We leave"), "got: {ex2}");
+    }
+
+    #[test]
+    fn floor_plan_auto_populates_cast_cameras_and_lens_fov() {
+        assert!((lens_to_fov_deg("24mm") - 73.7).abs() < 1.0);
+        assert!((lens_to_fov_deg("50mm") - 39.6).abs() < 1.0);
+        assert!((lens_to_fov_deg("85mm") - 23.9).abs() < 1.0);
+        assert_eq!(lens_to_fov_deg(""), 50.0);
+
+        let p = sample_project();
+        let scenes = p.scenes();
+        let scene = &scenes[0];
+        let mut list = ShotList::default();
+        let s1 = list.add_shot(
+            Some(scene.id),
+            "1",
+            ShotSize::Ws,
+            ShotMovement::Dolly,
+            "28mm".into(),
+            "Master".into(),
+            ShotRange::blocks(p.blocks[1].id, p.blocks[4].id),
+        );
+        let plan = list.auto_populate_floor_plan(scene, &p.blocks);
+        assert_eq!(plan.actors.len(), 1);
+        assert_eq!(plan.actors[0].name, "IVAN");
+        assert_eq!(plan.cameras.len(), 1);
+        assert_eq!(plan.cameras[0].shot_id, s1);
+        assert!(
+            plan.cameras[0].track_to.is_some(),
+            "Dolly shot should auto-seed a track motion arrow"
+        );
+
+        // Deleting the shot must prune its camera from the floor plan
+        assert!(list.delete_shot(s1));
+        assert!(list.plan_for_scene(scene.id).unwrap().cameras.is_empty());
     }
 }

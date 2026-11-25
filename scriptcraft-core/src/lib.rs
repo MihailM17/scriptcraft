@@ -15,4 +15,7 @@ pub mod smart_paste;
 pub mod summary;
 
 pub use model::{DocumentView, ElementType, Project, Scene, SceneMeta, ScriptBlock, Stats};
-pub use shots::{Shot, ShotColor, ShotList, ShotMovement, ShotRange, ShotSize};
+pub use shots::{
+    PlanActor, PlanCamera, PlanProp, PropKind, SceneFloorPlan, Shot, ShotColor, ShotList,
+    ShotMovement, ShotRange, ShotSize,
+};

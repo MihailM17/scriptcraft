@@ -837,3 +837,154 @@ fn snap_41_shots_coverage_rails() {
     h.run_steps(2);
     h.snapshot("41_shots_coverage_rails");
 }
+
+fn seed_demo_floor_plan(app: &mut ScriptCraftApp, ids: [uuid::Uuid; 4]) {
+    use scriptcraft_core::shots::{PlanActor, PlanCamera, PlanProp, PropKind, ShotColor};
+
+    let scene0_id = app.project_for_test().expect("A95").scenes()[0].id;
+    let plan = app
+        .shots_mut_for_test()
+        .expect("shots")
+        .ensure_floor_plan(scene0_id);
+
+    // Apartment block wall + entrance door behind the parking lot
+    plan.props = vec![
+        PlanProp {
+            id: uuid::Uuid::new_v4(),
+            kind: PropKind::Wall,
+            label: String::new(),
+            x: -2.4,
+            y: -3.2,
+            w: 4.8,
+            h: 0.24,
+            angle_deg: 0.0,
+        },
+        PlanProp {
+            id: uuid::Uuid::new_v4(),
+            kind: PropKind::Door,
+            label: "Entrance".into(),
+            x: 0.6,
+            y: -3.2,
+            w: 1.1,
+            h: 0.24,
+            angle_deg: 0.0,
+        },
+        PlanProp {
+            id: uuid::Uuid::new_v4(),
+            kind: PropKind::Wall,
+            label: String::new(),
+            x: 3.1,
+            y: -3.2,
+            w: 3.8,
+            h: 0.24,
+            angle_deg: 0.0,
+        },
+        // Opel Kadett parked in the foreground
+        PlanProp {
+            id: uuid::Uuid::new_v4(),
+            kind: PropKind::Car,
+            label: "OPEL KADETT".into(),
+            x: -0.3,
+            y: -0.7,
+            w: 4.2,
+            h: 1.75,
+            angle_deg: 0.0,
+        },
+    ];
+
+    plan.actors = vec![
+        PlanActor {
+            id: uuid::Uuid::new_v4(),
+            name: "БАЩАТА".into(),
+            x: 2.3,
+            y: -0.7,
+            angle_deg: 180.0,
+            color: ShotColor::Cobalt,
+            move_to: None,
+        },
+        PlanActor {
+            id: uuid::Uuid::new_v4(),
+            name: "ИВАН".into(),
+            x: -0.4,
+            y: 0.55,
+            angle_deg: -18.0,
+            color: ShotColor::Emerald,
+            move_to: Some((0.8, 1.05)),
+        },
+    ];
+
+    plan.cameras = vec![
+        PlanCamera {
+            shot_id: ids[0], // 1A 28mm Dolly
+            x: -2.9,
+            y: 3.1,
+            angle_deg: -46.0,
+            fov_deg: None,
+            track_to: Some((-1.1, 2.3)),
+        },
+        PlanCamera {
+            shot_id: ids[1], // 1B 50mm MCU
+            x: 1.3,
+            y: 2.4,
+            angle_deg: -72.0,
+            fov_deg: None,
+            track_to: None,
+        },
+        PlanCamera {
+            shot_id: ids[2], // 1C 85mm CU
+            x: 3.8,
+            y: 1.7,
+            angle_deg: -145.0,
+            fov_deg: None,
+            track_to: None,
+        },
+        PlanCamera {
+            shot_id: ids[3], // 1D 85mm Insert
+            x: -2.0,
+            y: 1.5,
+            angle_deg: -28.0,
+            fov_deg: None,
+            track_to: None,
+        },
+    ];
+}
+
+/// Phase 2 Shots workspace — 2D Top-Down Blocking / Floor Plan canvas with
+/// architectural props, actors, 180° Line of Action, and live focal-length FOV cones.
+#[test]
+fn snap_42_shots_floor_plan() {
+    use scriptcraft_app::shots_view::ShotsViewMode;
+
+    let mut h = harness(SideTab::Script, None);
+    h.run();
+    let (id_1a, _id_1b) = seed_demo_shots(h.state_mut());
+    let ids: [uuid::Uuid; 4] = {
+        let shots = &h.state().project_for_test().unwrap().shots.shots;
+        [shots[0].id, shots[1].id, shots[2].id, shots[3].id]
+    };
+    seed_demo_floor_plan(h.state_mut(), ids);
+    h.state_mut()
+        .set_shots_view_for_test(ShotsViewMode::FloorPlan, 0, Some(id_1a));
+    h.run_steps(2);
+    h.snapshot("42_shots_floor_plan");
+}
+
+/// Phase 2 Shots workspace — Side-by-side Split mode showing character-highlighted
+/// screenplay on the left synced live with the 2D Top-Down Floor Plan on the right.
+#[test]
+fn snap_43_shots_split_view() {
+    use scriptcraft_app::shots_view::ShotsViewMode;
+
+    let mut h = harness(SideTab::Script, None);
+    h.run();
+    let (_id_1a, id_1b) = seed_demo_shots(h.state_mut());
+    let ids: [uuid::Uuid; 4] = {
+        let shots = &h.state().project_for_test().unwrap().shots.shots;
+        [shots[0].id, shots[1].id, shots[2].id, shots[3].id]
+    };
+    seed_demo_floor_plan(h.state_mut(), ids);
+    h.state_mut()
+        .set_shots_view_for_test(ShotsViewMode::Split, 0, Some(id_1b));
+    h.run_steps(2);
+    h.snapshot("43_shots_split_view");
+}

@@ -3962,3 +3962,74 @@ fn bold_character_cues_setting_toggles_and_exports() {
         .expect("PDF exports with bold cues");
     assert!(pdf.starts_with(b"%PDF-"));
 }
+
+/// Phase 2 Floor Plan: opening Floor Plan auto-populates scene cast & shot
+/// cameras, adding set props (Car, Wall) & actors works, Split mode renders
+/// side-by-side, and floor plans persist across `.kitsp` Save and reopen.
+#[test]
+fn floor_plan_auto_populates_adds_props_and_persists_across_save() {
+    let fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/../fixtures/A95.kitsp");
+    let dir = std::env::temp_dir().join(format!("scriptcraft-floorplan-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("FloorPlanRoundTrip.kitsp");
+    std::fs::copy(fixture, &path).unwrap();
+    let path_str = path.to_string_lossy().into_owned();
+
+    let mut h = harness(SideTab::Script);
+    h.run();
+    h.state_mut().open_path(&path_str);
+    h.run();
+
+    h.get_by_label("Shots").click();
+    h.run();
+
+    // Create a shot first so a camera is also auto-populated
+    h.state_mut()
+        .set_shots_char_selection_for_test((1, 0), (1, 30));
+    h.run();
+    h.get_by_label("+ New Shot (1A)").click();
+    h.run();
+
+    // Switch to Floor Plan -> auto-populates cast & camera 1A
+    h.get_by_label("Floor Plan").click();
+    h.run_steps(2);
+
+    // Add a Car prop and a Wall prop
+    h.get_by_label("+ Car").click();
+    h.run();
+    h.get_by_label("+ Wall").click();
+    h.run();
+    assert!(h.state().is_dirty());
+
+    // Toggle 180-degree line and open Split view
+    h.get_by_label("180° Line").click();
+    h.run();
+    h.get_by_label("Split").click();
+    h.run_steps(2);
+
+    // Save and reopen in a fresh app instance
+    open_file_menu(&mut h);
+    h.get_by_label("Save").click();
+    h.run();
+    assert!(!h.state().is_dirty());
+
+    let mut reopened = harness(SideTab::Script);
+    reopened.run();
+    reopened.state_mut().open_path(&path_str);
+    reopened.run();
+
+    let p = reopened.state().project_for_test().unwrap();
+    let scene0_id = p.scenes()[0].id;
+    let plan = p
+        .shots
+        .plan_for_scene(scene0_id)
+        .expect("floor plan must persist inside .kitsp");
+    assert!(
+        plan.actors.len() >= 2,
+        "Scene 1 cast must be auto-populated and persisted"
+    );
+    assert_eq!(plan.cameras.len(), 1, "Shot 1A camera must persist");
+    assert_eq!(plan.props.len(), 2, "Car and Wall props must persist");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

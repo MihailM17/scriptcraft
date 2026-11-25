@@ -2,6 +2,7 @@ pub mod app;
 pub mod compare_view;
 pub mod dialogs;
 pub mod export;
+pub mod floor_plan_view;
 pub mod menu;
 pub mod panic_log;
 pub mod quit_guard;

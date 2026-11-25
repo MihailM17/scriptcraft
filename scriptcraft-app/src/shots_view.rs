@@ -36,14 +36,29 @@ pub enum ShotsViewMode {
     #[default]
     ColorMap,
     CoverageRails,
+    FloorPlan,
+    Split,
 }
 
 impl ShotsViewMode {
+    pub const ALL: [Self; 4] = [
+        Self::ColorMap,
+        Self::CoverageRails,
+        Self::FloorPlan,
+        Self::Split,
+    ];
+
     pub fn label(self) -> &'static str {
         match self {
             Self::ColorMap => "Color Map",
             Self::CoverageRails => "Coverage Rails",
+            Self::FloorPlan => "Floor Plan",
+            Self::Split => "Split",
         }
+    }
+
+    fn is_color_map_script(self) -> bool {
+        matches!(self, Self::ColorMap | Self::Split)
     }
 }
 
@@ -57,6 +72,7 @@ pub struct ShotsUiState {
     /// Selection focus `(block_idx, char_offset)`.
     pub sel_focus: Option<(usize, usize)>,
     pub view_mode: ShotsViewMode,
+    pub floor_plan: crate::floor_plan_view::FloorPlanUiState,
     dragging_selection: bool,
 }
 
@@ -67,6 +83,8 @@ impl ShotsUiState {
         self.sel_anchor = None;
         self.sel_focus = None;
         self.dragging_selection = false;
+        self.floor_plan.selected = None;
+        self.floor_plan.reset_view();
     }
 
     /// Ordered non-empty character selection `((lo_block, lo_char), (hi_block, hi_char))`.
@@ -240,7 +258,7 @@ pub fn show(
                     .inner_margin(Margin::same(2))
                     .show(ui, |ui| {
                         ui.spacing_mut().item_spacing.x = 2.0;
-                        for mode in [ShotsViewMode::ColorMap, ShotsViewMode::CoverageRails] {
+                        for mode in ShotsViewMode::ALL {
                             let active = state.view_mode == mode;
                             let fill = if active {
                                 kit().accent_soft
@@ -419,6 +437,8 @@ pub fn show(
                         if row_resp.clicked() && state.selected_scene != si {
                             state.selected_scene = si;
                             state.clear_selection();
+                            state.floor_plan.selected = None;
+                            state.floor_plan.reset_view();
                             let first_shot = project
                                 .shots
                                 .shots_for_scene(scene, &project.blocks)
@@ -477,27 +497,98 @@ pub fn show(
             }
         });
 
-    // 4. Center Interactive Screenplay Coverage stage
+    // 4. Center Interactive Screenplay Coverage / 2D Floor Plan stage
     egui::CentralPanel::default()
         .frame(
             egui::Frame::new()
                 .fill(kit().desk)
                 .inner_margin(Margin::same(0)),
         )
-        .show(ctx, |ui| {
-            let center_action = show_center_pane(
-                ui,
-                project,
-                &scenes,
-                active_scene.as_ref(),
-                &active_scene_label,
-                &block_coverage,
-                &char_coverage,
-                state,
-                bold_character_cues,
-            );
-            if center_action != ShotsAction::None {
-                action = center_action;
+        .show(ctx, |ui| match state.view_mode {
+            ShotsViewMode::ColorMap | ShotsViewMode::CoverageRails => {
+                let center_action = show_center_pane(
+                    ui,
+                    project,
+                    &scenes,
+                    active_scene.as_ref(),
+                    &active_scene_label,
+                    &block_coverage,
+                    &char_coverage,
+                    state,
+                    bold_character_cues,
+                );
+                if center_action != ShotsAction::None {
+                    action = center_action;
+                }
+            }
+            ShotsViewMode::FloorPlan => {
+                let fp_changed = crate::floor_plan_view::show(
+                    ui,
+                    project,
+                    active_scene.as_ref(),
+                    &mut state.selected_shot,
+                    &mut state.floor_plan,
+                );
+                if fp_changed && action == ShotsAction::None {
+                    action = ShotsAction::Changed;
+                }
+            }
+            ShotsViewMode::Split => {
+                let avail = ui.available_rect_before_wrap();
+                let left_w = (avail.width() * 0.48).max(260.0);
+                let right_w = (avail.width() - left_w - 1.0).max(240.0);
+                let left_rect = Rect::from_min_size(avail.min, Vec2::new(left_w, avail.height()));
+                let div_x = left_rect.right();
+                let right_rect = Rect::from_min_size(
+                    Pos2::new(div_x + 1.0, avail.top()),
+                    Vec2::new(right_w, avail.height()),
+                );
+
+                let mut left_ui = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(left_rect)
+                        .layout(Layout::top_down(Align::Min)),
+                );
+                left_ui.set_clip_rect(left_rect);
+                let center_action = show_center_pane(
+                    &mut left_ui,
+                    project,
+                    &scenes,
+                    active_scene.as_ref(),
+                    &active_scene_label,
+                    &block_coverage,
+                    &char_coverage,
+                    state,
+                    bold_character_cues,
+                );
+                if center_action != ShotsAction::None {
+                    action = center_action;
+                }
+
+                ui.painter().line_segment(
+                    [
+                        Pos2::new(div_x, avail.top()),
+                        Pos2::new(div_x, avail.bottom()),
+                    ],
+                    Stroke::new(1.0_f32, kit().sep),
+                );
+
+                let mut right_ui = ui.new_child(
+                    egui::UiBuilder::new()
+                        .max_rect(right_rect)
+                        .layout(Layout::top_down(Align::Min)),
+                );
+                right_ui.set_clip_rect(right_rect);
+                let fp_changed = crate::floor_plan_view::show(
+                    &mut right_ui,
+                    project,
+                    active_scene.as_ref(),
+                    &mut state.selected_shot,
+                    &mut state.floor_plan,
+                );
+                if fp_changed && action == ShotsAction::None {
+                    action = ShotsAction::Changed;
+                }
             }
         });
 
@@ -868,6 +959,8 @@ fn show_right_pane(
                         });
                     if clicked_card_body {
                         state.selected_shot = Some(shot_id);
+                        state.floor_plan.selected =
+                            Some(crate::floor_plan_view::PlanSelection::Camera(shot_id));
                         ui.ctx().request_repaint();
                     }
                 }
@@ -1279,7 +1372,12 @@ fn show_center_pane(
                             String::new(),
                             shot_range.clone(),
                         );
+                        if let Some(sid) = scene_id {
+                            project.shots.sync_camera_for_shot(sid, new_id);
+                        }
                         state.selected_shot = Some(new_id);
+                        state.floor_plan.selected =
+                            Some(crate::floor_plan_view::PlanSelection::Camera(new_id));
                         state.clear_selection();
                         action = ShotsAction::Changed;
                     }
@@ -1340,12 +1438,16 @@ fn show_center_pane(
                         }
                     });
                 } else {
-                    ui.label(
-                        RichText::new(
-                            "Drag across text to highlight any phrase or lines, double-click a word, then assign a shot.",
+                    let hint = if state.view_mode == ShotsViewMode::Split {
+                        "Drag text to highlight, then assign a shot."
+                    } else {
+                        "Drag across text to highlight any phrase or lines, double-click a word, then assign a shot."
+                    };
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(hint).size(12.0).color(kit().disabled_text),
                         )
-                        .size(12.0)
-                        .color(kit().disabled_text),
+                        .truncate(),
                     );
                     if let Some(&first_bi) = scene_blocks.first() {
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -1382,12 +1484,16 @@ fn show_center_pane(
         .show(ui, |ui| {
             ui.add_space(18.0);
             let avail_w = ui.available_width();
+            let is_split = state.view_mode == ShotsViewMode::Split;
             let max_sheet_w = match state.view_mode {
-                ShotsViewMode::ColorMap => 740.0_f32,
                 ShotsViewMode::CoverageRails => 820.0_f32,
+                _ => 740.0_f32,
             };
-            let sheet_w = (avail_w - 40.0).clamp(380.0, max_sheet_w);
-            let side_pad = ((avail_w - sheet_w) * 0.5).max(16.0);
+            let pad = if is_split { 20.0 } else { 40.0 };
+            let sheet_w = (avail_w - pad).min(max_sheet_w).max(200.0);
+            let side_pad = ((avail_w - sheet_w) * 0.5).max(8.0);
+            let inner_x: i8 = if is_split { 14 } else { 28 };
+            let inner_y: i8 = if is_split { 16 } else { 22 };
 
             ui.horizontal(|ui| {
                 ui.add_space(side_pad);
@@ -1399,9 +1505,9 @@ fn show_center_pane(
                         .fill(kit().page)
                         .stroke(Stroke::new(1.0_f32, kit().page_edge))
                         .corner_radius(CornerRadius::same(8))
-                        .inner_margin(Margin::symmetric(28, 22))
+                        .inner_margin(Margin::symmetric(inner_x, inner_y))
                         .show(ui, |ui| {
-                            ui.set_width(sheet_w - 56.0);
+                            ui.set_width((sheet_w - (inner_x as f32 * 2.0)).max(160.0));
 
                             // Scene title header inside the paper
                             if let Some(sc) = active_scene {
@@ -1513,12 +1619,16 @@ fn show_center_pane(
 
                             let shift_down = ui.input(|i| i.modifiers.shift);
                             let total_w = ui.available_width();
-                            let tag_area_w = if state.view_mode == ShotsViewMode::ColorMap {
-                                68.0
+                            let tag_area_w = if state.view_mode.is_color_map_script() {
+                                if is_split {
+                                    50.0
+                                } else {
+                                    68.0
+                                }
                             } else {
                                 rail_area_w
                             };
-                            let text_area_w = (total_w - tag_area_w - 8.0).max(200.0);
+                            let text_area_w = (total_w - tag_area_w - 6.0).max(120.0);
 
                             // Keep tight vertical spacing so Coverage Rails connect seamlessly
                             ui.spacing_mut().item_spacing.y = 0.0;
@@ -1803,7 +1913,7 @@ fn render_script_block_row(
 
     // Build merged character highlight runs `(shot_idx, c0, c1)` for Color Map
     let mut color_runs: Vec<(usize, usize, usize)> = Vec::new();
-    if state.view_mode == ShotsViewMode::ColorMap && !spans_here.is_empty() && char_len > 0 {
+    if state.view_mode.is_color_map_script() && !spans_here.is_empty() && char_len > 0 {
         for ci in 0..char_len {
             if let Some(si) = pick_shot_at(ci) {
                 if let Some(last) = color_runs.last_mut() {
@@ -1822,7 +1932,7 @@ fn render_script_block_row(
 
         // 1. Shot highlights behind text
         match state.view_mode {
-            ShotsViewMode::ColorMap => {
+            ShotsViewMode::ColorMap | ShotsViewMode::Split | ShotsViewMode::FloorPlan => {
                 for &(si, c0, c1) in &color_runs {
                     if let Some(shot) = project.shots.shots.get(si) {
                         let strong = state.selected_shot == Some(shot.id);
@@ -2005,7 +2115,7 @@ fn render_script_block_row(
                 }
             }
         }
-    } else if state.view_mode == ShotsViewMode::ColorMap {
+    } else if state.view_mode.is_color_map_script() {
         // Keep prev_visual_row_primary accurate even when scrolled off-screen
         if let Some(&(r_start, r_end, _)) = visual_rows.last() {
             let row_shots = shots_overlapping_range(spans_here, r_start, r_end);
