@@ -484,8 +484,13 @@ fn colored_script_and_shot_list_pdfs_render_with_legend() {
     );
     let page1_text = doc.extract_text(&[1]).unwrap_or_default();
     assert!(
-        page1_text.contains("SHOT LEGEND") && page1_text.contains("1A"),
-        "legend page must list shot 1A: {page1_text}"
+        page1_text.contains("A95"),
+        "title page must come first: {page1_text}"
+    );
+    let page2_text = doc.extract_text(&[2]).unwrap_or_default();
+    assert!(
+        page2_text.contains("SHOT LEGEND") && page2_text.contains("1A"),
+        "legend page must follow title page and list shot 1A: {page2_text}"
     );
 
     let list_pdf = scriptcraft_layout::pdf::to_shot_list_pdf_bytes(&p, &meta, &opts, &fonts)
@@ -586,5 +591,133 @@ fn normal_export_color_by_shots_and_untruncated_shot_list_pdf() {
     assert!(
         all_text.contains("Elena") && all_text.contains("ROOFTOP-"),
         "long description end and long code must wrap instead of being cut off: {all_text}"
+    );
+}
+
+#[test]
+fn cyrillic_descriptive_shot_names_render_cleanly_without_collisions() {
+    use scriptcraft_core::model::{ElementType, Project, ScriptBlock};
+    use scriptcraft_core::shots::{ShotColor, ShotMovement, ShotRange, ShotSize};
+    use scriptcraft_layout::pdf;
+
+    let mut p = Project {
+        title: "Покер".into(),
+        blocks: vec![
+            ScriptBlock::new(
+                ElementType::SceneHeading,
+                "ИНТ. СТАЯТА ЗА ПОЧИВКА. НОЩ".into(),
+            ),
+            ScriptBlock::new(
+                ElementType::Action,
+                "Групата изследователи се е наредила около бюрото отрупано с карти, чаши и бутилки с алкохол и чипове за покер. Петимата мъже са се наредили в полукръг.".into(),
+            ),
+            ScriptBlock::new(ElementType::Character, "КОПИНОВ".into()),
+            ScriptBlock::new(
+                ElementType::Dialogue,
+                "Момчета, време е да се поразтъпчем.".into(),
+            ),
+            ScriptBlock::new(
+                ElementType::Action,
+                "КОПИНОВ вдига залогът на масата. Всички възкликват негативно. Плащат и взимат картите пред тях.".into(),
+            ),
+            ScriptBlock::new(
+                ElementType::Action,
+                "КОПИНОВ отпива от уискито си. Мъжете се засмиват. Исаков оглежда стаята и после връща погледа си на усмихнатото лице на КОПИНОВ.".into(),
+            ),
+        ],
+        ..Default::default()
+    };
+    let s0 = p.blocks[0].id;
+    let b0 = p.blocks[0].id;
+    let b1 = p.blocks[1].id;
+    let b2 = p.blocks[2].id;
+    let b3 = p.blocks[3].id;
+    let b4 = p.blocks[4].id;
+    let b5 = p.blocks[5].id;
+
+    let id1 = p.shots.add_shot(
+        Some(s0),
+        "1",
+        ShotSize::Ews,
+        ShotMovement::Static,
+        "24mm".into(),
+        "Общ план на цялата стая и масата за покер".into(),
+        ShotRange::blocks(b0, b1),
+    );
+    p.shots.get_mut(id1).unwrap().code = "Най-общ план".into();
+    p.shots.get_mut(id1).unwrap().color = ShotColor::Amber;
+
+    let id2 = p.shots.add_shot(
+        Some(s0),
+        "1",
+        ShotSize::Cu,
+        ShotMovement::Static,
+        "85mm".into(),
+        "Близък план на Копинов".into(),
+        ShotRange::blocks(b2, b3),
+    );
+    p.shots.get_mut(id2).unwrap().code = "Копинов близък".into();
+    p.shots.get_mut(id2).unwrap().color = ShotColor::Crimson;
+    p.shots
+        .assign_range_merged(id2, ShotRange::chars(b5, 0, b5, 49), &p.blocks);
+
+    let id3 = p.shots.add_shot(
+        Some(s0),
+        "1",
+        ShotSize::Ws,
+        ShotMovement::Dolly,
+        "35mm".into(),
+        "Цялата маса при залога".into(),
+        ShotRange::blocks(b4, b4),
+    );
+    p.shots.get_mut(id3).unwrap().code = "Цялата маса".into();
+    p.shots.get_mut(id3).unwrap().color = ShotColor::Coral;
+
+    let id4 = p.shots.add_shot(
+        Some(s0),
+        "1",
+        ShotSize::Mcu,
+        ShotMovement::Static,
+        "50mm".into(),
+        "Исаков среден план".into(),
+        ShotRange::chars(b5, 50, b5, p.blocks[5].text.chars().count()),
+    );
+    p.shots.get_mut(id4).unwrap().code = "Исаков среден".into();
+    p.shots.get_mut(id4).unwrap().color = ShotColor::Navy;
+
+    let read = |name: &str| {
+        std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../scriptcraft-app/assets/fonts")
+                .join(name),
+        )
+        .expect("font")
+    };
+    let fonts = pdf::ExportFonts {
+        regular: &read("IBMPlexMono-Regular.ttf"),
+        bold: &read("IBMPlexMono-Bold.ttf"),
+        italic: Some(&read("CourierPrime-Italic.ttf")),
+        fallback_regular: &read("CourierPrime-Regular.ttf"),
+        fallback_bold: &read("CourierPrime-Bold.ttf"),
+        fallback_italic: Some(&read("LiberationMono-Italic.ttf")),
+    };
+    let meta = kitsp::Metadata::default();
+    let opts = pdf::ExportOptions {
+        title_page: false,
+        bold_character_cues: true,
+        color_by_shots: true,
+        include_shot_legend: true,
+        ..Default::default()
+    };
+    let colored = pdf::to_pdf_bytes(&p, &meta, &opts, &fonts).expect("colored cyrillic pdf");
+    let shotlist =
+        pdf::to_shot_list_pdf_bytes(&p, &meta, &opts, &fonts).expect("shotlist cyrillic pdf");
+    assert!(shotlist.starts_with(b"%PDF-"));
+    let doc = lopdf::Document::load_mem(&colored).expect("parse cyrillic colored");
+    assert_eq!(doc.get_pages().len(), 2, "legend + 1 script page");
+    let script_txt = doc.extract_text(&[2]).unwrap_or_default();
+    assert!(
+        script_txt.contains("Копинов близък") && script_txt.contains("Цялата маса"),
+        "full Cyrillic shot names must appear untruncated in left margin: {script_txt}"
     );
 }

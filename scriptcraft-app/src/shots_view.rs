@@ -1778,6 +1778,7 @@ fn show_center_pane(
 
     // Handle trackpad pinch / Cmd+scroll zooming over the script viewport
     let script_stage_rect = ui.available_rect_before_wrap();
+    let viewport_w = script_stage_rect.width();
     if ui.rect_contains_pointer(script_stage_rect) {
         let pinch = ui.input(|i| i.zoom_delta());
         if (pinch - 1.0).abs() > 1e-3 {
@@ -1786,9 +1787,10 @@ fn show_center_pane(
         }
     }
 
-    // 2. Centered Screenplay Paper Stage (disable drag_to_scroll so dragging
-    // selects text cleanly instead of grabbing and pushing the page!)
-    ScrollArea::vertical()
+    // 2. Centered Screenplay Paper Stage (uniform paper zoom like the Script tab:
+    // disable drag_to_scroll so dragging selects text cleanly instead of pushing
+    // the page, and allow horizontal scrolling when zoomed past the viewport width).
+    ScrollArea::both()
         .id_salt(("shots_script_scroll", state.selected_scene))
         .scroll_source(egui::scroll_area::ScrollSource {
             drag: false,
@@ -1797,20 +1799,22 @@ fn show_center_pane(
         .auto_shrink([false, false])
         .show(ui, |ui| {
             let zoom = state.script_zoom.clamp(SCRIPT_ZOOM_MIN, SCRIPT_ZOOM_MAX);
-            ui.add_space(18.0);
-            let avail_w = ui.available_width();
+            ui.add_space(18.0 * zoom);
             let is_split = state.view_mode == ShotsViewMode::Split;
             let base_sheet_w = match state.view_mode {
                 ShotsViewMode::CoverageRails => 820.0_f32,
                 _ => 740.0_f32,
             };
             let pad = if is_split { 20.0 } else { 40.0 };
-            let sheet_w = (base_sheet_w * zoom)
-                .min((avail_w - pad).max(200.0))
-                .max(200.0);
-            let side_pad = ((avail_w - sheet_w) * 0.5).max(8.0);
-            let inner_x: i8 = if is_split { 14 } else { 28 };
-            let inner_y: i8 = if is_split { 16 } else { 22 };
+            let unzoomed_sheet_w = (viewport_w - pad).min(base_sheet_w).max(200.0);
+            let sheet_w = unzoomed_sheet_w * zoom;
+            let side_pad = ((viewport_w - sheet_w) * 0.5).max(8.0);
+            let base_inner_x = if is_split { 14.0_f32 } else { 28.0_f32 };
+            let base_inner_y = if is_split { 16.0_f32 } else { 22.0_f32 };
+            let inner_x = (base_inner_x * zoom).round().clamp(4.0, 120.0) as i8;
+            let inner_y = (base_inner_y * zoom).round().clamp(4.0, 120.0) as i8;
+            let unzoomed_inner_w = (unzoomed_sheet_w - base_inner_x * 2.0).max(160.0);
+            let inner_w = unzoomed_inner_w * zoom;
 
             let paper_bg = if paper_mono {
                 Color32::WHITE
@@ -1845,7 +1849,7 @@ fn show_center_pane(
                         .corner_radius(CornerRadius::same(8))
                         .inner_margin(Margin::symmetric(inner_x, inner_y))
                         .show(ui, |ui| {
-                            ui.set_width((sheet_w - (inner_x as f32 * 2.0)).max(160.0));
+                            ui.set_width(inner_w);
 
                             // Scene title header inside the paper
                             if let Some(sc) = active_scene {
@@ -1861,7 +1865,7 @@ fn show_center_pane(
                                             "SCENE {}",
                                             scene_label.trim_end_matches('.')
                                         ))
-                                        .font(FontId::monospace(11.0))
+                                        .font(FontId::monospace(11.0 * zoom))
                                         .strong()
                                         .color(paper_accent),
                                     );
@@ -1871,12 +1875,12 @@ fn show_center_pane(
                                                 "{n_shots} {} · {sc_pct}% covered",
                                                 if n_shots == 1 { "shot" } else { "shots" }
                                             ))
-                                            .size(11.0)
+                                            .size(11.0 * zoom)
                                             .color(paper_muted),
                                         );
                                     });
                                 });
-                                ui.add_space(4.0);
+                                ui.add_space(4.0 * zoom);
                             }
 
                             // Coverage Rails track legend at top of page
@@ -1894,11 +1898,11 @@ fn show_center_pane(
                                 } else {
                                     Vec::new()
                                 };
-                            let rail_col_w = 24.0_f32;
+                            let rail_col_w = 24.0_f32 * zoom;
                             let rail_area_w = if state.view_mode == ShotsViewMode::CoverageRails
                                 && !rail_shots.is_empty()
                             {
-                                (rail_shots.len() as f32 * rail_col_w) + 12.0
+                                (rail_shots.len() as f32 * rail_col_w) + 12.0 * zoom
                             } else {
                                 0.0
                             };
@@ -1906,17 +1910,19 @@ fn show_center_pane(
                             if state.view_mode == ShotsViewMode::CoverageRails
                                 && !rail_shots.is_empty()
                             {
-                                let total_w = ui.available_width();
-                                let (hdr_rect, _) = ui
-                                    .allocate_exact_size(Vec2::new(total_w, 22.0), Sense::hover());
-                                let rail_x0 = hdr_rect.right() - rail_area_w + 12.0;
+                                let total_w = inner_w;
+                                let (hdr_rect, _) = ui.allocate_exact_size(
+                                    Vec2::new(total_w, 22.0 * zoom),
+                                    Sense::hover(),
+                                );
+                                let rail_x0 = hdr_rect.right() - rail_area_w + 12.0 * zoom;
                                 for (col_i, &(_, sid, ref code, col)) in
                                     rail_shots.iter().enumerate()
                                 {
                                     let cx = rail_x0 + col_i as f32 * rail_col_w + rail_col_w * 0.5;
                                     let pill_rect = Rect::from_center_size(
                                         Pos2::new(cx, hdr_rect.center().y),
-                                        Vec2::new(rail_col_w - 3.0, 17.0),
+                                        Vec2::new(rail_col_w - 3.0 * zoom, 17.0 * zoom),
                                     );
                                     let active = state.selected_shot == Some(sid);
                                     let resp = ui
@@ -1939,9 +1945,9 @@ fn show_center_pane(
                                     let g = ellipsized(
                                         ui.painter(),
                                         code,
-                                        FontId::monospace(9.5),
+                                        FontId::monospace(9.5 * zoom),
                                         if active { ink_on_accent(col) } else { col },
-                                        (rail_col_w - 6.0).max(12.0),
+                                        (rail_col_w - 6.0 * zoom).max(12.0 * zoom),
                                     );
                                     ui.painter().galley(
                                         Pos2::new(
@@ -1955,21 +1961,26 @@ fn show_center_pane(
                                         state.selected_shot = Some(sid);
                                     }
                                 }
-                                ui.add_space(4.0);
+                                ui.add_space(4.0 * zoom);
                             }
 
                             let shift_down = ui.input(|i| i.modifiers.shift);
-                            let total_w = ui.available_width();
-                            let tag_area_w = if state.view_mode.is_color_map_script() {
+                            let total_w = inner_w;
+                            let base_tag_area_w = if state.view_mode.is_color_map_script() {
                                 if is_split {
                                     58.0
                                 } else {
                                     82.0
                                 }
+                            } else if !rail_shots.is_empty() {
+                                (rail_shots.len() as f32 * 24.0) + 12.0
                             } else {
-                                rail_area_w
+                                0.0
                             };
-                            let text_area_w = (total_w - tag_area_w - 6.0).max(120.0);
+                            let tag_area_w = base_tag_area_w * zoom;
+                            let unzoomed_text_area_w =
+                                (unzoomed_inner_w - base_tag_area_w - 6.0).max(120.0);
+                            let text_area_w = unzoomed_text_area_w * zoom;
 
                             // Keep tight vertical spacing so Coverage Rails connect seamlessly
                             ui.spacing_mut().item_spacing.y = 0.0;
@@ -2200,9 +2211,21 @@ fn render_script_block_row(
     let zoom = state.script_zoom.clamp(SCRIPT_ZOOM_MIN, SCRIPT_ZOOM_MAX);
     let top_pad = top_pad * zoom;
     let bot_pad = bot_pad * zoom;
-    let font = FontId::new(12.5 * zoom, if bold { bold_mono() } else { MONO });
-    let left_pad = 12.0 + text_area_w * indent_frac;
-    let wrap_w = (text_area_w * (1.0 - indent_frac - right_frac) - 16.0).max(120.0);
+    let family = if bold { bold_mono() } else { MONO };
+    let base_font = FontId::new(12.5, family.clone());
+    let font = FontId::new(12.5 * zoom, family);
+    let (base_char_w, zoom_char_w) = ui.fonts(|f| {
+        (
+            f.glyph_width(&base_font, 'M').max(1.0),
+            f.glyph_width(&font, 'M').max(1.0),
+        )
+    });
+    let left_pad = 12.0 * zoom + text_area_w * indent_frac;
+    let unzoomed_text_w = text_area_w / zoom;
+    let unzoomed_wrap_w = (unzoomed_text_w * (1.0 - indent_frac - right_frac) - 16.0).max(120.0);
+    // Scale wrap width by the exact rendered glyph-advance ratio so line breaks
+    // stay 100% invariant across all zoom levels (no text reflow/deformation).
+    let wrap_w = unzoomed_wrap_w * (zoom_char_w / base_char_w);
 
     let light_paper = kit_is_light() || paper_mono;
     let text_color = if paper_mono {
@@ -2243,7 +2266,8 @@ fn render_script_block_row(
     });
 
     let text_x = if align_right {
-        (row_rect.left() + text_area_w - galley.size().x - 10.0).max(row_rect.left() + 12.0)
+        (row_rect.left() + text_area_w - galley.size().x - 10.0 * zoom)
+            .max(row_rect.left() + 12.0 * zoom)
     } else {
         row_rect.left() + left_pad
     };
@@ -2308,7 +2332,7 @@ fn render_script_block_row(
                     }
                 }
                 // Crisp left color bar per visual row reflecting that visual row's primary shot
-                let max_pill_w = (tag_area_w - 8.0).max(28.0);
+                let max_pill_w = (tag_area_w - 8.0 * zoom).max(28.0 * zoom);
                 for &(r_start, r_end, r_rect) in &visual_rows {
                     let row_shots = shots_overlapping_range(spans_here, r_start, r_end);
                     let row_primary = pick_row_primary(project, &row_shots, state.selected_shot);
@@ -2316,8 +2340,11 @@ fn render_script_block_row(
                         if let Some(shot) = project.shots.shots.get(psi) {
                             let col = shot_color32(shot.color);
                             let bar = Rect::from_min_max(
-                                Pos2::new(row_rect.left(), text_pos.y + r_rect.min.y - 1.0),
-                                Pos2::new(row_rect.left() + 3.5, text_pos.y + r_rect.max.y + 1.0),
+                                Pos2::new(row_rect.left(), text_pos.y + r_rect.min.y - 1.0 * zoom),
+                                Pos2::new(
+                                    row_rect.left() + 3.5 * zoom,
+                                    text_pos.y + r_rect.max.y + 1.0 * zoom,
+                                ),
                             );
                             p.rect_filled(bar, CornerRadius::same(2), col);
 
@@ -2332,15 +2359,17 @@ fn render_script_block_row(
                                 let g = ellipsized(
                                     p,
                                     &tag_text,
-                                    FontId::monospace(10.0),
+                                    FontId::monospace(10.0 * zoom),
                                     ink_on_accent(col),
-                                    (max_pill_w - 10.0).max(18.0),
+                                    (max_pill_w - 10.0 * zoom).max(18.0 * zoom),
                                 );
-                                let pill_w = (g.size().x + 10.0).clamp(28.0, max_pill_w);
-                                let pill_y = text_pos.y + r_rect.center().y - 8.0;
+                                let pill_w =
+                                    (g.size().x + 10.0 * zoom).clamp(28.0 * zoom, max_pill_w);
+                                let pill_h = 16.0 * zoom;
+                                let pill_y = text_pos.y + r_rect.center().y - pill_h * 0.5;
                                 let pill_rect = Rect::from_min_size(
-                                    Pos2::new(row_rect.right() - pill_w - 4.0, pill_y),
-                                    Vec2::new(pill_w, 16.0),
+                                    Pos2::new(row_rect.right() - pill_w - 4.0 * zoom, pill_y),
+                                    Vec2::new(pill_w, pill_h),
                                 );
                                 p.rect_filled(pill_rect, CornerRadius::same(4), col);
                                 p.galley(
@@ -2402,11 +2431,11 @@ fn render_script_block_row(
 
         // 4. Coverage Rails (exact wrapped visual-line precision!)
         if state.view_mode == ShotsViewMode::CoverageRails && !rail_shots.is_empty() {
-            let rail_x0 = row_rect.right() - rail_area_w + 12.0;
+            let rail_x0 = row_rect.right() - rail_area_w + 12.0 * zoom;
             p.line_segment(
                 [
-                    Pos2::new(rail_x0 - 6.0, row_rect.top()),
-                    Pos2::new(rail_x0 - 6.0, row_rect.bottom()),
+                    Pos2::new(rail_x0 - 6.0 * zoom, row_rect.top()),
+                    Pos2::new(rail_x0 - 6.0 * zoom, row_rect.bottom()),
                 ],
                 Stroke::new(1.0_f32, kit().sep.gamma_multiply(0.55)),
             );
@@ -2414,7 +2443,7 @@ fn render_script_block_row(
             for (col_i, &(shot_idx, sid, _, col)) in rail_shots.iter().enumerate() {
                 let cx = rail_x0 + col_i as f32 * rail_col_w + rail_col_w * 0.5;
                 let active = state.selected_shot == Some(sid);
-                let half_w = if active { 2.5 } else { 1.6 };
+                let half_w = (if active { 2.5 } else { 1.6 }) * zoom;
 
                 let row_hits: Vec<bool> = visual_rows
                     .iter()
