@@ -100,6 +100,11 @@ const SETTINGS_INDEX: &[SettingEntry] = &[
     },
     SettingEntry {
         page: SettingsPage::Writing,
+        title: "Bold character names (speaking parts)",
+        keywords: "bold character cue speaker dialogue speaking parts names",
+    },
+    SettingEntry {
+        page: SettingsPage::Writing,
         title: "Number scenes in the list",
         keywords: "navigator scene list numbering",
     },
@@ -286,6 +291,9 @@ pub struct AppSettings {
     /// automatic typography off until the writer asks for it.
     pub show_scene_numbers: bool,
     pub highlight_current_line: bool,
+    /// Automatically bold speaking character cues (`ElementType::Character`)
+    /// without affecting character names mentioned in Action.
+    pub bold_character_cues: bool,
     pub capitalize_first_word: bool,
     pub correct_double_capitals: bool,
     pub replace_three_dots: bool,
@@ -314,6 +322,7 @@ impl Default for AppSettings {
             paper_mono: false,
             show_scene_numbers: true,
             highlight_current_line: false,
+            bold_character_cues: false,
             capitalize_first_word: false,
             correct_double_capitals: false,
             replace_three_dots: false,
@@ -333,6 +342,7 @@ impl AppSettings {
             page_size: self.page_size,
             show_scene_numbers: self.show_scene_numbers,
             highlight_current_line: self.highlight_current_line,
+            bold_character_cues: self.bold_character_cues,
             capitalize_first_word: self.capitalize_first_word,
             correct_double_capitals: self.correct_double_capitals,
             replace_three_dots: self.replace_three_dots,
@@ -369,6 +379,7 @@ impl AppSettings {
                     }
                     "show_scene_numbers" => s.show_scene_numbers = v != "0",
                     "highlight_current_line" => s.highlight_current_line = v == "1",
+                    "bold_character_cues" => s.bold_character_cues = v == "1",
                     "capitalize_first_word" => s.capitalize_first_word = v == "1",
                     "correct_double_capitals" => s.correct_double_capitals = v == "1",
                     "replace_three_dots" => s.replace_three_dots = v == "1",
@@ -405,7 +416,7 @@ impl AppSettings {
         let _ = std::fs::create_dir_all(crate::app::config_dir());
         let text = format!(
             "autosave={}\nautosave_minutes={}\nbackups={}\nbackups_dir={}\ntheme={}\n\
-             script_face={}\npage_size={}\npaper_mono={}\nshow_scene_numbers={}\nhighlight_current_line={}\ncapitalize_first_word={}\n\
+             script_face={}\npage_size={}\npaper_mono={}\nshow_scene_numbers={}\nhighlight_current_line={}\nbold_character_cues={}\ncapitalize_first_word={}\n\
              correct_double_capitals={}\nreplace_three_dots={}\nsmart_quotes={}\nnavigator_preview={}\n\
              navigator_show_numbers={}\nspellcheck={}\nspell_language={}\nspell_ignore_caps={}\n",
             self.autosave as u8,
@@ -418,6 +429,7 @@ impl AppSettings {
             self.paper_mono as u8,
             self.show_scene_numbers as u8,
             self.highlight_current_line as u8,
+            self.bold_character_cues as u8,
             self.capitalize_first_word as u8,
             self.correct_double_capitals as u8,
             self.replace_three_dots as u8,
@@ -919,6 +931,19 @@ fn settings_writing(ui: &mut Ui, settings: &mut AppSettings) -> (bool, bool, boo
                 "Highlight current line",
             )
             .on_hover_text("Tint the line holding the caret, like KIT's editor.")
+            .changed();
+    });
+    ui.add_space(8.0);
+    ui.horizontal(|ui| {
+        ui.add_space(16.0);
+        changed |= ui
+            .checkbox(
+                &mut settings.bold_character_cues,
+                "Bold character names (speaking parts)",
+            )
+            .on_hover_text(
+                "Automatically bold character cues above dialogue in the editor and PDF, without bolding mentions in Action.",
+            )
             .changed();
     });
 

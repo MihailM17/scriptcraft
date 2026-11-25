@@ -117,6 +117,7 @@ pub struct ExportOptions {
     pub page_numbers: bool,
     pub scene_numbers: bool,
     pub speaking_parts_count: bool,
+    pub bold_character_cues: bool,
     pub revision_marks: bool,
     pub revision_pages_only: bool,
     pub watermark: Option<String>,
@@ -130,6 +131,7 @@ impl Default for ExportOptions {
             page_numbers: true,
             scene_numbers: true,
             speaking_parts_count: false,
+            bold_character_cues: false,
             revision_marks: false,
             revision_pages_only: false,
             watermark: None,
@@ -183,8 +185,11 @@ pub struct PrintLine {
     /// Optional shot-coverage pastel tint RGB (populated only for colored
     /// shot-script exports).
     pub shot_tint: Option<(u8, u8, u8)>,
+    /// Exact display-column highlighter spans `(col_start, col_end, rgb)` on
+    /// `text` for character-level shot coverage.
+    pub shot_highlights: Vec<(usize, usize, (u8, u8, u8))>,
     /// Optional shot code badge `(label, rgb)` drawn in the right margin on
-    /// the first line of a shot-covered block.
+    /// the first line of a shot-covered span.
     pub shot_tag: Option<(String, (u8, u8, u8))>,
 }
 
@@ -204,6 +209,7 @@ impl PrintLine {
             y_from_bottom_mm: None,
             runs: Vec::new(),
             shot_tint: None,
+            shot_highlights: Vec::new(),
             shot_tag: None,
         }
     }
@@ -262,6 +268,49 @@ fn styled_runs_for_line(
     } else {
         Vec::new()
     }
+}
+
+/// Compute merged `(col_start, col_end, rgb)` highlight spans and distinct
+/// covering shot indices for one wrapped display line. When multiple shots
+/// overlap a character, the tighter/more specific span wins its highlight color
+/// so partial cuts remain visible inside wider masters.
+#[allow(clippy::type_complexity)]
+fn line_shot_highlights(
+    shots: &scriptcraft_core::shots::ShotList,
+    block_spans: &[(usize, usize, usize)],
+    para_off: usize,
+    cols: &[usize],
+) -> (Vec<(usize, usize, (u8, u8, u8))>, Vec<usize>) {
+    let mut hl: Vec<(usize, usize, (u8, u8, u8))> = Vec::new();
+    let mut line_shots: Vec<usize> = Vec::new();
+    for (ci, &src_col) in cols.iter().enumerate() {
+        let abs = para_off + src_col;
+        let mut best: Option<(usize, usize)> = None; // (shot_idx, span_len)
+        for &(si, c0, c1) in block_spans {
+            if abs >= c0 && abs < c1 {
+                if !line_shots.contains(&si) {
+                    line_shots.push(si);
+                }
+                let span_len = c1 - c0;
+                if best.is_none_or(|(_, bl)| span_len < bl) {
+                    best = Some((si, span_len));
+                }
+            }
+        }
+        if let Some((si, _)) = best {
+            if let Some(shot) = shots.shots.get(si) {
+                let rgb = shot.color.rgb();
+                if let Some(last) = hl.last_mut() {
+                    if last.1 == ci && last.2 == rgb {
+                        last.1 = ci + 1;
+                        continue;
+                    }
+                }
+                hl.push((ci, ci + 1, rgb));
+            }
+        }
+    }
+    (hl, line_shots)
 }
 
 /// Char offset of paragraph `para` inside `text` (splitting on `'\n'`).
@@ -518,21 +567,10 @@ fn layout_pages_inner(
     } else {
         HashMap::new()
     };
-    let shot_cov: Vec<Vec<usize>> = if include_shots && !p.shots.is_empty() {
-        p.shots.resolve_block_coverage(&renum)
+    let shot_char_cov: Vec<Vec<(usize, usize, usize)>> = if include_shots && !p.shots.is_empty() {
+        p.shots.resolve_block_char_coverage(&renum)
     } else {
         Vec::new()
-    };
-    let shot_for = |bi: usize| -> Option<((u8, u8, u8), String)> {
-        let hits = shot_cov.get(bi)?;
-        let primary = p.shots.shots.get(*hits.first()?)?;
-        let rgb = primary.color.rgb();
-        let tag = if hits.len() > 1 {
-            format!("{} +{}", primary.code, hits.len() - 1)
-        } else {
-            primary.code.clone()
-        };
-        Some((rgb, tag))
     };
     let mut scene_i = 0usize;
     let mut last_tagged_shot: Option<String> = None;
@@ -580,7 +618,7 @@ fn layout_pages_inner(
                             let mut line = PrintLine::text_line(
                                 margin_l + dual::cue_x_mm(&text, right),
                                 text,
-                                false,
+                                opts.bold_character_cues,
                             );
                             line.revision = revisions[cue_bi];
                             lines.push(line);
@@ -591,10 +629,15 @@ fn layout_pages_inner(
                 let end = dual_chunk.end_row.min(rows.rows.len());
                 for row in &rows.rows[start..end] {
                     for cell in [&row.left, &row.right].into_iter().flatten() {
+                        let cell_bold = cell.bold
+                            || (opts.bold_character_cues
+                                && cell.span.is_some_and(|sp| {
+                                    renum[sp.bi].element_type == ElementType::Character
+                                }));
                         let mut line = PrintLine::text_line(
                             margin_l + cell.x_mm,
                             cell.text.clone(),
-                            cell.bold,
+                            cell_bold,
                         );
                         line.revision = cell.span.map(|span| revisions[span.bi]).unwrap_or(None);
                         if let Some(span) = cell.span {
@@ -606,7 +649,7 @@ fn layout_pages_inner(
                                     off,
                                     &cell.text,
                                     &cell.cols,
-                                    cell.bold,
+                                    cell_bold,
                                     cell.italic,
                                 );
                             }
@@ -637,7 +680,7 @@ fn layout_pages_inner(
                 ElementType::SceneHeading => (margin_l, false, false),
                 ElementType::SceneCharacters => (margin_l, false, false),
                 ElementType::Action | ElementType::Shot => (margin_l, false, false),
-                ElementType::Character => (x_cue, false, false),
+                ElementType::Character => (x_cue, opts.bold_character_cues, false),
                 ElementType::Parenthetical => (x_paren, false, false),
                 ElementType::Dialogue => (x_dlg, false, false),
                 ElementType::Lyrics => (x_dlg, false, false),
@@ -646,7 +689,11 @@ fn layout_pages_inner(
             };
             if chunk.contd {
                 if let Some(cue) = cue_name_for(&renum, chunk.bi) {
-                    let mut line = PrintLine::text_line(x_cue, format!("{cue} (CONT'D)"), false);
+                    let mut line = PrintLine::text_line(
+                        x_cue,
+                        format!("{cue} (CONT'D)"),
+                        opts.bold_character_cues,
+                    );
                     line.revision = revision;
                     lines.push(line);
                 }
@@ -667,8 +714,11 @@ fn layout_pages_inner(
             if b.element_type == ElementType::SceneHeading {
                 scene_i += 1;
             }
-            let block_shot = shot_for(chunk.bi);
-            if b.styles.is_empty() {
+            let block_char_spans: &[(usize, usize, usize)] = shot_char_cov
+                .get(chunk.bi)
+                .map(Vec::as_slice)
+                .unwrap_or(&[]);
+            if b.styles.is_empty() && block_char_spans.is_empty() {
                 let mut text = b
                     .text
                     .split('\n')
@@ -688,13 +738,7 @@ fn layout_pages_inner(
                     l.right_aligned = right_aligned;
                     l.share_row = li == 0 && number_pushed;
                     l.revision = revision;
-                    if let Some((rgb, ref tag)) = block_shot {
-                        l.shot_tint = Some(rgb);
-                        if li == 0 && last_tagged_shot.as_deref() != Some(tag.as_str()) {
-                            l.shot_tag = Some((tag.clone(), rgb));
-                            last_tagged_shot = Some(tag.clone());
-                        }
-                    } else if li == 0 {
+                    if li == 0 {
                         last_tagged_shot = None;
                     }
                     lines.push(l);
@@ -726,18 +770,42 @@ fn layout_pages_inner(
                         para_text
                     };
                     for wl in crate::wrap::wrap_paragraph(slice, col_chars) {
-                        let runs =
-                            styled_runs_for_line(b, para_off, &wl.text, &wl.cols, bold, false);
+                        let runs = if b.styles.is_empty() {
+                            Vec::new()
+                        } else {
+                            styled_runs_for_line(b, para_off, &wl.text, &wl.cols, bold, false)
+                        };
                         let mut l = PrintLine::text_line(x, wl.text, bold);
                         l.right_aligned = right_aligned;
                         l.share_row = li == 0 && number_pushed;
                         l.revision = revision;
                         l.runs = runs;
-                        if let Some((rgb, ref tag)) = block_shot {
-                            l.shot_tint = Some(rgb);
-                            if li == 0 && last_tagged_shot.as_deref() != Some(tag.as_str()) {
-                                l.shot_tag = Some((tag.clone(), rgb));
-                                last_tagged_shot = Some(tag.clone());
+                        if !block_char_spans.is_empty() {
+                            let (hl, line_shots) = line_shot_highlights(
+                                &p.shots,
+                                block_char_spans,
+                                para_off,
+                                &wl.cols,
+                            );
+                            if !hl.is_empty() {
+                                let primary_rgb = hl[0].2;
+                                l.shot_tint = Some(primary_rgb);
+                                l.shot_highlights = hl;
+                                if let Some(&first_si) = line_shots.first() {
+                                    if let Some(primary) = p.shots.shots.get(first_si) {
+                                        let tag = if line_shots.len() > 1 {
+                                            format!("{} +{}", primary.code, line_shots.len() - 1)
+                                        } else {
+                                            primary.code.clone()
+                                        };
+                                        if last_tagged_shot.as_deref() != Some(tag.as_str()) {
+                                            l.shot_tag = Some((tag.clone(), primary.color.rgb()));
+                                            last_tagged_shot = Some(tag);
+                                        }
+                                    }
+                                }
+                            } else {
+                                last_tagged_shot = None;
                             }
                         } else if li == 0 {
                             last_tagged_shot = None;
@@ -848,6 +916,7 @@ pub fn layout_title_page_for(
             y_from_bottom_mm: None,
             runs: Vec::new(),
             shot_tint: None,
+            shot_highlights: Vec::new(),
             shot_tag: None,
         }
     };
@@ -1192,38 +1261,63 @@ fn to_pdf_bytes_inner(
                 continue;
             }
             let yy = line.y_from_bottom_mm.unwrap_or(y - line.dy_mm);
-            if let Some((r, g, b)) = line.shot_tint {
-                // Soft pastel highlight over white paper so black text stays crisp.
-                let tr = 0.84 + 0.16 * (r as f32 / 255.0);
-                let tg = 0.84 + 0.16 * (g as f32 / 255.0);
-                let tb = 0.84 + 0.16 * (b as f32 / 255.0);
-                ops.push(Op::SetFillColor {
-                    col: Color::Rgb(Rgb::new(tr, tg, tb, None)),
-                });
-                let mut strip = PdfRect::from_wh(
-                    Pt((text_right - margin_l + 4.0) * MM_TO_PT),
-                    Pt(PITCH_MM * MM_TO_PT),
-                );
-                strip.x = Pt((margin_l - 2.0) * MM_TO_PT);
-                strip.y = Pt((yy - DESCENT_MM * 0.85) * MM_TO_PT);
-                ops.push(Op::DrawPolygon {
-                    polygon: strip.to_polygon(),
-                });
-                // Solid 1.8mm color bar along the left edge of the text column.
-                ops.push(Op::SetFillColor {
-                    col: Color::Rgb(Rgb::new(
-                        r as f32 / 255.0,
-                        g as f32 / 255.0,
-                        b as f32 / 255.0,
-                        None,
-                    )),
-                });
-                let mut bar = PdfRect::from_wh(Pt(1.8 * MM_TO_PT), Pt(PITCH_MM * MM_TO_PT));
-                bar.x = Pt((margin_l - 4.0) * MM_TO_PT);
-                bar.y = Pt((yy - DESCENT_MM * 0.85) * MM_TO_PT);
-                ops.push(Op::DrawPolygon {
-                    polygon: bar.to_polygon(),
-                });
+            if !line.shot_highlights.is_empty() || line.shot_tint.is_some() {
+                let base_x = if line.right_aligned {
+                    line.x_mm - line.text.chars().count() as f32 * CHAR_MM
+                } else {
+                    line.x_mm
+                };
+                if !line.shot_highlights.is_empty() {
+                    for &(c0, c1, (r, g, b)) in &line.shot_highlights {
+                        let tr = 0.80 + 0.20 * (r as f32 / 255.0);
+                        let tg = 0.80 + 0.20 * (g as f32 / 255.0);
+                        let tb = 0.80 + 0.20 * (b as f32 / 255.0);
+                        ops.push(Op::SetFillColor {
+                            col: Color::Rgb(Rgb::new(tr, tg, tb, None)),
+                        });
+                        let w_mm = ((c1 - c0) as f32 * CHAR_MM) + 1.0;
+                        let mut strip =
+                            PdfRect::from_wh(Pt(w_mm * MM_TO_PT), Pt(PITCH_MM * MM_TO_PT));
+                        strip.x = Pt((base_x + c0 as f32 * CHAR_MM - 0.5) * MM_TO_PT);
+                        strip.y = Pt((yy - DESCENT_MM * 0.85) * MM_TO_PT);
+                        ops.push(Op::DrawPolygon {
+                            polygon: strip.to_polygon(),
+                        });
+                    }
+                } else if let Some((r, g, b)) = line.shot_tint {
+                    let tr = 0.84 + 0.16 * (r as f32 / 255.0);
+                    let tg = 0.84 + 0.16 * (g as f32 / 255.0);
+                    let tb = 0.84 + 0.16 * (b as f32 / 255.0);
+                    ops.push(Op::SetFillColor {
+                        col: Color::Rgb(Rgb::new(tr, tg, tb, None)),
+                    });
+                    let mut strip = PdfRect::from_wh(
+                        Pt((text_right - margin_l + 4.0) * MM_TO_PT),
+                        Pt(PITCH_MM * MM_TO_PT),
+                    );
+                    strip.x = Pt((margin_l - 2.0) * MM_TO_PT);
+                    strip.y = Pt((yy - DESCENT_MM * 0.85) * MM_TO_PT);
+                    ops.push(Op::DrawPolygon {
+                        polygon: strip.to_polygon(),
+                    });
+                }
+                if let Some((r, g, b)) = line.shot_tint {
+                    // Solid 1.8mm color bar along the left edge of the text column.
+                    ops.push(Op::SetFillColor {
+                        col: Color::Rgb(Rgb::new(
+                            r as f32 / 255.0,
+                            g as f32 / 255.0,
+                            b as f32 / 255.0,
+                            None,
+                        )),
+                    });
+                    let mut bar = PdfRect::from_wh(Pt(1.8 * MM_TO_PT), Pt(PITCH_MM * MM_TO_PT));
+                    bar.x = Pt((margin_l - 4.0) * MM_TO_PT);
+                    bar.y = Pt((yy - DESCENT_MM * 0.85) * MM_TO_PT);
+                    ops.push(Op::DrawPolygon {
+                        polygon: bar.to_polygon(),
+                    });
+                }
                 if let Some((ref tag, (sr, sg, sb))) = line.shot_tag {
                     ops.push(Op::SetFillColor {
                         col: Color::Rgb(Rgb::new(
@@ -2536,5 +2630,84 @@ mod tests {
         assert!(line.runs.iter().any(|r| r.text == "whispers" && r.italic));
         assert!(line.runs.iter().any(|r| r.text == "loudly" && r.bold));
         assert!(line.runs.iter().any(|r| r.text == "now" && r.underline));
+    }
+
+    #[test]
+    fn bold_character_cues_only_bolds_speaking_cues() {
+        let p = Project {
+            title: "Cues".into(),
+            blocks: vec![
+                ScriptBlock::new(ElementType::SceneHeading, "INT. ROOM - DAY".into()),
+                ScriptBlock::new(ElementType::Action, "IVAN enters the room.".into()),
+                ScriptBlock::new(ElementType::Character, "IVAN".into()),
+                ScriptBlock::new(ElementType::Dialogue, "Hello there.".into()),
+            ],
+            ..Default::default()
+        };
+        let mut opts = default_opts();
+        assert!(!opts.bold_character_cues, "off by default");
+        let regular_pages = layout_pages(&p, &Default::default(), &opts);
+        let cue_regular = regular_pages[0]
+            .iter()
+            .find(|l| l.text == "IVAN")
+            .expect("cue line");
+        assert!(!cue_regular.bold);
+
+        opts.bold_character_cues = true;
+        let bold_pages = layout_pages(&p, &Default::default(), &opts);
+        let action_line = bold_pages[0]
+            .iter()
+            .find(|l| l.text == "IVAN enters the room.")
+            .expect("action line");
+        let cue_line = bold_pages[0]
+            .iter()
+            .find(|l| l.text == "IVAN")
+            .expect("cue line");
+        let dlg_line = bold_pages[0]
+            .iter()
+            .find(|l| l.text == "Hello there.")
+            .expect("dialogue line");
+        assert!(cue_line.bold, "speaking character cue must be bold");
+        assert!(
+            !action_line.bold,
+            "action mentioning character must not be bold"
+        );
+        assert!(!dlg_line.bold, "dialogue must not be bold");
+    }
+
+    #[test]
+    fn colored_script_highlights_exact_character_substrings() {
+        use scriptcraft_core::shots::{ShotMovement, ShotRange, ShotSize};
+
+        let mut p = Project {
+            title: "CharHL".into(),
+            blocks: vec![
+                ScriptBlock::new(ElementType::SceneHeading, "INT. ROOM - DAY".into()),
+                ScriptBlock::new(
+                    ElementType::Action,
+                    "Ivan stares at the flickering neon sign.".into(),
+                ),
+            ],
+            ..Default::default()
+        };
+        let b1 = p.blocks[1].id;
+        p.shots.add_shot(
+            Some(p.blocks[0].id),
+            "1",
+            ShotSize::Insert,
+            ShotMovement::Static,
+            "85mm".into(),
+            "Neon sign".into(),
+            ShotRange::chars(b1, 19, b1, 39),
+        );
+        let pages = layout_pages_inner(&p, &Default::default(), &default_opts(), &[], None, true);
+        let line = pages[0]
+            .iter()
+            .find(|l| l.text.contains("flickering"))
+            .expect("action line");
+        assert_eq!(line.shot_highlights.len(), 1);
+        assert_eq!(line.shot_highlights[0].0, 19);
+        assert_eq!(line.shot_highlights[0].1, 39);
+        assert_eq!(line.shot_tag.as_ref().map(|(t, _)| t.as_str()), Some("1A"));
     }
 }

@@ -1372,6 +1372,7 @@ impl ScriptCraftApp {
     pub fn load_persistent(&mut self) {
         self.settings = AppSettings::load();
         self.export_options.page_size = self.settings.page_size;
+        self.export_options.bold_character_cues = self.settings.bold_character_cues;
         self.recent = load_recent();
         self.persist = true;
         self.recovery = Self::scan_recovery_files();
@@ -2401,6 +2402,30 @@ impl ScriptCraftApp {
         self.shots_ui.view_mode = mode;
         self.shots_ui.selected_scene = scene_idx;
         self.shots_ui.selected_shot = shot_id;
+    }
+
+    /// Set exact `(block_idx, char_idx)` text selection inside Shots (tests).
+    #[doc(hidden)]
+    pub fn set_shots_char_selection_for_test(
+        &mut self,
+        start: (usize, usize),
+        end: (usize, usize),
+    ) {
+        self.shots_ui.sel_anchor = Some(start);
+        self.shots_ui.sel_focus = Some(end);
+    }
+
+    /// Current value of the automatic bold speaking character cues setting (tests).
+    #[doc(hidden)]
+    pub fn bold_character_cues_for_test(&self) -> bool {
+        self.settings.bold_character_cues
+    }
+
+    /// Toggle automatic bold speaking character cues (tests).
+    #[doc(hidden)]
+    pub fn set_bold_character_cues_for_test(&mut self, on: bool) {
+        self.settings.bold_character_cues = on;
+        self.export_options.bold_character_cues = on;
     }
 
     fn refresh_derived(&mut self) {
@@ -3548,6 +3573,7 @@ impl ScriptCraftApp {
     fn pdf_bytes(&mut self) -> Option<Vec<u8>> {
         let Some(p) = &self.project else { return None };
         let mut opts = self.export_options.clone();
+        opts.bold_character_cues = self.settings.bold_character_cues;
         if self.revisions.is_empty() {
             opts.revision_marks = false;
             opts.revision_pages_only = false;
@@ -8132,6 +8158,7 @@ impl ScriptCraftApp {
         let p = self.project.as_ref()?;
         let mut opts = self.export_options.clone();
         opts.page_size = self.settings.page_size;
+        opts.bold_character_cues = self.settings.bold_character_cues;
         let res = self.with_script_export_fonts(|fonts| {
             scriptcraft_layout::pdf::to_colored_script_pdf_bytes(p, &self.meta, &opts, fonts)
         });
@@ -8227,11 +8254,12 @@ impl ScriptCraftApp {
             return;
         }
         let labels = self.shots_scene_labels();
+        let bold_cues = self.settings.bold_character_cues;
         let action = {
             let Some(p) = self.project.as_mut() else {
                 return;
             };
-            crate::shots_view::show(ctx, p, &labels, &mut self.shots_ui)
+            crate::shots_view::show(ctx, p, &labels, &mut self.shots_ui, bold_cues)
         };
         match action {
             crate::shots_view::ShotsAction::None => {}
@@ -9049,6 +9077,7 @@ impl ScriptCraftApp {
             self.doc_hint = None;
             self.refresh_derived();
         }
+        self.export_options.bold_character_cues = self.settings.bold_character_cues;
         if outcome.check_updates {
             self.update.start();
             ctx.request_repaint();

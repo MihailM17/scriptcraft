@@ -211,6 +211,17 @@ impl ShotRange {
         }
     }
 
+    /// Exact character-range selection `[start_char, end_char)` spanning one
+    /// or more screenplay blocks.
+    pub fn chars(start_block: Uuid, start_char: usize, end_block: Uuid, end_char: usize) -> Self {
+        Self {
+            start_block,
+            end_block,
+            start_char: Some(start_char),
+            end_char: Some(end_char),
+        }
+    }
+
     /// Resolve to inclusive `(lo, hi)` indices in `blocks`. Gracefully falls
     /// back to whichever endpoint still exists if the other was deleted.
     pub fn resolve(&self, index: &HashMap<Uuid, usize>) -> Option<(usize, usize)> {
@@ -221,6 +232,98 @@ impl ShotRange {
             (None, None) => None,
         }
     }
+
+    /// Resolve to ordered `((lo_block, lo_char), (hi_block, hi_char))` in
+    /// `blocks`, clamping char offsets to each block's char length. Whole-block
+    /// ranges (`start_char`/`end_char` `None`) span `0..block_len`.
+    pub fn resolve_chars(
+        &self,
+        index: &HashMap<Uuid, usize>,
+        blocks: &[ScriptBlock],
+    ) -> Option<((usize, usize), (usize, usize))> {
+        let len_of = |bi: usize| blocks.get(bi).map(|b| b.text.chars().count()).unwrap_or(0);
+        match (index.get(&self.start_block), index.get(&self.end_block)) {
+            (Some(&a), Some(&b)) => {
+                let ca = self.start_char.unwrap_or(0).min(len_of(a));
+                let cb = self.end_char.unwrap_or_else(|| len_of(b)).min(len_of(b));
+                if (a, ca) <= (b, cb) {
+                    Some(((a, ca), (b, cb)))
+                } else {
+                    Some(((b, cb), (a, ca)))
+                }
+            }
+            (Some(&a), None) => {
+                let l = len_of(a);
+                let ca = self.start_char.unwrap_or(0).min(l);
+                Some(((a, ca), (a, l)))
+            }
+            (None, Some(&b)) => {
+                let cb = self.end_char.unwrap_or_else(|| len_of(b)).min(len_of(b));
+                Some(((b, 0), (b, cb)))
+            }
+            (None, None) => None,
+        }
+    }
+
+    /// Half-open `[c0, c1)` character slice of `blocks[bi]` covered by this
+    /// range, or `None` if `bi` has no covered characters.
+    pub fn char_span_in_block(
+        &self,
+        bi: usize,
+        index: &HashMap<Uuid, usize>,
+        blocks: &[ScriptBlock],
+    ) -> Option<(usize, usize)> {
+        let ((lo_b, lo_c), (hi_b, hi_c)) = self.resolve_chars(index, blocks)?;
+        if bi < lo_b || bi > hi_b {
+            return None;
+        }
+        let len = blocks.get(bi).map(|b| b.text.chars().count()).unwrap_or(0);
+        let (c0, c1) = if lo_b == hi_b {
+            (lo_c, hi_c)
+        } else if bi == lo_b {
+            (lo_c, len)
+        } else if bi == hi_b {
+            (0, hi_c)
+        } else {
+            (0, len)
+        };
+        if len == 0 {
+            // Whole-block span on an empty block still counts as covering it.
+            if self.start_char.is_none() && self.end_char.is_none() {
+                Some((0, 0))
+            } else {
+                None
+            }
+        } else if c0 < c1 {
+            Some((c0, c1))
+        } else {
+            None
+        }
+    }
+
+    /// Readable text slice covered by this single range.
+    pub fn excerpt(&self, index: &HashMap<Uuid, usize>, blocks: &[ScriptBlock]) -> String {
+        let Some(((lo_b, _), (hi_b, _))) = self.resolve_chars(index, blocks) else {
+            return String::new();
+        };
+        let mut parts = Vec::new();
+        for (bi, block) in blocks.iter().enumerate().take(hi_b + 1).skip(lo_b) {
+            if let Some((c0, c1)) = self.char_span_in_block(bi, index, blocks) {
+                let slice = slice_chars(&block.text, c0, c1).trim().replace('\n', " ");
+                if !slice.is_empty() {
+                    parts.push(slice);
+                }
+            }
+        }
+        parts.join(" / ")
+    }
+}
+
+fn slice_chars(s: &str, c0: usize, c1: usize) -> String {
+    if c0 >= c1 {
+        return String::new();
+    }
+    s.chars().skip(c0).take(c1 - c0).collect()
 }
 
 /// One production camera setup / shot covering one or more screenplay beats.
@@ -437,9 +540,13 @@ impl ShotList {
         true
     }
 
-    /// For every block index `bi`, return the indices into `self.shots` that
-    /// cover `bi` (preserving shot list order, deduplicated per block).
-    pub fn resolve_block_coverage(&self, blocks: &[ScriptBlock]) -> Vec<Vec<usize>> {
+    /// For every block index `bi`, return the `(shot_index, start_char, end_char)`
+    /// half-open character intervals covering `blocks[bi]` (preserving shot list
+    /// order).
+    pub fn resolve_block_char_coverage(
+        &self,
+        blocks: &[ScriptBlock],
+    ) -> Vec<Vec<(usize, usize, usize)>> {
         let mut cov = vec![Vec::new(); blocks.len()];
         if self.shots.is_empty() || blocks.is_empty() {
             return cov;
@@ -447,16 +554,37 @@ impl ShotList {
         let index = block_index_map(blocks);
         for (si, shot) in self.shots.iter().enumerate() {
             for span in &shot.spans {
-                if let Some((lo, hi)) = span.resolve(&index) {
-                    for slot in cov.iter_mut().take(hi + 1).skip(lo) {
-                        if !slot.contains(&si) {
-                            slot.push(si);
+                let Some(((lo_b, _), (hi_b, _))) = span.resolve_chars(&index, blocks) else {
+                    continue;
+                };
+                for (bi, slot) in cov.iter_mut().enumerate().take(hi_b + 1).skip(lo_b) {
+                    if let Some((c0, c1)) = span.char_span_in_block(bi, &index, blocks) {
+                        let entry = (si, c0, c1);
+                        if !slot.contains(&entry) {
+                            slot.push(entry);
                         }
                     }
                 }
             }
         }
         cov
+    }
+
+    /// For every block index `bi`, return the indices into `self.shots` that
+    /// cover any part of `bi` (preserving shot list order, deduplicated per block).
+    pub fn resolve_block_coverage(&self, blocks: &[ScriptBlock]) -> Vec<Vec<usize>> {
+        self.resolve_block_char_coverage(blocks)
+            .into_iter()
+            .map(|spans| {
+                let mut ids = Vec::new();
+                for (si, _, _) in spans {
+                    if !ids.contains(&si) {
+                        ids.push(si);
+                    }
+                }
+                ids
+            })
+            .collect()
     }
 
     /// Indices into `self.shots` that belong to `scene_id` (or cover any block
@@ -505,20 +633,31 @@ impl ShotList {
         (shot_count, covered, total)
     }
 
-    /// Short readable excerpt of the screenplay lines covered by `shot`.
+    /// Short readable excerpt of the exact screenplay text covered by `shot`.
     pub fn covered_excerpt(&self, shot: &Shot, blocks: &[ScriptBlock]) -> String {
         let index = block_index_map(blocks);
-        let mut seen = HashSet::new();
-        let mut parts: Vec<String> = Vec::new();
+        let mut per_block: HashMap<usize, Vec<(usize, usize)>> = HashMap::new();
         for span in &shot.spans {
-            let Some((lo, hi)) = span.resolve(&index) else {
+            let Some(((lo_b, _), (hi_b, _))) = span.resolve_chars(&index, blocks) else {
                 continue;
             };
-            for (bi, block) in blocks.iter().enumerate().take(hi + 1).skip(lo) {
-                if !seen.insert(bi) {
-                    continue;
+            for bi in lo_b..=hi_b {
+                if let Some((c0, c1)) = span.char_span_in_block(bi, &index, blocks) {
+                    per_block.entry(bi).or_default().push((c0, c1));
                 }
-                let t = block.text.trim().replace('\n', " ");
+            }
+        }
+        let mut block_indices: Vec<usize> = per_block.keys().copied().collect();
+        block_indices.sort_unstable();
+
+        let mut parts: Vec<String> = Vec::new();
+        for bi in block_indices {
+            let Some(block) = blocks.get(bi) else {
+                continue;
+            };
+            let intervals = merge_intervals(per_block.remove(&bi).unwrap_or_default());
+            for (c0, c1) in intervals {
+                let t = slice_chars(&block.text, c0, c1).trim().replace('\n', " ");
                 if !t.is_empty() {
                     parts.push(t);
                 }
@@ -534,32 +673,40 @@ impl ShotList {
         }
     }
 
-    /// Estimated screen duration (seconds) of the blocks covered by `shot`.
+    /// Estimated screen duration (seconds) of the text covered by `shot`.
     pub fn shot_duration_secs(&self, shot: &Shot, blocks: &[ScriptBlock]) -> f64 {
         let index = block_index_map(blocks);
-        let mut seen = HashSet::new();
-        let mut action_words = 0usize;
-        let mut dialog_words = 0usize;
+        let mut per_block: HashMap<usize, Vec<(usize, usize)>> = HashMap::new();
         for span in &shot.spans {
-            let Some((lo, hi)) = span.resolve(&index) else {
+            let Some(((lo_b, _), (hi_b, _))) = span.resolve_chars(&index, blocks) else {
                 continue;
             };
-            for (bi, b) in blocks.iter().enumerate().take(hi + 1).skip(lo) {
-                if !seen.insert(bi) {
-                    continue;
+            for bi in lo_b..=hi_b {
+                if let Some((c0, c1)) = span.char_span_in_block(bi, &index, blocks) {
+                    per_block.entry(bi).or_default().push((c0, c1));
                 }
-                if !b.element_type.is_printable() {
-                    continue;
-                }
-                let w = b.text.split_whitespace().count();
-                if matches!(
-                    b.element_type,
-                    ElementType::Dialogue | ElementType::Parenthetical | ElementType::Lyrics
-                ) {
-                    dialog_words += w;
-                } else {
-                    action_words += w;
-                }
+            }
+        }
+        let mut action_words = 0usize;
+        let mut dialog_words = 0usize;
+        for (bi, raw) in per_block {
+            let Some(b) = blocks.get(bi) else {
+                continue;
+            };
+            if !b.element_type.is_printable() {
+                continue;
+            }
+            let w: usize = merge_intervals(raw)
+                .into_iter()
+                .map(|(c0, c1)| slice_chars(&b.text, c0, c1).split_whitespace().count())
+                .sum();
+            if matches!(
+                b.element_type,
+                ElementType::Dialogue | ElementType::Parenthetical | ElementType::Lyrics
+            ) {
+                dialog_words += w;
+            } else {
+                action_words += w;
             }
         }
         action_words as f64 * ACTION_S_PER_WORD + dialog_words as f64 * DIALOG_S_PER_WORD
@@ -618,6 +765,24 @@ impl ShotList {
         }
         out
     }
+}
+
+fn merge_intervals(mut raw: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
+    raw.retain(|(a, b)| a < b);
+    if raw.is_empty() {
+        return raw;
+    }
+    raw.sort_unstable();
+    let mut merged = vec![raw[0]];
+    for (a, b) in raw.into_iter().skip(1) {
+        let last = merged.last_mut().unwrap();
+        if a <= last.1 {
+            last.1 = last.1.max(b);
+        } else {
+            merged.push((a, b));
+        }
+    }
+    merged
 }
 
 #[cfg(test)]
@@ -723,5 +888,42 @@ mod tests {
         assert!(list.delete_shot(b));
         assert_eq!(list.len(), 1);
         assert_eq!(list.shots[0].id, a);
+    }
+
+    #[test]
+    fn char_range_slicing_excerpt_and_block_coverage() {
+        let p = sample_project();
+        let sid = p.blocks[0].id;
+        let mut list = ShotList::default();
+        // Select only "boils on the stove" inside block 1 ("Coffee boils on the stove.")
+        let id = list.add_shot(
+            Some(sid),
+            "1",
+            ShotSize::Insert,
+            ShotMovement::Static,
+            "85mm".into(),
+            "Stove insert".into(),
+            ShotRange::chars(p.blocks[1].id, 7, p.blocks[1].id, 25),
+        );
+        let shot = list.get(id).unwrap();
+        assert_eq!(list.covered_excerpt(shot, &p.blocks), "boils on the stove");
+        let char_cov = list.resolve_block_char_coverage(&p.blocks);
+        assert_eq!(char_cov[1], vec![(0, 7, 25)]);
+        assert!(char_cov[2].is_empty());
+
+        // Cross-block partial char selection: tail of block 1 into head of block 3
+        let id2 = list.add_shot(
+            Some(sid),
+            "1",
+            ShotSize::Cu,
+            ShotMovement::Handheld,
+            "50mm".into(),
+            "Cross-block cut".into(),
+            ShotRange::chars(p.blocks[1].id, 20, p.blocks[3].id, 8),
+        );
+        let shot2 = list.get(id2).unwrap();
+        let ex2 = list.covered_excerpt(shot2, &p.blocks);
+        assert!(ex2.starts_with("stove."), "got: {ex2}");
+        assert!(ex2.ends_with("We leave"), "got: {ex2}");
     }
 }

@@ -3804,8 +3804,9 @@ fn shots_phase_create_overlap_toggle_modes_and_export() {
     h.run();
     assert_eq!(h.state().shots_count_for_test(), 2);
 
-    // Click block 2 again and overlap it with existing shot 1B
-    h.get_by_label(&b1_label).click();
+    // Highlight a specific partial character range inside block 2 and overlap it with shot 1B
+    h.state_mut()
+        .set_shots_char_selection_for_test((1, 5), (1, 28));
     h.run();
     h.get_by_label("+ 1B").click();
     h.run();
@@ -3885,4 +3886,62 @@ fn shots_persist_across_save_and_reopen() {
     assert!(csv.contains("1A") && csv.contains("85mm"));
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Selecting a partial character span inside a screenplay paragraph creates a
+/// shot covering only those exact words (reflected in CSV & Colored Script PDF).
+#[test]
+fn shots_char_selection_creates_exact_phrase_shot() {
+    let mut h = harness(SideTab::Script);
+    h.run();
+    h.get_by_label("Shots").click();
+    h.run();
+
+    let b1_text = h.state().block_text(1).unwrap_or_default();
+    let phrase: String = b1_text.chars().skip(5).take(22).collect();
+    assert!(!phrase.trim().is_empty());
+
+    h.state_mut()
+        .set_shots_char_selection_for_test((1, 5), (1, 27));
+    h.run();
+    h.get_by_label("+ New Shot (1A)").click();
+    h.run();
+
+    let csv = h.state().shot_list_csv_for_test().unwrap();
+    assert!(
+        csv.contains(phrase.trim()),
+        "CSV must list exact selected phrase {:?}: {csv}",
+        phrase.trim()
+    );
+    assert!(
+        !csv.contains(b1_text.trim()),
+        "CSV must not expand partial selection to whole paragraph"
+    );
+}
+
+/// "Bold character names (speaking parts)" is opt-in under Settings -> Writing
+/// and flows to editor & PDF options without bolding mentions in Action.
+#[test]
+fn bold_character_cues_setting_toggles_and_exports() {
+    let mut h = harness(SideTab::Script);
+    h.run();
+    assert!(
+        !h.state().bold_character_cues_for_test(),
+        "bold character cues must be off by default"
+    );
+
+    h.get_by_label("Settings").click();
+    h.run();
+    h.get_by_label("Writing").click();
+    h.run();
+    h.get_by_label("Bold character names (speaking parts)")
+        .click();
+    h.run();
+    assert!(h.state().bold_character_cues_for_test());
+
+    let pdf = h
+        .state_mut()
+        .pdf_for_test()
+        .expect("PDF exports with bold cues");
+    assert!(pdf.starts_with(b"%PDF-"));
 }

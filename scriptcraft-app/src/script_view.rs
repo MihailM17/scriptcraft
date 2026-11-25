@@ -219,6 +219,7 @@ pub struct EditorOptions {
     pub page_size: PageSize,
     pub show_scene_numbers: bool,
     pub highlight_current_line: bool,
+    pub bold_character_cues: bool,
     pub capitalize_first_word: bool,
     pub correct_double_capitals: bool,
     pub replace_three_dots: bool,
@@ -231,6 +232,7 @@ impl Default for EditorOptions {
             page_size: PageSize::A4,
             show_scene_numbers: true,
             highlight_current_line: false,
+            bold_character_cues: false,
             capitalize_first_word: false,
             correct_double_capitals: false,
             replace_three_dots: false,
@@ -612,6 +614,7 @@ pub fn script_view(
                     row_h,
                     revision,
                     paper_mono,
+                    bold_character_cues: style.options.bold_character_cues,
                 };
                 paint_line(painter, prect, blocks, line, paint);
                 if line.role == LineRole::Body {
@@ -2571,6 +2574,7 @@ struct LinePaint {
     row_h: f32,
     revision: Option<RevisionColor>,
     paper_mono: bool,
+    bold_character_cues: bool,
 }
 
 /// Resolve the per-block char ranges affected by toggling an inline style for
@@ -2700,9 +2704,18 @@ fn paint_line(
         row_h,
         revision,
         paper_mono,
+        bold_character_cues,
     } = paint;
     let c = kit();
     let color = line_color(line, blocks, &c, paper_mono);
+    let auto_bold = bold_character_cues
+        && (line.role == LineRole::ContdCue
+            || (line.role == LineRole::Body
+                && line
+                    .span
+                    .and_then(|sp| blocks.get(sp.bi))
+                    .is_some_and(|b| b.element_type == ElementType::Character)));
+    let line_bold = line.bold || auto_bold;
     let cell = MM_PER_CELL * scale;
     let x = prect.left() + spec.margin_l_mm * scale + line.x_mm * scale;
     let y = prect.top() + spec.margin_t_mm * scale + line.row as f32 * row_h;
@@ -2735,7 +2748,7 @@ fn paint_line(
             for (ci, ch) in line.text.chars().enumerate() {
                 let src_in_para = line.cols.get(ci).copied().unwrap_or(span.start + ci);
                 let (sb, si, su) = block.styles_at(para_off + src_in_para);
-                let flags = (line.bold || sb, line.italic || si, su);
+                let flags = (line_bold || sb, line.italic || si, su);
                 if cur_flags == Some(flags) {
                     cur_text.push(ch);
                 } else {
@@ -2785,7 +2798,7 @@ fn paint_line(
             return;
         }
     }
-    let family = if line.bold {
+    let family = if line_bold {
         bold_mono()
     } else if line.italic {
         italic_mono()

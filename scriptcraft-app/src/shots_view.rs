@@ -2,13 +2,14 @@
 //!
 //! Three-pane native `egui` studio layout:
 //! - Left: Scene navigator with shot counts and coverage progress bars.
-//! - Center: Interactive colored screenplay view (`Color Map` and Hollywood
-//!   `Coverage Rails` modes) where clicking, Shift+clicking, or dragging
-//!   selects blocks to create a new shot or add overlapping coverage to an
-//!   existing shot.
+//! - Center: Interactive text-selection screenplay view (`Color Map` and
+//!   Hollywood `Coverage Rails` modes). Drag through text (within a sentence or
+//!   across blocks), double-click a word, or click an uncovered line to select
+//!   beats, then assign a new shot or add overlapping coverage to an existing
+//!   shot.
 //! - Right: Scene shot list (reorder / delete / select) + Shot Inspector
 //!   (code, 10-color palette, shot size, camera movement, lens presets,
-//!   description, and covered spans).
+//!   description, and exact covered text spans).
 
 use egui::{
     Align, Align2, Color32, CornerRadius, FontId, Id, Layout, Margin, Pos2, Rect, RichText,
@@ -18,6 +19,7 @@ use scriptcraft_core::shots::{block_index_map, ShotColor, ShotMovement, ShotRang
 use scriptcraft_core::{ElementType, Project, Scene, ScriptBlock};
 use uuid::Uuid;
 
+use crate::app::{bold_mono, MONO};
 use crate::theme::{ink_on_accent, kit, kit_is_light, overline, paint_ellipsized};
 
 const CUE_INDENT: f32 = scriptcraft_layout::FINAL_DRAFT_A4_GEOMETRY.cue_mm
@@ -50,8 +52,10 @@ impl ShotsViewMode {
 pub struct ShotsUiState {
     pub selected_scene: usize,
     pub selected_shot: Option<Uuid>,
-    pub sel_anchor: Option<usize>,
-    pub sel_focus: Option<usize>,
+    /// Selection anchor `(block_idx, char_offset)`.
+    pub sel_anchor: Option<(usize, usize)>,
+    /// Selection focus `(block_idx, char_offset)`.
+    pub sel_focus: Option<(usize, usize)>,
     pub view_mode: ShotsViewMode,
     dragging_selection: bool,
 }
@@ -65,10 +69,55 @@ impl ShotsUiState {
         self.dragging_selection = false;
     }
 
-    pub fn selection_range(&self) -> Option<(usize, usize)> {
+    /// Ordered non-empty character selection `((lo_block, lo_char), (hi_block, hi_char))`.
+    pub fn selection_range(&self) -> Option<((usize, usize), (usize, usize))> {
         let a = self.sel_anchor?;
         let b = self.sel_focus.unwrap_or(a);
-        Some((a.min(b), a.max(b)))
+        if a == b {
+            return None;
+        }
+        if a <= b {
+            Some((a, b))
+        } else {
+            Some((b, a))
+        }
+    }
+
+    /// Build a [`ShotRange`] from the current text selection. Whole-block
+    /// selections store `ShotRange::blocks` so later appends stay covered;
+    /// partial text selections store exact `ShotRange::chars`.
+    pub fn selection_shot_range(&self, blocks: &[ScriptBlock]) -> Option<ShotRange> {
+        let ((lo_b, lo_c), (hi_b, hi_c)) = self.selection_range()?;
+        let sb = blocks.get(lo_b)?;
+        let eb = blocks.get(hi_b)?;
+        let hi_len = eb.text.chars().count();
+        if lo_c == 0 && hi_c >= hi_len {
+            Some(ShotRange::blocks(sb.id, eb.id))
+        } else {
+            Some(ShotRange::chars(sb.id, lo_c, eb.id, hi_c))
+        }
+    }
+
+    /// Half-open `[c0, c1)` slice of `blocks[bi]` covered by the live selection.
+    fn selection_in_block(&self, bi: usize, char_len: usize) -> Option<(usize, usize)> {
+        let ((lo_b, lo_c), (hi_b, hi_c)) = self.selection_range()?;
+        if bi < lo_b || bi > hi_b {
+            return None;
+        }
+        let (c0, c1) = if lo_b == hi_b {
+            (lo_c.min(char_len), hi_c.min(char_len))
+        } else if bi == lo_b {
+            (lo_c.min(char_len), char_len)
+        } else if bi == hi_b {
+            (0, hi_c.min(char_len))
+        } else {
+            (0, char_len)
+        };
+        if c0 < c1 {
+            Some((c0, c1))
+        } else {
+            None
+        }
     }
 
     pub fn clear_selection(&mut self) {
@@ -97,10 +146,10 @@ fn shot_color32(color: ShotColor) -> Color32 {
 fn shot_tint32(color: ShotColor, strong: bool) -> Color32 {
     let (r, g, b) = color.rgb();
     let alpha = match (kit_is_light(), strong) {
-        (true, true) => 48,
-        (true, false) => 30,
-        (false, true) => 46,
-        (false, false) => 28,
+        (true, true) => 64,
+        (true, false) => 42,
+        (false, true) => 62,
+        (false, false) => 38,
     };
     Color32::from_rgba_unmultiplied(r, g, b, alpha)
 }
@@ -111,6 +160,7 @@ pub fn show(
     project: &mut Project,
     scene_labels: &[String],
     state: &mut ShotsUiState,
+    bold_character_cues: bool,
 ) -> ShotsAction {
     let mut action = ShotsAction::None;
 
@@ -126,7 +176,19 @@ pub fn show(
         }
     }
 
-    let coverage = project.shots.resolve_block_coverage(&project.blocks);
+    let char_coverage = project.shots.resolve_block_char_coverage(&project.blocks);
+    let block_coverage: Vec<Vec<usize>> = char_coverage
+        .iter()
+        .map(|spans| {
+            let mut ids = Vec::new();
+            for &(si, _, _) in spans {
+                if !ids.contains(&si) {
+                    ids.push(si);
+                }
+            }
+            ids
+        })
+        .collect();
 
     // Overall script coverage KPI
     let total_body_blocks = project
@@ -141,7 +203,7 @@ pub fn show(
         .filter(|(bi, b)| {
             b.element_type != ElementType::SceneHeading
                 && b.element_type.is_printable()
-                && coverage.get(*bi).is_some_and(|v| !v.is_empty())
+                && block_coverage.get(*bi).is_some_and(|v| !v.is_empty())
         })
         .count();
     let total_pct = (covered_body_blocks * 100)
@@ -158,7 +220,6 @@ pub fn show(
                 .stroke(Stroke::NONE),
         )
         .show(ctx, |ui| {
-            // Crisp bottom hairline
             let bottom_y = ui.max_rect().bottom() + 8.0;
             ui.painter().line_segment(
                 [
@@ -255,7 +316,7 @@ pub fn show(
                     .min_size(Vec2::new(0.0, 26.0));
                     if ui
                         .add_enabled(has_shots, colored_btn)
-                        .on_hover_text("Export screenplay PDF with shot color bands and legend")
+                        .on_hover_text("Export screenplay PDF with shot highlights and legend")
                         .clicked()
                     {
                         action = ShotsAction::ExportColoredScriptPdf;
@@ -314,7 +375,6 @@ pub fn show(
                 .stroke(Stroke::NONE),
         )
         .show(ctx, |ui| {
-            // Right hairline border
             let r = ui.max_rect();
             ui.painter().line_segment(
                 [
@@ -346,10 +406,11 @@ pub fn show(
                             .get(si)
                             .cloned()
                             .unwrap_or_else(|| (si + 1).to_string());
-                        let (shot_count, covered, total) =
-                            project
-                                .shots
-                                .scene_coverage_stats(scene, &project.blocks, &coverage);
+                        let (shot_count, covered, total) = project.shots.scene_coverage_stats(
+                            scene,
+                            &project.blocks,
+                            &block_coverage,
+                        );
                         let pct = (covered * 100).checked_div(total).unwrap_or(0);
                         let active = state.selected_scene == si;
 
@@ -395,7 +456,6 @@ pub fn show(
                 .stroke(Stroke::NONE),
         )
         .show(ctx, |ui| {
-            // Left hairline border
             let r = ui.max_rect();
             ui.painter().line_segment(
                 [
@@ -431,8 +491,10 @@ pub fn show(
                 &scenes,
                 active_scene.as_ref(),
                 &active_scene_label,
-                &coverage,
+                &block_coverage,
+                &char_coverage,
                 state,
+                bold_character_cues,
             );
             if center_action != ShotsAction::None {
                 action = center_action;
@@ -486,7 +548,6 @@ fn scene_nav_row(
             p.rect_filled(bar, CornerRadius::same(2), kit().accent);
         }
 
-        // Scene number badge
         let num_font = FontId::monospace(11.0);
         let num_galley = p.layout_no_wrap(
             label.to_string(),
@@ -516,7 +577,6 @@ fn scene_nav_row(
             Color32::TRANSPARENT,
         );
 
-        // Truncated scene heading
         let head_x = badge_rect.right() + 7.0;
         let head_w = (rect.right() - 10.0 - head_x).max(20.0);
         let head_text = if heading.trim().is_empty() {
@@ -538,7 +598,6 @@ fn scene_nav_row(
             head_w,
         );
 
-        // Bottom row: coverage progress bar + shot/pct summary
         let meta = format!(
             "{shot_count} {} · {pct}%",
             if shot_count == 1 { "shot" } else { "shots" }
@@ -589,7 +648,6 @@ fn show_right_pane(
         None => (0..project.shots.shots.len()).collect(),
     };
 
-    // Scene Shot List header
     ui.horizontal(|ui| {
         overline(
             ui,
@@ -605,7 +663,6 @@ fn show_right_pane(
     });
     ui.add_space(6.0);
 
-    // Top section: shot cards (bounded height so inspector is always visible)
     let list_max_h = (ui.available_height() * 0.40).clamp(130.0, 320.0);
     let mut move_req: Option<(Uuid, isize)> = None;
     let mut delete_req: Option<Uuid> = None;
@@ -632,7 +689,7 @@ fn show_right_pane(
                         ui.add_space(3.0);
                         ui.label(
                             RichText::new(
-                                "Click or Shift+click lines in the script to select beats, then click + New Shot.",
+                                "Highlight any words or lines in the script, then click + New Shot.",
                             )
                             .size(11.5)
                             .color(kit().disabled_text),
@@ -665,16 +722,16 @@ fn show_right_pane(
 
                     let frame_resp = egui::Frame::new()
                         .fill(fill_col)
-                        .stroke(Stroke::new(if selected { 1.5_f32 } else { 1.0_f32 }, border_col))
+                        .stroke(Stroke::new(
+                            if selected { 1.5_f32 } else { 1.0_f32 },
+                            border_col,
+                        ))
                         .corner_radius(CornerRadius::same(7))
                         .inner_margin(Margin::symmetric(10, 8))
                         .show(ui, |ui| {
                             ui.horizontal(|ui| {
-                                // Color dot
-                                let (dot_rect, _) = ui.allocate_exact_size(
-                                    Vec2::new(10.0, 10.0),
-                                    Sense::hover(),
-                                );
+                                let (dot_rect, _) =
+                                    ui.allocate_exact_size(Vec2::new(10.0, 10.0), Sense::hover());
                                 ui.painter().circle_filled(dot_rect.center(), 4.5, color);
 
                                 ui.label(
@@ -1011,7 +1068,7 @@ fn show_right_pane(
                 changed = true;
             }
 
-            // Row 5: Covered Spans
+            // Row 5: Covered Text Spans
             let spans_snapshot = shot.spans.clone();
             let block_index = block_index_map(&project.blocks);
             ui.horizontal(|ui| {
@@ -1020,52 +1077,37 @@ fn show_right_pane(
                         .size(11.0)
                         .color(kit().disabled_text),
                 );
-                if let Some((lo, hi)) = state.selection_range() {
-                    if let (Some(sb), Some(eb)) = (project.blocks.get(lo), project.blocks.get(hi)) {
-                        let range = ShotRange::blocks(sb.id, eb.id);
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            let add_span = egui::Button::new(
-                                RichText::new("+ Add selection")
-                                    .size(11.0)
-                                    .color(kit().accent_text),
-                            )
-                            .fill(kit().accent_soft)
-                            .stroke(Stroke::NONE)
-                            .corner_radius(CornerRadius::same(4));
-                            if ui.add(add_span).clicked() {
-                                if project.shots.assign_range(sel_id, range) {
-                                    changed = true;
-                                }
-                                state.clear_selection();
+                if let Some(range) = state.selection_shot_range(&project.blocks) {
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        let add_span = egui::Button::new(
+                            RichText::new("+ Add selection")
+                                .size(11.0)
+                                .color(kit().accent_text),
+                        )
+                        .fill(kit().accent_soft)
+                        .stroke(Stroke::NONE)
+                        .corner_radius(CornerRadius::same(4));
+                        if ui.add(add_span).clicked() {
+                            if project.shots.assign_range(sel_id, range) {
+                                changed = true;
                             }
-                        });
-                    }
+                            state.clear_selection();
+                        }
+                    });
                 }
             });
 
             let mut remove_span_idx: Option<usize> = None;
             for (idx, span) in spans_snapshot.iter().enumerate() {
-                let summary = match span.resolve(&block_index) {
-                    Some((lo, hi)) => {
-                        let count = hi - lo + 1;
-                        let first_txt = project
-                            .blocks
-                            .get(lo)
-                            .map(|b| b.text.trim().replace('\n', " "))
-                            .unwrap_or_default();
-                        let short: String = if first_txt.chars().count() > 30 {
-                            let mut s: String = first_txt.chars().take(29).collect();
-                            s.push('…');
-                            s
-                        } else {
-                            first_txt
-                        };
-                        format!(
-                            "{count} {} · {short}",
-                            if count == 1 { "line" } else { "lines" }
-                        )
-                    }
-                    None => "Deleted lines".to_string(),
+                let excerpt = span.excerpt(&block_index, &project.blocks);
+                let summary = if excerpt.is_empty() {
+                    "Deleted text".to_string()
+                } else if excerpt.chars().count() > 38 {
+                    let mut s: String = excerpt.chars().take(37).collect();
+                    s.push('…');
+                    s
+                } else {
+                    excerpt
                 };
                 egui::Frame::new()
                     .fill(kit().base)
@@ -1112,8 +1154,10 @@ fn show_center_pane(
     scenes: &[Scene],
     active_scene: Option<&Scene>,
     scene_label: &str,
-    coverage: &[Vec<usize>],
+    block_coverage: &[Vec<usize>],
+    char_coverage: &[Vec<(usize, usize, usize)>],
     state: &mut ShotsUiState,
+    bold_character_cues: bool,
 ) -> ShotsAction {
     let mut action = ShotsAction::None;
 
@@ -1127,7 +1171,6 @@ fn show_center_pane(
         None => (0..project.shots.shots.len()).collect(),
     };
 
-    // Release drag-selection when primary pointer lifts.
     if !ui.input(|i| i.pointer.primary_down()) {
         state.dragging_selection = false;
     }
@@ -1143,27 +1186,34 @@ fn show_center_pane(
                 ui.set_height(26.0);
                 ui.spacing_mut().item_spacing.x = 8.0;
 
-                if let Some((lo, hi)) = state.selection_range() {
-                    let count = hi - lo + 1;
+                if let Some(shot_range) = state.selection_shot_range(&project.blocks) {
+                    let lo_bi = state.selection_range().map(|((b, _), _)| b).unwrap_or(0);
+                    let index = block_index_map(&project.blocks);
+                    let selected_text = shot_range.excerpt(&index, &project.blocks);
+                    let words = selected_text.split_whitespace().count();
+                    let badge_label = if words > 0 {
+                        format!(
+                            "{words} {} selected",
+                            if words == 1 { "word" } else { "words" }
+                        )
+                    } else {
+                        "Selection ready".to_string()
+                    };
+
                     egui::Frame::new()
                         .fill(kit().accent_soft)
                         .corner_radius(CornerRadius::same(12))
                         .inner_margin(Margin::symmetric(9, 3))
                         .show(ui, |ui| {
                             ui.label(
-                                RichText::new(format!(
-                                    "{count} {} selected",
-                                    if count == 1 { "block" } else { "blocks" }
-                                ))
-                                .size(11.5)
-                                .strong()
-                                .color(kit().accent_text),
+                                RichText::new(badge_label)
+                                    .size(11.5)
+                                    .strong()
+                                    .color(kit().accent_text),
                             );
                         });
 
-                    let next_code = project
-                        .shots
-                        .next_code_for_scene(scene_label, scene_id);
+                    let next_code = project.shots.next_code_for_scene(scene_label, scene_id);
                     let new_btn = egui::Button::new(
                         RichText::new(format!("+ New Shot ({next_code})"))
                             .size(12.0)
@@ -1175,22 +1225,18 @@ fn show_center_pane(
                     .corner_radius(CornerRadius::same(6))
                     .min_size(Vec2::new(0.0, 26.0));
                     if ui.add(new_btn).clicked() {
-                        if let (Some(sb), Some(eb)) =
-                            (project.blocks.get(lo), project.blocks.get(hi))
-                        {
-                            let new_id = project.shots.add_shot(
-                                scene_id,
-                                scene_label,
-                                ShotSize::Ws,
-                                ShotMovement::Static,
-                                "35mm".to_string(),
-                                String::new(),
-                                ShotRange::blocks(sb.id, eb.id),
-                            );
-                            state.selected_shot = Some(new_id);
-                            state.clear_selection();
-                            action = ShotsAction::Changed;
-                        }
+                        let new_id = project.shots.add_shot(
+                            scene_id,
+                            scene_label,
+                            ShotSize::Ws,
+                            ShotMovement::Static,
+                            "35mm".to_string(),
+                            String::new(),
+                            shot_range.clone(),
+                        );
+                        state.selected_shot = Some(new_id);
+                        state.clear_selection();
+                        action = ShotsAction::Changed;
                     }
 
                     // Quick-assign pills for existing shots in this scene (overlap!)
@@ -1210,21 +1256,14 @@ fn show_center_pane(
                             .min_size(Vec2::new(0.0, 24.0));
                             if ui
                                 .add(btn)
-                                .on_hover_text(format!("Add selected blocks to shot {code}"))
+                                .on_hover_text(format!("Add selected text to shot {code}"))
                                 .clicked()
                             {
-                                if let (Some(sb), Some(eb)) =
-                                    (project.blocks.get(lo), project.blocks.get(hi))
-                                {
-                                    if project
-                                        .shots
-                                        .assign_range(sid, ShotRange::blocks(sb.id, eb.id))
-                                    {
-                                        action = ShotsAction::Changed;
-                                    }
-                                    state.selected_shot = Some(sid);
-                                    state.clear_selection();
+                                if project.shots.assign_range(sid, shot_range.clone()) {
+                                    action = ShotsAction::Changed;
                                 }
+                                state.selected_shot = Some(sid);
+                                state.clear_selection();
                             }
                         }
                     }
@@ -1240,7 +1279,7 @@ fn show_center_pane(
                         .corner_radius(CornerRadius::same(6))
                         .min_size(Vec2::new(0.0, 24.0));
                         if ui.add(open_btn).clicked() {
-                            action = ShotsAction::OpenInScript(lo);
+                            action = ShotsAction::OpenInScript(lo_bi);
                         }
 
                         let clear_btn = egui::Button::new(
@@ -1258,7 +1297,7 @@ fn show_center_pane(
                 } else {
                     ui.label(
                         RichText::new(
-                            "Click a line, Shift+click or drag to select a range, then assign a shot.",
+                            "Drag across text to highlight any phrase or lines, double-click a word, then assign a shot.",
                         )
                         .size(12.0)
                         .color(kit().disabled_text),
@@ -1324,7 +1363,7 @@ fn show_center_pane(
                                 let (n_shots, cov_b, tot_b) = project.shots.scene_coverage_stats(
                                     sc,
                                     &project.blocks,
-                                    coverage,
+                                    block_coverage,
                                 );
                                 let sc_pct = (cov_b * 100).checked_div(tot_b).unwrap_or(0);
                                 ui.horizontal(|ui| {
@@ -1427,8 +1466,6 @@ fn show_center_pane(
                                 ui.add_space(4.0);
                             }
 
-                            // Screenplay blocks inside this scene
-                            let sel_range = state.selection_range();
                             let shift_down = ui.input(|i| i.modifiers.shift);
                             let total_w = ui.available_width();
                             let tag_area_w = if state.view_mode == ShotsViewMode::ColorMap {
@@ -1438,8 +1475,13 @@ fn show_center_pane(
                             };
                             let text_area_w = (total_w - tag_area_w - 8.0).max(200.0);
 
-                            // Keep tight vertical spacing so Coverage Rails connect seamlessly!
+                            // Keep tight vertical spacing so Coverage Rails connect seamlessly
                             ui.spacing_mut().item_spacing.y = 0.0;
+
+                            // Track previous visual row's primary shot for right-margin pill dedup
+                            let mut prev_visual_row_primary: Option<usize> = None;
+                            // Track active rail connections across blocks (shot_idx -> continues)
+                            let mut prev_block_end_shots: Vec<usize> = Vec::new();
 
                             for (pos_in_scene, &bi) in scene_blocks.iter().enumerate() {
                                 let Some(block) = project.blocks.get(bi) else {
@@ -1449,31 +1491,30 @@ fn show_center_pane(
                                     continue;
                                 }
 
-                                let cov = coverage.get(bi).map(|v| v.as_slice()).unwrap_or(&[]);
-                                let prev_cov = pos_in_scene
-                                    .checked_sub(1)
-                                    .and_then(|p| scene_blocks.get(p))
-                                    .and_then(|&pbi| coverage.get(pbi))
-                                    .map(|v| v.as_slice())
-                                    .unwrap_or(&[]);
-                                let next_cov = scene_blocks
+                                let spans_here =
+                                    char_coverage.get(bi).map(Vec::as_slice).unwrap_or(&[]);
+
+                                // Shots starting at char 0 of the next printable block (for continuous rails)
+                                let next_block_start_shots: Vec<usize> = scene_blocks
                                     .get(pos_in_scene + 1)
-                                    .and_then(|&nbi| coverage.get(nbi))
-                                    .map(|v| v.as_slice())
-                                    .unwrap_or(&[]);
+                                    .and_then(|&nbi| char_coverage.get(nbi))
+                                    .map(|v| {
+                                        v.iter()
+                                            .filter(|&&(_, c0, _)| c0 == 0)
+                                            .map(|&(si, _, _)| si)
+                                            .collect()
+                                    })
+                                    .unwrap_or_default();
 
-                                let is_selected =
-                                    sel_range.is_some_and(|(lo, hi)| bi >= lo && bi <= hi);
-
-                                render_script_block_row(
+                                let block_end_shots = render_script_block_row(
                                     ui,
                                     project,
                                     bi,
                                     block,
-                                    cov,
-                                    prev_cov,
-                                    next_cov,
-                                    is_selected,
+                                    spans_here,
+                                    &prev_block_end_shots,
+                                    &next_block_start_shots,
+                                    &mut prev_visual_row_primary,
                                     shift_down,
                                     total_w,
                                     text_area_w,
@@ -1481,7 +1522,9 @@ fn show_center_pane(
                                     rail_col_w,
                                     rail_area_w,
                                     state,
+                                    bold_character_cues,
                                 );
+                                prev_block_end_shots = block_end_shots;
                             }
                         });
 
@@ -1531,16 +1574,93 @@ fn show_center_pane(
     action
 }
 
+/// Extract `(row_char_start, row_char_end_excl_nl, row_rect)` for every wrapped
+/// visual row in `galley`.
+fn galley_row_ranges(galley: &egui::Galley) -> Vec<(usize, usize, Rect)> {
+    let mut out = Vec::with_capacity(galley.rows.len());
+    let mut off = 0usize;
+    for placed in &galley.rows {
+        let len_no_nl = placed.char_count_excluding_newline();
+        let len_with_nl = placed.char_count_including_newline();
+        out.push((off, off + len_no_nl, placed.rect()));
+        off += len_with_nl;
+    }
+    out
+}
+
+/// Paint a highlighter rectangle covering exact characters `[c0, c1)` across
+/// one or more wrapped visual rows of `galley`.
+fn paint_char_highlight(
+    painter: &egui::Painter,
+    galley: &egui::Galley,
+    text_pos: Pos2,
+    c0: usize,
+    c1: usize,
+    fill: Color32,
+    outline: Option<Stroke>,
+) {
+    if c0 >= c1 {
+        return;
+    }
+    let mut off = 0usize;
+    for placed in &galley.rows {
+        let len_no_nl = placed.char_count_excluding_newline();
+        let len_with_nl = placed.char_count_including_newline();
+        let r_start = off;
+        let r_end = off + len_no_nl;
+        off += len_with_nl;
+
+        if c1 <= r_start || c0 >= r_end {
+            continue;
+        }
+        let local_0 = c0.max(r_start) - r_start;
+        let local_1 = c1.min(r_end) - r_start;
+        let x0 = text_pos.x + placed.x_offset(local_0);
+        let x1 = text_pos.x + placed.x_offset(local_1);
+        let prow = placed.rect();
+        let rect = Rect::from_min_max(
+            Pos2::new(x0 - 1.5, text_pos.y + prow.min.y - 1.0),
+            Pos2::new((x1 + 1.5).max(x0 + 4.0), text_pos.y + prow.max.y + 1.0),
+        );
+        painter.rect_filled(rect, CornerRadius::same(3), fill);
+        if let Some(st) = outline {
+            painter.rect_stroke(rect, CornerRadius::same(3), st, StrokeKind::Inside);
+        }
+    }
+}
+
+/// Expand character index `ci` to its surrounding word `(start, end)` in `text`.
+fn word_bounds_at(text: &str, ci: usize) -> (usize, usize) {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.is_empty() {
+        return (0, 0);
+    }
+    let idx = ci.min(chars.len().saturating_sub(1));
+    let is_word = |c: char| c.is_alphanumeric() || c == '_' || c == '\'' || c == '-';
+    if !is_word(chars[idx]) {
+        return (idx, (idx + 1).min(chars.len()));
+    }
+    let mut lo = idx;
+    while lo > 0 && is_word(chars[lo - 1]) {
+        lo -= 1;
+    }
+    let mut hi = idx + 1;
+    while hi < chars.len() && is_word(chars[hi]) {
+        hi += 1;
+    }
+    (lo, hi)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn render_script_block_row(
     ui: &mut Ui,
     project: &Project,
     bi: usize,
     block: &ScriptBlock,
-    cov: &[usize],
-    prev_cov: &[usize],
-    next_cov: &[usize],
-    is_selected: bool,
+    spans_here: &[(usize, usize, usize)],
+    prev_block_end_shots: &[usize],
+    next_block_start_shots: &[usize],
+    prev_visual_row_primary: &mut Option<usize>,
     shift_down: bool,
     total_w: f32,
     text_area_w: f32,
@@ -1548,21 +1668,24 @@ fn render_script_block_row(
     rail_col_w: f32,
     rail_area_w: f32,
     state: &mut ShotsUiState,
-) {
-    let (indent_frac, right_frac, uppercase, bold, align_right, top_pad, bot_pad) =
-        match block.element_type {
-            ElementType::SceneHeading => (0.0, 0.0, true, true, false, 6.0, 6.0),
-            ElementType::Action => (0.0, 0.0, false, false, false, 4.0, 5.0),
-            ElementType::Character => (CUE_INDENT, 0.05, true, true, false, 8.0, 1.5),
-            ElementType::Parenthetical => (PAREN_INDENT, 0.14, false, false, false, 1.0, 1.0),
-            ElementType::Dialogue | ElementType::Lyrics => {
-                (DIALOGUE_INDENT, 0.10, false, false, false, 1.5, 5.0)
-            }
-            ElementType::Transition => (0.0, 0.0, true, true, true, 6.0, 6.0),
-            ElementType::Shot => (0.0, 0.0, true, false, false, 4.0, 4.0),
-            _ => (0.0, 0.0, false, false, false, 3.0, 3.0),
-        };
+    bold_character_cues: bool,
+) -> Vec<usize> {
+    let (indent_frac, right_frac, uppercase, bold, align_right, top_pad, bot_pad) = match block
+        .element_type
+    {
+        ElementType::SceneHeading => (0.0, 0.0, true, true, false, 6.0, 6.0),
+        ElementType::Action => (0.0, 0.0, false, false, false, 4.0, 5.0),
+        ElementType::Character => (CUE_INDENT, 0.05, true, bold_character_cues, false, 8.0, 1.5),
+        ElementType::Parenthetical => (PAREN_INDENT, 0.14, false, false, false, 1.0, 1.0),
+        ElementType::Dialogue | ElementType::Lyrics => {
+            (DIALOGUE_INDENT, 0.10, false, false, false, 1.5, 5.0)
+        }
+        ElementType::Transition => (0.0, 0.0, true, true, true, 6.0, 6.0),
+        ElementType::Shot => (0.0, 0.0, true, false, false, 4.0, 4.0),
+        _ => (0.0, 0.0, false, false, false, 3.0, 3.0),
+    };
 
+    let char_len = block.text.chars().count();
     let display_text = if uppercase {
         block.text.to_uppercase()
     } else {
@@ -1574,7 +1697,7 @@ fn render_script_block_row(
         display_text
     };
 
-    let font = FontId::monospace(12.5);
+    let font = FontId::new(12.5, if bold { bold_mono() } else { MONO });
     let left_pad = 12.0 + text_area_w * indent_frac;
     let wrap_w = (text_area_w * (1.0 - indent_frac - right_frac) - 16.0).max(120.0);
 
@@ -1595,7 +1718,7 @@ fn render_script_block_row(
     let row_h = (galley.size().y + top_pad + bot_pad).max(22.0);
 
     let (row_rect, resp) = ui.allocate_exact_size(Vec2::new(total_w, row_h), Sense::click());
-    let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+    let resp = resp.on_hover_cursor(egui::CursorIcon::Text);
     resp.widget_info(|| {
         egui::WidgetInfo::labeled(
             egui::WidgetType::Button,
@@ -1604,266 +1727,388 @@ fn render_script_block_row(
         )
     });
 
-    // Primary shot for Color Map (prefer the currently selected shot if it covers this block!)
-    let pick_primary = |slice: &[usize]| -> Option<usize> {
-        if slice.is_empty() {
-            None
-        } else if let Some(sel_id) = state.selected_shot {
-            slice
-                .iter()
-                .copied()
-                .find(|&si| project.shots.shots.get(si).is_some_and(|s| s.id == sel_id))
-                .or_else(|| slice.first().copied())
-        } else {
-            slice.first().copied()
-        }
+    let text_x = if align_right {
+        (row_rect.left() + text_area_w - galley.size().x - 10.0).max(row_rect.left() + 12.0)
+    } else {
+        row_rect.left() + left_pad
     };
-    let primary_shot_idx = pick_primary(cov);
-    let prev_primary_shot_idx = pick_primary(prev_cov);
+    let text_pos = Pos2::new(text_x, row_rect.top() + top_pad);
+    let visual_rows = galley_row_ranges(&galley);
 
-    let text_box = Rect::from_min_max(
-        row_rect.min,
-        Pos2::new(row_rect.min.x + text_area_w, row_rect.max.y),
-    );
+    // Pick winning shot at one character offset: prefer selected shot if it
+    // covers `ci`, otherwise choose the tightest (most specific) covering span.
+    let selected_shot = state.selected_shot;
+    let pick_shot_at = |ci: usize| -> Option<usize> {
+        let mut best: Option<(usize, usize)> = None;
+        for &(si, c0, c1) in spans_here {
+            if ci >= c0 && ci < c1 {
+                if let Some(sel_id) = selected_shot {
+                    if project.shots.shots.get(si).is_some_and(|s| s.id == sel_id) {
+                        return Some(si);
+                    }
+                }
+                let span_len = c1 - c0;
+                if best.is_none_or(|(_, bl)| span_len < bl) {
+                    best = Some((si, span_len));
+                }
+            }
+        }
+        best.map(|(si, _)| si)
+    };
+
+    // Build merged character highlight runs `(shot_idx, c0, c1)` for Color Map
+    let mut color_runs: Vec<(usize, usize, usize)> = Vec::new();
+    if state.view_mode == ShotsViewMode::ColorMap && !spans_here.is_empty() && char_len > 0 {
+        for ci in 0..char_len {
+            if let Some(si) = pick_shot_at(ci) {
+                if let Some(last) = color_runs.last_mut() {
+                    if last.0 == si && last.2 == ci {
+                        last.2 = ci + 1;
+                        continue;
+                    }
+                }
+                color_runs.push((si, ci, ci + 1));
+            }
+        }
+    }
 
     if ui.is_rect_visible(row_rect) {
         let p = ui.painter();
 
-        // Background tint depending on view mode
+        // 1. Shot highlights behind text
         match state.view_mode {
             ShotsViewMode::ColorMap => {
-                if let Some(psi) = primary_shot_idx {
-                    if let Some(shot) = project.shots.shots.get(psi) {
-                        let is_active_shot = state.selected_shot == Some(shot.id);
-                        let wash_rect = Rect::from_min_max(
-                            Pos2::new(row_rect.left(), row_rect.top() + 1.0),
-                            Pos2::new(row_rect.right(), row_rect.bottom() - 1.0),
-                        );
-                        p.rect_filled(
-                            wash_rect,
-                            CornerRadius::same(4),
-                            shot_tint32(shot.color, is_active_shot),
-                        );
-                        // Solid left color bar
-                        let bar = Rect::from_min_max(
-                            Pos2::new(row_rect.left(), row_rect.top() + 1.0),
-                            Pos2::new(row_rect.left() + 3.5, row_rect.bottom() - 1.0),
-                        );
-                        p.rect_filled(bar, CornerRadius::same(2), shot_color32(shot.color));
-                    }
-                }
-            }
-            ShotsViewMode::CoverageRails => {
-                if let Some(sel_id) = state.selected_shot {
-                    if let Some(shot) = cov
-                        .iter()
-                        .filter_map(|&si| project.shots.shots.get(si))
-                        .find(|s| s.id == sel_id)
-                    {
-                        let wash_rect = Rect::from_min_max(
-                            Pos2::new(text_box.left(), text_box.top() + 1.0),
-                            Pos2::new(text_box.right(), text_box.bottom() - 1.0),
-                        );
-                        p.rect_filled(
-                            wash_rect,
-                            CornerRadius::same(4),
-                            shot_tint32(shot.color, false),
+                for &(si, c0, c1) in &color_runs {
+                    if let Some(shot) = project.shots.shots.get(si) {
+                        let strong = state.selected_shot == Some(shot.id);
+                        paint_char_highlight(
+                            p,
+                            &galley,
+                            text_pos,
+                            c0,
+                            c1,
+                            shot_tint32(shot.color, strong),
+                            None,
                         );
                     }
                 }
-            }
-        }
-
-        // Hover cue on uncovered rows
-        if resp.hovered() && !is_selected {
-            p.rect_filled(
-                Rect::from_min_max(
-                    Pos2::new(text_box.left(), text_box.top() + 1.0),
-                    Pos2::new(text_box.right(), text_box.bottom() - 1.0),
-                ),
-                CornerRadius::same(4),
-                kit().hover_light.gamma_multiply(0.55),
-            );
-        }
-
-        // Active user block-range selection highlight
-        if is_selected {
-            let sel_rect = Rect::from_min_max(
-                Pos2::new(text_box.left(), text_box.top() + 0.5),
-                Pos2::new(text_box.right(), text_box.bottom() - 0.5),
-            );
-            p.rect_filled(sel_rect, CornerRadius::same(4), kit().accent_soft);
-            p.rect_stroke(
-                sel_rect,
-                CornerRadius::same(4),
-                Stroke::new(1.5_f32, kit().accent),
-                StrokeKind::Inside,
-            );
-        }
-
-        // Screenplay text
-        let text_x = if align_right {
-            (row_rect.left() + text_area_w - galley.size().x - 10.0).max(row_rect.left() + 12.0)
-        } else {
-            row_rect.left() + left_pad
-        };
-        let text_pos = Pos2::new(text_x, row_rect.top() + top_pad);
-        p.galley(text_pos, galley, text_color);
-
-        // Right margin annotations
-        match state.view_mode {
-            ShotsViewMode::ColorMap => {
-                if let Some(psi) = primary_shot_idx {
-                    if let Some(shot) = project.shots.shots.get(psi) {
-                        let show_pill = prev_primary_shot_idx != Some(psi) || cov.len() > 1;
-                        if show_pill {
-                            let tag_text = if cov.len() > 1 {
-                                format!("{} +{}", shot.code, cov.len() - 1)
-                            } else {
-                                shot.code.clone()
-                            };
+                // Crisp left color bar per visual row reflecting that visual row's primary shot
+                for &(r_start, r_end, r_rect) in &visual_rows {
+                    let row_shots = shots_overlapping_range(spans_here, r_start, r_end);
+                    let row_primary = pick_row_primary(project, &row_shots, state.selected_shot);
+                    if let Some(psi) = row_primary {
+                        if let Some(shot) = project.shots.shots.get(psi) {
                             let col = shot_color32(shot.color);
-                            let g = p.layout_no_wrap(
-                                tag_text,
-                                FontId::monospace(10.0),
-                                ink_on_accent(col),
+                            let bar = Rect::from_min_max(
+                                Pos2::new(row_rect.left(), text_pos.y + r_rect.min.y - 1.0),
+                                Pos2::new(row_rect.left() + 3.5, text_pos.y + r_rect.max.y + 1.0),
                             );
-                            let pill_w = (g.size().x + 10.0).max(28.0);
-                            let pill_rect = Rect::from_min_size(
-                                Pos2::new(
-                                    row_rect.right() - pill_w - 6.0,
-                                    row_rect.top() + top_pad,
-                                ),
-                                Vec2::new(pill_w, 16.0),
-                            );
-                            p.rect_filled(pill_rect, CornerRadius::same(4), col);
-                            p.galley(
-                                Pos2::new(
-                                    pill_rect.center().x - g.size().x * 0.5,
-                                    pill_rect.center().y - g.size().y * 0.5,
-                                ),
-                                g,
-                                Color32::TRANSPARENT,
-                            );
+                            p.rect_filled(bar, CornerRadius::same(2), col);
+
+                            if *prev_visual_row_primary != Some(psi) {
+                                let tag_text = if row_shots.len() > 1 {
+                                    format!("{} +{}", shot.code, row_shots.len() - 1)
+                                } else {
+                                    shot.code.clone()
+                                };
+                                let g = p.layout_no_wrap(
+                                    tag_text,
+                                    FontId::monospace(10.0),
+                                    ink_on_accent(col),
+                                );
+                                let pill_w = (g.size().x + 10.0).max(28.0);
+                                let pill_y = text_pos.y + r_rect.center().y - 8.0;
+                                let pill_rect = Rect::from_min_size(
+                                    Pos2::new(row_rect.right() - pill_w - 6.0, pill_y),
+                                    Vec2::new(pill_w, 16.0),
+                                );
+                                p.rect_filled(pill_rect, CornerRadius::same(4), col);
+                                p.galley(
+                                    Pos2::new(
+                                        pill_rect.center().x - g.size().x * 0.5,
+                                        pill_rect.center().y - g.size().y * 0.5,
+                                    ),
+                                    g,
+                                    Color32::TRANSPARENT,
+                                );
+                            }
                         }
                     }
+                    *prev_visual_row_primary = row_primary;
                 }
             }
             ShotsViewMode::CoverageRails => {
-                if !rail_shots.is_empty() {
-                    let rail_x0 = row_rect.right() - rail_area_w + 12.0;
-                    // Subtle vertical guide divider between text and rails
-                    p.line_segment(
-                        [
-                            Pos2::new(rail_x0 - 6.0, row_rect.top()),
-                            Pos2::new(rail_x0 - 6.0, row_rect.bottom()),
-                        ],
-                        Stroke::new(1.0_f32, kit().sep.gamma_multiply(0.55)),
-                    );
-
-                    for (col_i, &(shot_idx, sid, _, col)) in rail_shots.iter().enumerate() {
-                        let cx = rail_x0 + col_i as f32 * rail_col_w + rail_col_w * 0.5;
-                        let covered_here = cov.contains(&shot_idx);
-                        if !covered_here {
-                            continue;
-                        }
-                        let active = state.selected_shot == Some(sid);
-                        let connects_up = prev_cov.contains(&shot_idx);
-                        let connects_dn = next_cov.contains(&shot_idx);
-                        let y0 = if connects_up {
-                            row_rect.top()
-                        } else {
-                            row_rect.top() + 4.0
-                        };
-                        let y1 = if connects_dn {
-                            row_rect.bottom()
-                        } else {
-                            row_rect.bottom() - 4.0
-                        };
-                        let half_w = if active { 2.5 } else { 1.6 };
-                        let line_rect = Rect::from_min_max(
-                            Pos2::new(cx - half_w, y0),
-                            Pos2::new(cx + half_w, y1),
-                        );
-                        p.rect_filled(
-                            line_rect,
-                            CornerRadius::same(if connects_up && connects_dn { 0 } else { 2 }),
-                            col,
-                        );
-                        if !connects_up {
-                            p.circle_filled(Pos2::new(cx, y0 + 1.0), half_w + 1.2, col);
-                        }
-                        if !connects_dn {
-                            p.circle_filled(Pos2::new(cx, y1 - 1.0), half_w + 1.2, col);
-                        }
-
-                        // Clickable rail hit target
-                        let hit_rect = Rect::from_min_max(
-                            Pos2::new(cx - rail_col_w * 0.45, row_rect.top()),
-                            Pos2::new(cx + rail_col_w * 0.45, row_rect.bottom()),
-                        );
-                        let rail_hit = ui
-                            .interact(hit_rect, Id::new(("rail_seg", bi, sid)), Sense::click())
-                            .on_hover_cursor(egui::CursorIcon::PointingHand);
-                        if rail_hit.clicked() {
-                            state.selected_shot = Some(sid);
+                // Spotlight the currently selected shot's exact characters
+                if let Some(sel_id) = state.selected_shot {
+                    for &(si, c0, c1) in spans_here {
+                        if let Some(shot) = project.shots.shots.get(si) {
+                            if shot.id == sel_id {
+                                paint_char_highlight(
+                                    p,
+                                    &galley,
+                                    text_pos,
+                                    c0,
+                                    c1,
+                                    shot_tint32(shot.color, false),
+                                    None,
+                                );
+                            }
                         }
                     }
                 }
             }
         }
-    }
 
-    // Tooltip listing all overlapping shots covering this block
-    if !cov.is_empty() && resp.hovered() {
-        let names: Vec<String> = cov
-            .iter()
-            .filter_map(|&si| project.shots.shots.get(si))
-            .map(|s| {
-                if s.lens.trim().is_empty() {
-                    format!("{} ({})", s.code, s.size.short())
-                } else {
-                    format!("{} ({} · {})", s.code, s.size.short(), s.lens.trim())
-                }
-            })
-            .collect();
-        if !names.is_empty() {
-            resp.clone()
-                .on_hover_text(format!("Covered by: {}", names.join("  |  ")));
+        // 2. Live user character selection highlight
+        if let Some((sc0, sc1)) = state.selection_in_block(bi, char_len) {
+            paint_char_highlight(
+                p,
+                &galley,
+                text_pos,
+                sc0,
+                sc1,
+                kit().accent_soft,
+                Some(Stroke::new(1.2_f32, kit().accent)),
+            );
         }
-    }
 
-    // Selection interaction (click, Shift+click, drag-select)
-    if resp.clicked() {
-        if shift_down && state.sel_anchor.is_some() {
-            state.sel_focus = Some(bi);
-        } else {
-            state.sel_anchor = Some(bi);
-            state.sel_focus = Some(bi);
-            if let Some(psi) = primary_shot_idx {
-                if let Some(shot) = project.shots.shots.get(psi) {
-                    state.selected_shot = Some(shot.id);
+        // 3. Screenplay text
+        p.galley(text_pos, galley.clone(), text_color);
+
+        // 4. Coverage Rails (exact wrapped visual-line precision!)
+        if state.view_mode == ShotsViewMode::CoverageRails && !rail_shots.is_empty() {
+            let rail_x0 = row_rect.right() - rail_area_w + 12.0;
+            p.line_segment(
+                [
+                    Pos2::new(rail_x0 - 6.0, row_rect.top()),
+                    Pos2::new(rail_x0 - 6.0, row_rect.bottom()),
+                ],
+                Stroke::new(1.0_f32, kit().sep.gamma_multiply(0.55)),
+            );
+
+            for (col_i, &(shot_idx, sid, _, col)) in rail_shots.iter().enumerate() {
+                let cx = rail_x0 + col_i as f32 * rail_col_w + rail_col_w * 0.5;
+                let active = state.selected_shot == Some(sid);
+                let half_w = if active { 2.5 } else { 1.6 };
+
+                let row_hits: Vec<bool> = visual_rows
+                    .iter()
+                    .map(|&(rs, re, _)| {
+                        spans_here
+                            .iter()
+                            .any(|&(si, c0, c1)| si == shot_idx && c0 < re && c1 > rs)
+                    })
+                    .collect();
+
+                for (vi, &hit) in row_hits.iter().enumerate() {
+                    if !hit {
+                        continue;
+                    }
+                    let is_first_vrow = vi == 0;
+                    let is_last_vrow = vi + 1 == row_hits.len();
+                    let connects_up = if is_first_vrow {
+                        prev_block_end_shots.contains(&shot_idx)
+                    } else {
+                        row_hits[vi - 1]
+                    };
+                    let connects_dn = if is_last_vrow {
+                        next_block_start_shots.contains(&shot_idx)
+                    } else {
+                        row_hits[vi + 1]
+                    };
+
+                    let r_rect = visual_rows[vi].2;
+                    let y0 = if is_first_vrow && connects_up {
+                        row_rect.top()
+                    } else if connects_up {
+                        text_pos.y + r_rect.min.y
+                    } else {
+                        text_pos.y + r_rect.min.y + 2.0
+                    };
+                    let y1 = if is_last_vrow && connects_dn {
+                        row_rect.bottom()
+                    } else if connects_dn {
+                        text_pos.y + r_rect.max.y
+                    } else {
+                        text_pos.y + r_rect.max.y - 2.0
+                    };
+
+                    let line_rect =
+                        Rect::from_min_max(Pos2::new(cx - half_w, y0), Pos2::new(cx + half_w, y1));
+                    p.rect_filled(
+                        line_rect,
+                        CornerRadius::same(if connects_up && connects_dn { 0 } else { 2 }),
+                        col,
+                    );
+                    if !connects_up {
+                        p.circle_filled(Pos2::new(cx, y0 + 1.0), half_w + 1.2, col);
+                    }
+                    if !connects_dn {
+                        p.circle_filled(Pos2::new(cx, y1 - 1.0), half_w + 1.2, col);
+                    }
+
+                    let hit_rect = Rect::from_min_max(
+                        Pos2::new(cx - rail_col_w * 0.45, y0),
+                        Pos2::new(cx + rail_col_w * 0.45, y1),
+                    );
+                    let rail_hit = ui
+                        .interact(hit_rect, Id::new(("rail_seg", bi, vi, sid)), Sense::click())
+                        .on_hover_cursor(egui::CursorIcon::PointingHand);
+                    if rail_hit.clicked() {
+                        state.selected_shot = Some(sid);
+                    }
                 }
             }
         }
+    } else if state.view_mode == ShotsViewMode::ColorMap {
+        // Keep prev_visual_row_primary accurate even when scrolled off-screen
+        if let Some(&(r_start, r_end, _)) = visual_rows.last() {
+            let row_shots = shots_overlapping_range(spans_here, r_start, r_end);
+            *prev_visual_row_primary = pick_row_primary(project, &row_shots, state.selected_shot);
+        }
+    }
+
+    // Hover tooltip listing every shot covering the hovered character
+    if !spans_here.is_empty() && resp.hovered() {
+        if let Some(ptr) = ui.input(|i| i.pointer.hover_pos()) {
+            let ci = galley
+                .cursor_from_pos(ptr - text_pos)
+                .index
+                .min(char_len.saturating_sub(1));
+            let mut names = Vec::new();
+            let mut seen_si = Vec::new();
+            for &(si, c0, c1) in spans_here {
+                if ci >= c0 && ci < c1 && !seen_si.contains(&si) {
+                    seen_si.push(si);
+                    if let Some(s) = project.shots.shots.get(si) {
+                        if s.lens.trim().is_empty() {
+                            names.push(format!("{} ({})", s.code, s.size.short()));
+                        } else {
+                            names.push(format!(
+                                "{} ({} · {})",
+                                s.code,
+                                s.size.short(),
+                                s.lens.trim()
+                            ));
+                        }
+                    }
+                }
+            }
+            if !names.is_empty() {
+                resp.clone()
+                    .on_hover_text(format!("Covered by: {}", names.join("  |  ")));
+            }
+        }
+    }
+
+    // Direct text-selection interaction (drag across chars/blocks, double-click word,
+    // triple-click block, Shift+click extend, single-click shot or uncovered block).
+    let pointer_pos = ui.input(|i| i.pointer.interact_pos());
+    let char_at =
+        |pos: Pos2| -> usize { galley.cursor_from_pos(pos - text_pos).index.min(char_len) };
+
+    if resp.triple_clicked() {
+        state.sel_anchor = Some((bi, 0));
+        state.sel_focus = Some((bi, char_len));
+        state.dragging_selection = false;
         ui.ctx().request_repaint();
-    } else if resp.is_pointer_button_down_on() {
-        if !state.dragging_selection {
-            state.dragging_selection = true;
-            if !shift_down || state.sel_anchor.is_none() {
-                state.sel_anchor = Some(bi);
-            }
-            state.sel_focus = Some(bi);
+    } else if resp.double_clicked() {
+        if let Some(pos) = pointer_pos {
+            let ci = char_at(pos);
+            let (w0, w1) = word_bounds_at(&block.text, ci);
+            state.sel_anchor = Some((bi, w0));
+            state.sel_focus = Some((bi, w1));
+            state.dragging_selection = false;
             ui.ctx().request_repaint();
         }
-    } else if state.dragging_selection
-        && ui.input(|i| i.pointer.primary_down())
-        && ui.rect_contains_pointer(row_rect)
-        && state.sel_focus != Some(bi)
-    {
-        state.sel_focus = Some(bi);
-        ui.ctx().request_repaint();
+    } else if resp.is_pointer_button_down_on() && !state.dragging_selection {
+        if let Some(pos) = pointer_pos {
+            // Only start a text drag on the text half (not over Coverage Rails clicks)
+            if pos.x <= row_rect.left() + text_area_w + 8.0 {
+                let ci = char_at(pos);
+                state.dragging_selection = true;
+                if !shift_down || state.sel_anchor.is_none() {
+                    state.sel_anchor = Some((bi, ci));
+                }
+                state.sel_focus = Some((bi, ci));
+                ui.ctx().request_repaint();
+            }
+        }
+    } else if state.dragging_selection && ui.input(|i| i.pointer.primary_down()) {
+        if let Some(pos) = pointer_pos {
+            if pos.y >= row_rect.top() && pos.y <= row_rect.bottom() {
+                let ci = char_at(pos);
+                if state.sel_focus != Some((bi, ci)) {
+                    state.sel_focus = Some((bi, ci));
+                    ui.ctx().request_repaint();
+                }
+            }
+        }
+    } else if resp.clicked() {
+        if let Some(pos) = pointer_pos {
+            if pos.x <= row_rect.left() + text_area_w + 8.0 {
+                let ci = char_at(pos);
+                if shift_down && state.sel_anchor.is_some() {
+                    state.sel_focus = Some((bi, ci));
+                    ui.ctx().request_repaint();
+                } else if state.sel_anchor == state.sel_focus {
+                    // Plain click without dragging: if clicking inside a shot highlight,
+                    // select that shot in the inspector; if uncovered, select the whole block.
+                    let hit_shot = pick_shot_at(ci.min(char_len.saturating_sub(1)));
+                    if let Some(si) = hit_shot {
+                        if let Some(shot) = project.shots.shots.get(si) {
+                            state.selected_shot = Some(shot.id);
+                        }
+                        state.clear_selection();
+                    } else if char_len > 0 {
+                        state.sel_anchor = Some((bi, 0));
+                        state.sel_focus = Some((bi, char_len));
+                    }
+                    ui.ctx().request_repaint();
+                }
+            }
+        }
     }
+
+    // Return shots that reach the end of this block (for continuous Coverage Rails into next block)
+    spans_here
+        .iter()
+        .filter(|&&(_, _, c1)| c1 >= char_len && char_len > 0)
+        .map(|&(si, _, _)| si)
+        .collect()
+}
+
+fn shots_overlapping_range(
+    spans_here: &[(usize, usize, usize)],
+    r_start: usize,
+    r_end: usize,
+) -> Vec<usize> {
+    let mut out = Vec::new();
+    for &(si, c0, c1) in spans_here {
+        if c0 < r_end && c1 > r_start && !out.contains(&si) {
+            out.push(si);
+        }
+    }
+    out
+}
+
+fn pick_row_primary(
+    project: &Project,
+    row_shots: &[usize],
+    selected_shot: Option<Uuid>,
+) -> Option<usize> {
+    if row_shots.is_empty() {
+        return None;
+    }
+    if let Some(sel_id) = selected_shot {
+        if let Some(&si) = row_shots
+            .iter()
+            .find(|&&si| project.shots.shots.get(si).is_some_and(|s| s.id == sel_id))
+        {
+            return Some(si);
+        }
+    }
+    row_shots.first().copied()
 }
 
 /// Calm empty-state view when no project is open.
@@ -1882,7 +2127,7 @@ pub fn show_empty(ctx: &egui::Context) {
             ui.painter().text(
                 rect.center() + Vec2::new(0.0, 16.0),
                 Align2::CENTER_CENTER,
-                "Open or create a screenplay to tag shots, color-code coverage, and export shot lists.",
+                "Open or create a screenplay to tag shots, highlight coverage, and export shot lists.",
                 FontId::proportional(13.0),
                 kit().disabled_text,
             );

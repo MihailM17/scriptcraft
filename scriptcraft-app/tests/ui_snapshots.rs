@@ -743,47 +743,50 @@ fn seed_demo_shots(app: &mut ScriptCraftApp) -> (uuid::Uuid, uuid::Uuid) {
         ShotSize::Ws,
         ShotMovement::Dolly,
         "28mm".into(),
-        "Wide establishing master across the room, slow push-in".into(),
+        "Wide establishing master across the parking lot".into(),
         ShotRange::blocks(pick(s0_blocks, 1), pick(s0_blocks, 5)),
     );
     if let Some(s) = shots.get_mut(id_1a) {
         s.color = ShotColor::Cobalt;
     }
 
+    // Partial mid-paragraph phrase selection inside block 2 into block 4
     let id_1b = shots.add_shot(
         Some(*s0_id),
         "1",
         ShotSize::Mcu,
         ShotMovement::Static,
         "50mm".into(),
-        "Clean medium close-up favoring eye-line on dialogue beat".into(),
-        ShotRange::blocks(pick(s0_blocks, 2), pick(s0_blocks, 4)),
+        "Medium close-up cutting in on carburetor action".into(),
+        ShotRange::chars(pick(s0_blocks, 2), 45, pick(s0_blocks, 4), 6),
     );
     if let Some(s) = shots.get_mut(id_1b) {
         s.color = ShotColor::Emerald;
     }
 
+    // Mid-dialogue cut inside block 5 into block 6
     let id_1c = shots.add_shot(
         Some(*s0_id),
         "1",
         ShotSize::Cu,
         ShotMovement::Handheld,
         "85mm".into(),
-        "Tight reaction close-up on turn".into(),
-        ShotRange::blocks(pick(s0_blocks, 4), pick(s0_blocks, 6)),
+        "Tight close-up cutting mid-speech on spark warning".into(),
+        ShotRange::chars(pick(s0_blocks, 5), 76, pick(s0_blocks, 6), 34),
     );
     if let Some(s) = shots.get_mut(id_1c) {
         s.color = ShotColor::Amber;
     }
 
+    // Tight prop insert on just the last phrase of block 6
     let id_1d = shots.add_shot(
         Some(*s0_id),
         "1",
         ShotSize::Insert,
         ShotMovement::Static,
         "85mm".into(),
-        "Insert detail on prop".into(),
-        ShotRange::blocks(pick(s0_blocks, 6), pick(s0_blocks, 7)),
+        "Insert detail on car door".into(),
+        ShotRange::chars(pick(s0_blocks, 6), 22, pick(s0_blocks, 6), 54),
     );
     if let Some(s) = shots.get_mut(id_1d) {
         s.color = ShotColor::Crimson;
