@@ -37,6 +37,7 @@ fn script() -> Project {
         title: "Omitted layout".into(),
         blocks,
         scene_meta: Vec::new(),
+        shots: Default::default(),
     }
 }
 
@@ -214,6 +215,7 @@ fn pdf_keeps_locked_heading_pages_across_omission() {
         title: "PDF omission".into(),
         blocks: Vec::new(),
         scene_meta: Vec::new(),
+        shots: Default::default(),
     };
     for scene in 1..=4 {
         p.blocks.push(ScriptBlock::new(

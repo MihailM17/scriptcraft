@@ -196,6 +196,7 @@ mod tests {
                 block(ElementType::Action, "Мария тича."),
             ],
             scene_meta: Vec::new(),
+            shots: Default::default(),
         }
     }
 

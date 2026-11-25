@@ -148,6 +148,7 @@ fn scene_reorder_keeps_ids_after_external_edit() {
         title: p.title.clone(),
         blocks: Vec::new(),
         scene_meta: p.scene_meta.clone(),
+        ..Default::default()
     };
     for scene in [&scenes[1], &scenes[0]]
         .into_iter()

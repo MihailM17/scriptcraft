@@ -9,6 +9,7 @@ pub mod research;
 pub mod revision_summary;
 pub mod script_view;
 pub mod settings;
+pub mod shots_view;
 pub mod spell;
 pub mod system_font;
 pub mod theme;

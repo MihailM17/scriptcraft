@@ -687,6 +687,7 @@ pub enum SideTab {
     Script,
     Research,
     Cards,
+    Shots,
     Statistics,
     Settings,
 }
@@ -783,6 +784,7 @@ pub struct ScriptCraftApp {
     recent: Vec<(String, String)>,
     settings: AppSettings,
     settings_ui: SettingsUi,
+    shots_ui: crate::shots_view::ShotsUiState,
     /// Latest-release check, run on open and from Settings ▸ Application.
     update: crate::update::UpdateState,
     /// The installer asked for a restart; send Close once.
@@ -902,6 +904,7 @@ impl Default for ScriptCraftApp {
             recent: Vec::new(),
             settings: AppSettings::default(),
             settings_ui: SettingsUi::default(),
+            shots_ui: crate::shots_view::ShotsUiState::default(),
             update: crate::update::UpdateState::default(),
             update_restart_sent: false,
             rendered_script_face: None,
@@ -2350,6 +2353,56 @@ impl ScriptCraftApp {
         self.write_summary_csv(dst)
     }
 
+    /// Render the colored script + shot legend PDF (tests).
+    #[doc(hidden)]
+    pub fn colored_script_pdf_for_test(&mut self) -> Option<Vec<u8>> {
+        self.colored_script_pdf_bytes()
+    }
+
+    /// Render the shot list table PDF (tests).
+    #[doc(hidden)]
+    pub fn shot_list_pdf_for_test(&mut self) -> Option<Vec<u8>> {
+        self.shot_list_pdf_bytes()
+    }
+
+    /// Export the shot list CSV string (tests).
+    #[doc(hidden)]
+    pub fn shot_list_csv_for_test(&self) -> Option<String> {
+        self.shot_list_csv_string()
+    }
+
+    /// Number of shots in the open project (tests).
+    #[doc(hidden)]
+    pub fn shots_count_for_test(&self) -> usize {
+        self.project.as_ref().map(|p| p.shots.len()).unwrap_or(0)
+    }
+
+    /// Read-only access to the open project (tests & snapshots).
+    #[doc(hidden)]
+    pub fn project_for_test(&self) -> Option<&Project> {
+        self.project.as_ref()
+    }
+
+    /// Mutable access to the open project's shot list (tests & snapshots).
+    #[doc(hidden)]
+    pub fn shots_mut_for_test(&mut self) -> Option<&mut scriptcraft_core::shots::ShotList> {
+        self.project.as_mut().map(|p| &mut p.shots)
+    }
+
+    /// Switch Shots workspace mode and selected shot (tests & snapshots).
+    #[doc(hidden)]
+    pub fn set_shots_view_for_test(
+        &mut self,
+        mode: crate::shots_view::ShotsViewMode,
+        scene_idx: usize,
+        shot_id: Option<uuid::Uuid>,
+    ) {
+        self.side_tab = SideTab::Shots;
+        self.shots_ui.view_mode = mode;
+        self.shots_ui.selected_scene = scene_idx;
+        self.shots_ui.selected_shot = shot_id;
+    }
+
     fn refresh_derived(&mut self) {
         self.revision_marks_dirty = true;
         self.invalidate_compare();
@@ -2875,6 +2928,7 @@ impl ScriptCraftApp {
                 self.close_compare();
                 self.selected_scene = 0;
                 self.selected_block = None;
+                self.shots_ui.reset();
                 self.editor2 = Default::default();
                 self.revisions = kitsp::load_revisions(path).unwrap_or_default();
                 self.revision_marks_dirty = true;
@@ -3476,6 +3530,7 @@ impl ScriptCraftApp {
         self.path = String::new();
         self.selected_scene = 0;
         self.selected_block = None;
+        self.shots_ui.reset();
         self.editor2 = Default::default();
         self.revisions = RevisionHistory::default();
         self.revision_marks = RevisionMarks::default();
@@ -4425,6 +4480,23 @@ fn draw_rail_icon(painter: &egui::Painter, tab: SideTab, center: egui::Pos2, col
                     egui::StrokeKind::Inside,
                 );
             }
+        }
+        SideTab::Shots => {
+            // Minimalist cinema camera silhouette (body + lens cone).
+            let body = egui::Rect::from_min_max(
+                center + egui::vec2(-6.2, -4.0),
+                center + egui::vec2(2.2, 4.0),
+            );
+            painter.rect_stroke(body, 1.5, stroke, egui::StrokeKind::Inside);
+            let lens = [
+                center + egui::vec2(2.2, -1.6),
+                center + egui::vec2(6.2, -3.6),
+                center + egui::vec2(6.2, 3.6),
+                center + egui::vec2(2.2, 1.6),
+            ];
+            painter.line_segment([lens[0], lens[1]], stroke);
+            painter.line_segment([lens[1], lens[2]], stroke);
+            painter.line_segment([lens[2], lens[3]], stroke);
         }
         SideTab::Statistics => {
             // Bar chart.
@@ -5636,6 +5708,7 @@ impl eframe::App for ScriptCraftApp {
                 SideTab::Start => self.start_view(ctx),
                 SideTab::Script => self.editor_view(ctx),
                 SideTab::Cards => self.cards_view(ctx),
+                SideTab::Shots => self.shots_view(ctx),
                 SideTab::Research => self.research_view(ctx),
                 SideTab::Statistics => self.statistics_view(ctx),
                 SideTab::Settings => self.settings_view(ctx),
@@ -5993,6 +6066,7 @@ impl ScriptCraftApp {
                                 SideTab::Script => "Script",
                                 SideTab::Research => "Research",
                                 SideTab::Cards => "Corkboard",
+                                SideTab::Shots => "Shots",
                                 SideTab::Statistics => "Statistics",
                                 SideTab::Settings => "Settings",
                             }
@@ -7316,6 +7390,7 @@ impl ScriptCraftApp {
                     (SideTab::Script, "Script"),
                     (SideTab::Research, "Research"),
                     (SideTab::Cards, "Cards"),
+                    (SideTab::Shots, "Shots"),
                     (SideTab::Statistics, "Statistics"),
                     (SideTab::Settings, "Settings"),
                 ] {
@@ -7970,6 +8045,213 @@ impl ScriptCraftApp {
             );
             self.cards_tab(ui);
         });
+    }
+
+    fn shots_scene_labels(&self) -> Vec<String> {
+        let Some(p) = &self.project else {
+            return Vec::new();
+        };
+        let n = p.scenes().len();
+        if let Some(mut locked) = self.locked_scene_labels() {
+            if locked.len() >= n {
+                locked.truncate(n);
+                return locked;
+            }
+        }
+        (1..=n).map(|i| i.to_string()).collect()
+    }
+
+    fn shots_file_stem(&self, suffix: &str) -> String {
+        let title = if self.title.trim().is_empty() {
+            "Script"
+        } else {
+            self.title.trim()
+        };
+        format!("{title} - {suffix}")
+            .chars()
+            .map(|c| {
+                if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') {
+                    '-'
+                } else {
+                    c
+                }
+            })
+            .collect()
+    }
+
+    fn with_script_export_fonts<T>(
+        &self,
+        f: impl FnOnce(&scriptcraft_layout::pdf::ExportFonts<'_>) -> T,
+    ) -> T {
+        const PLEX_REGULAR: &[u8] = include_bytes!("../assets/fonts/IBMPlexMono-Regular.ttf");
+        const PLEX_BOLD: &[u8] = include_bytes!("../assets/fonts/IBMPlexMono-Bold.ttf");
+        const COURIER_REGULAR: &[u8] = include_bytes!("../assets/fonts/CourierPrime-Regular.ttf");
+        const COURIER_BOLD: &[u8] = include_bytes!("../assets/fonts/CourierPrime-Bold.ttf");
+        const COURIER_ITALIC: &[u8] = include_bytes!("../assets/fonts/CourierPrime-Italic.ttf");
+        const LIBERATION_REGULAR: &[u8] =
+            include_bytes!("../assets/fonts/LiberationMono-Regular.ttf");
+        const LIBERATION_BOLD: &[u8] = include_bytes!("../assets/fonts/LiberationMono-Bold.ttf");
+        const LIBERATION_ITALIC: &[u8] =
+            include_bytes!("../assets/fonts/LiberationMono-Italic.ttf");
+        let face = self.settings.script_face;
+        let (regular, bold, italic): (&[u8], &[u8], &[u8]) = match face {
+            crate::settings::ScriptFace::PlexMono => (PLEX_REGULAR, PLEX_BOLD, COURIER_ITALIC),
+            crate::settings::ScriptFace::CourierPrime => {
+                (COURIER_REGULAR, COURIER_BOLD, COURIER_ITALIC)
+            }
+            crate::settings::ScriptFace::LiberationMono => {
+                (LIBERATION_REGULAR, LIBERATION_BOLD, LIBERATION_ITALIC)
+            }
+            crate::settings::ScriptFace::CourierNew => match crate::system_font::courier_new() {
+                Some(system) => (
+                    system.regular.as_slice(),
+                    system.bold.as_deref().unwrap_or(system.regular.as_slice()),
+                    system.italic.as_deref().unwrap_or(COURIER_ITALIC),
+                ),
+                None => (COURIER_REGULAR, COURIER_BOLD, COURIER_ITALIC),
+            },
+        };
+        let (fallback_regular, fallback_bold): (&[u8], &[u8]) =
+            if face == crate::settings::ScriptFace::PlexMono {
+                (COURIER_REGULAR, COURIER_BOLD)
+            } else {
+                (PLEX_REGULAR, PLEX_BOLD)
+            };
+        let fonts = scriptcraft_layout::pdf::ExportFonts {
+            regular,
+            bold,
+            italic: Some(italic),
+            fallback_regular,
+            fallback_bold,
+            fallback_italic: Some(LIBERATION_ITALIC),
+        };
+        f(&fonts)
+    }
+
+    fn colored_script_pdf_bytes(&mut self) -> Option<Vec<u8>> {
+        let p = self.project.as_ref()?;
+        let mut opts = self.export_options.clone();
+        opts.page_size = self.settings.page_size;
+        let res = self.with_script_export_fonts(|fonts| {
+            scriptcraft_layout::pdf::to_colored_script_pdf_bytes(p, &self.meta, &opts, fonts)
+        });
+        match res {
+            Ok(bytes) => Some(bytes),
+            Err(e) => {
+                self.status = format!("Colored script PDF failed: {e}");
+                None
+            }
+        }
+    }
+
+    fn shot_list_pdf_bytes(&mut self) -> Option<Vec<u8>> {
+        let p = self.project.as_ref()?;
+        let mut opts = self.export_options.clone();
+        opts.page_size = self.settings.page_size;
+        let res = self.with_script_export_fonts(|fonts| {
+            scriptcraft_layout::pdf::to_shot_list_pdf_bytes(p, &self.meta, &opts, fonts)
+        });
+        match res {
+            Ok(bytes) => Some(bytes),
+            Err(e) => {
+                self.status = format!("Shot list PDF failed: {e}");
+                None
+            }
+        }
+    }
+
+    fn shot_list_csv_string(&self) -> Option<String> {
+        let p = self.project.as_ref()?;
+        let scenes = p.scenes();
+        let labels = self.shots_scene_labels();
+        Some(p.shots.to_csv(&p.blocks, &scenes, &labels))
+    }
+
+    fn export_colored_script_pdf(&mut self) {
+        let stem = self.shots_file_stem("Colored Script");
+        let Some(dst) = rfd::FileDialog::new()
+            .add_filter("PDF", &["pdf"])
+            .set_file_name(format!("{stem}.pdf"))
+            .save_file()
+        else {
+            return;
+        };
+        let Some(bytes) = self.colored_script_pdf_bytes() else {
+            return;
+        };
+        match std::fs::write(&dst, &bytes) {
+            Ok(()) => self.status = format!("Exported colored script to {}", dst.to_string_lossy()),
+            Err(e) => self.status = format!("Export failed: {e}"),
+        }
+    }
+
+    fn export_shot_list_pdf(&mut self) {
+        let stem = self.shots_file_stem("Shot List");
+        let Some(dst) = rfd::FileDialog::new()
+            .add_filter("PDF", &["pdf"])
+            .set_file_name(format!("{stem}.pdf"))
+            .save_file()
+        else {
+            return;
+        };
+        let Some(bytes) = self.shot_list_pdf_bytes() else {
+            return;
+        };
+        match std::fs::write(&dst, &bytes) {
+            Ok(()) => self.status = format!("Exported shot list to {}", dst.to_string_lossy()),
+            Err(e) => self.status = format!("Export failed: {e}"),
+        }
+    }
+
+    fn export_shot_list_csv(&mut self) {
+        let Some(csv) = self.shot_list_csv_string() else {
+            return;
+        };
+        let stem = self.shots_file_stem("Shot List");
+        let Some(dst) = rfd::FileDialog::new()
+            .add_filter("CSV", &["csv"])
+            .set_file_name(format!("{stem}.csv"))
+            .save_file()
+        else {
+            return;
+        };
+        match std::fs::write(&dst, csv) {
+            Ok(()) => self.status = format!("Exported shot list CSV to {}", dst.to_string_lossy()),
+            Err(e) => self.status = format!("Export failed: {e}"),
+        }
+    }
+
+    fn shots_view(&mut self, ctx: &egui::Context) {
+        if self.project.is_none() {
+            crate::shots_view::show_empty(ctx);
+            return;
+        }
+        let labels = self.shots_scene_labels();
+        let action = {
+            let Some(p) = self.project.as_mut() else {
+                return;
+            };
+            crate::shots_view::show(ctx, p, &labels, &mut self.shots_ui)
+        };
+        match action {
+            crate::shots_view::ShotsAction::None => {}
+            crate::shots_view::ShotsAction::Changed => {
+                self.dirty = true;
+            }
+            crate::shots_view::ShotsAction::ExportColoredScriptPdf => {
+                self.export_colored_script_pdf();
+            }
+            crate::shots_view::ShotsAction::ExportShotListPdf => {
+                self.export_shot_list_pdf();
+            }
+            crate::shots_view::ShotsAction::ExportShotListCsv => {
+                self.export_shot_list_csv();
+            }
+            crate::shots_view::ShotsAction::OpenInScript(bi) => {
+                self.side_tab = SideTab::Script;
+                self.goto_block(bi);
+            }
+        }
     }
 
     fn statistics_view(&mut self, ctx: &egui::Context) {

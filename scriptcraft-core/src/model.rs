@@ -489,6 +489,10 @@ pub struct Project {
     /// the user changes a scene-level property.
     #[serde(default)]
     pub scene_meta: Vec<SceneMeta>,
+    /// Shot list & coverage ranges anchored to block UUIDs (persisted in
+    /// `.kitsp`'s `scriptcraft_shots` sidecar row).
+    #[serde(default, skip_serializing_if = "crate::shots::ShotList::is_empty")]
+    pub shots: crate::shots::ShotList,
 }
 
 impl Project {

@@ -49,6 +49,7 @@ fn script() -> Project {
             ScriptBlock::new(ElementType::Action, "Rain.".into()),
         ],
         scene_meta: Vec::new(),
+        ..Default::default()
     }
 }
 

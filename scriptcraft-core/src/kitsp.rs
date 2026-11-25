@@ -117,10 +117,14 @@ pub const SCENE_META_KEY: &str = "scriptcraft_scene_meta";
 /// ScriptCraft extension: versioned JSON dual-dialogue groups keyed by the two
 /// stable character-block ids. KIT ignores this key.
 pub const DUAL_GROUPS_KEY: &str = "scriptcraft_dual_groups";
+/// ScriptCraft extension: versioned JSON shot list & script coverage ranges
+/// keyed by stable block/scene ids. KIT ignores this key.
+pub const SHOTS_KEY: &str = "scriptcraft_shots";
 
 const IDENTITY_SCHEMA: u32 = 1;
 const SCENE_META_SCHEMA: u32 = 1;
 const DUAL_GROUPS_SCHEMA: u32 = 1;
+const SHOTS_SCHEMA: u32 = crate::shots::SHOTS_SCHEMA;
 
 /// Result of opening a `.kitsp`: the project plus non-fatal compatibility
 /// warnings, for example an external KIT edit whose block identity could not
@@ -168,6 +172,7 @@ fn load_conn(conn: &Connection) -> Result<LoadReport, KitspError> {
     let identity = apply_saved_identity(conn, &mut project, &mut warnings);
     apply_saved_dual_groups(conn, &mut project, &identity, &mut warnings);
     apply_saved_scene_meta(conn, &mut project, &identity, &mut warnings);
+    apply_saved_shots(conn, &mut project, &mut warnings);
     Ok(LoadReport { project, warnings })
 }
 
@@ -661,6 +666,47 @@ fn write_dual_groups(conn: &Connection, project: &Project) -> Result<(), KitspEr
     upsert_data(conn, DUAL_GROUPS_KEY, &serde_json::to_string(&row)?)
 }
 
+/// Apply `scriptcraft_shots` after block identity is settled.
+fn apply_saved_shots(conn: &Connection, project: &mut Project, warnings: &mut Vec<String>) {
+    let json = get_data(conn, SHOTS_KEY);
+    if json.trim().is_empty() {
+        return;
+    }
+    let list: crate::shots::ShotList = match serde_json::from_str(&json) {
+        Ok(list) => list,
+        Err(err) => {
+            warnings.push(format!(
+                "Shot list could not be read ({err}); it was ignored."
+            ));
+            return;
+        }
+    };
+    if list.schema > SHOTS_SCHEMA {
+        warnings.push(format!(
+            "Shot list uses newer schema {}; it was left untouched.",
+            list.schema
+        ));
+        return;
+    }
+    project.shots = list;
+}
+
+/// Save the project's shot list into `scenario_data.scriptcraft_shots`,
+/// deleting the row when empty so untouched `.kitsp` files stay clean.
+fn write_shots(conn: &Connection, project: &Project) -> Result<(), KitspError> {
+    if !row_writable(conn, SHOTS_KEY, SHOTS_SCHEMA)? {
+        return Ok(());
+    }
+    if project.shots.is_empty() {
+        conn.execute(
+            "DELETE FROM scenario_data WHERE data_name=?1",
+            params![SHOTS_KEY],
+        )?;
+        return Ok(());
+    }
+    upsert_data(conn, SHOTS_KEY, &serde_json::to_string(&project.shots)?)
+}
+
 /// A row written by a newer ScriptCraft must not be silently downgraded.
 fn row_writable(conn: &Connection, key: &str, current: u32) -> Result<bool, KitspError> {
     let json = get_data(conn, key);
@@ -834,6 +880,7 @@ fn save_file_inner(
         write_identity(&conn, p)?;
         write_dual_groups(&conn, p)?;
         write_scene_meta(&conn, p)?;
+        write_shots(&conn, p)?;
         if let Some(revisions) = revisions {
             write_revisions(&conn, revisions)?;
         }
@@ -1100,6 +1147,7 @@ pub fn restore_revision_as_copy(
         write_identity(&conn, &project)?;
         write_dual_groups(&conn, &project)?;
         write_scene_meta(&conn, &project)?;
+        write_shots(&conn, &project)?;
         if restored_index.is_some() {
             write_revisions(&conn, &restored_history)?;
         }
@@ -1214,6 +1262,7 @@ fn project_from_baseline(set: &RevisionSet, source: &Project) -> Project {
         title: source.title.clone(),
         blocks,
         scene_meta,
+        shots: source.shots.clone(),
     }
 }
 
@@ -2408,5 +2457,44 @@ mod tests {
         assert_eq!(parsed.blocks.len(), 1);
         assert_eq!(parsed.blocks[0].text, blk.text);
         assert_eq!(parsed.blocks[0].styles, blk.styles);
+    }
+
+    #[test]
+    fn shots_persist_across_kitsp_save_and_reopen() {
+        use crate::shots::{ShotMovement, ShotRange, ShotSize};
+        let dir = std::env::temp_dir().join(format!("scriptcraft-shots-rt-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("shots.kitsp");
+        let mut p = create_file(&path, "Shots Test").unwrap();
+        p.blocks.push(ScriptBlock::new(
+            ElementType::Action,
+            "A camera glides across the room.".into(),
+        ));
+        let scene_id = p.blocks[0].id;
+        let act_id = p.blocks[1].id;
+        let shot_id = p.shots.add_shot(
+            Some(scene_id),
+            "1",
+            ShotSize::Ws,
+            ShotMovement::Dolly,
+            "28mm".into(),
+            "Opening dolly master".into(),
+            ShotRange::blocks(act_id, act_id),
+        );
+        save_file(&path, &p).unwrap();
+
+        let report = load_file_report(&path).unwrap();
+        assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+        assert_eq!(report.project.shots.len(), 1);
+        let s = report.project.shots.get(shot_id).expect("shot restored");
+        assert_eq!(s.code, "1A");
+        assert_eq!(s.lens, "28mm");
+        assert_eq!(s.description, "Opening dolly master");
+        let cov = report
+            .project
+            .shots
+            .resolve_block_coverage(&report.project.blocks);
+        assert_eq!(cov[1], vec![0]);
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

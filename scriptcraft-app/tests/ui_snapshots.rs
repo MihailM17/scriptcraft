@@ -722,3 +722,115 @@ fn snap_39_inline_styles() {
     h.run();
     h.snapshot("39_inline_styles");
 }
+
+fn seed_demo_shots(app: &mut ScriptCraftApp) -> (uuid::Uuid, uuid::Uuid) {
+    use scriptcraft_core::shots::{ShotColor, ShotMovement, ShotRange, ShotSize};
+
+    let (scenes_data, block_ids): (Vec<(uuid::Uuid, Vec<usize>)>, Vec<uuid::Uuid>) = {
+        let p = app.project_for_test().expect("A95 loaded");
+        let scs = p.scenes().into_iter().map(|s| (s.id, s.blocks)).collect();
+        let bids = p.blocks.iter().map(|b| b.id).collect();
+        (scs, bids)
+    };
+
+    let shots = app.shots_mut_for_test().expect("shots list");
+    let (s0_id, s0_blocks) = &scenes_data[0];
+    let pick = |blocks: &[usize], idx: usize| block_ids[blocks[idx.min(blocks.len() - 1)]];
+
+    let id_1a = shots.add_shot(
+        Some(*s0_id),
+        "1",
+        ShotSize::Ws,
+        ShotMovement::Dolly,
+        "28mm".into(),
+        "Wide establishing master across the room, slow push-in".into(),
+        ShotRange::blocks(pick(s0_blocks, 1), pick(s0_blocks, 5)),
+    );
+    if let Some(s) = shots.get_mut(id_1a) {
+        s.color = ShotColor::Cobalt;
+    }
+
+    let id_1b = shots.add_shot(
+        Some(*s0_id),
+        "1",
+        ShotSize::Mcu,
+        ShotMovement::Static,
+        "50mm".into(),
+        "Clean medium close-up favoring eye-line on dialogue beat".into(),
+        ShotRange::blocks(pick(s0_blocks, 2), pick(s0_blocks, 4)),
+    );
+    if let Some(s) = shots.get_mut(id_1b) {
+        s.color = ShotColor::Emerald;
+    }
+
+    let id_1c = shots.add_shot(
+        Some(*s0_id),
+        "1",
+        ShotSize::Cu,
+        ShotMovement::Handheld,
+        "85mm".into(),
+        "Tight reaction close-up on turn".into(),
+        ShotRange::blocks(pick(s0_blocks, 4), pick(s0_blocks, 6)),
+    );
+    if let Some(s) = shots.get_mut(id_1c) {
+        s.color = ShotColor::Amber;
+    }
+
+    let id_1d = shots.add_shot(
+        Some(*s0_id),
+        "1",
+        ShotSize::Insert,
+        ShotMovement::Static,
+        "85mm".into(),
+        "Insert detail on prop".into(),
+        ShotRange::blocks(pick(s0_blocks, 6), pick(s0_blocks, 7)),
+    );
+    if let Some(s) = shots.get_mut(id_1d) {
+        s.color = ShotColor::Crimson;
+    }
+
+    if let Some((s1_id, s1_blocks)) = scenes_data.get(1) {
+        if s1_blocks.len() >= 3 {
+            shots.add_shot(
+                Some(*s1_id),
+                "2",
+                ShotSize::Ots,
+                ShotMovement::Steadicam,
+                "35mm".into(),
+                "Over-the-shoulder tracking entry".into(),
+                ShotRange::blocks(pick(s1_blocks, 1), pick(s1_blocks, 2)),
+            );
+        }
+    }
+
+    (id_1a, id_1b)
+}
+
+/// Phase 1 Shots workspace — Color Map mode with overlapping shots & inspector.
+#[test]
+fn snap_40_shots_color_map() {
+    use scriptcraft_app::shots_view::ShotsViewMode;
+
+    let mut h = harness(SideTab::Script, None);
+    h.run();
+    let (_id_1a, id_1b) = seed_demo_shots(h.state_mut());
+    h.state_mut()
+        .set_shots_view_for_test(ShotsViewMode::ColorMap, 0, Some(id_1b));
+    h.run_steps(2);
+    h.snapshot("40_shots_color_map");
+}
+
+/// Phase 1 Shots workspace — Hollywood Coverage Rails mode showing overlapping
+/// vertical colored tracks down the right margin.
+#[test]
+fn snap_41_shots_coverage_rails() {
+    use scriptcraft_app::shots_view::ShotsViewMode;
+
+    let mut h = harness(SideTab::Script, None);
+    h.run();
+    let (id_1a, _id_1b) = seed_demo_shots(h.state_mut());
+    h.state_mut()
+        .set_shots_view_for_test(ShotsViewMode::CoverageRails, 0, Some(id_1a));
+    h.run_steps(2);
+    h.snapshot("41_shots_coverage_rails");
+}

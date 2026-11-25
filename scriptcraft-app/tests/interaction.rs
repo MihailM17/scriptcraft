@@ -2585,6 +2585,7 @@ fn omitted_scene_persists_with_page_locks_and_keeps_later_numbers() {
             title: "Omission Test".into(),
             blocks,
             scene_meta: Vec::new(),
+            shots: Default::default(),
         }
     }
 
@@ -3767,4 +3768,121 @@ fn us_letter_is_opt_in_and_updates_pagination() {
         letter_rect.width() > a4_rect.width() && letter_rect.height() < a4_rect.height(),
         "US Letter is wider and shorter than A4"
     );
+}
+
+/// Phase 1 Shot Breakdown: selecting screenplay blocks in the Shots workspace,
+/// assigning overlapping shots, switching Color Map <-> Coverage Rails, editing
+/// lens presets, and exporting Colored Script PDF, Shot List PDF, and CSV.
+#[test]
+fn shots_phase_create_overlap_toggle_modes_and_export() {
+    let mut h = harness(SideTab::Script);
+    h.run();
+
+    // Open Shots via the left module rail
+    h.get_by_label("Shots").click();
+    h.run();
+
+    // Select block 2 and create Shot 1A
+    let b1_text = h.state().block_text(1).unwrap_or_default();
+    let b1_label = format!("Script block 2: {}", b1_text.trim());
+    h.get_by_label(&b1_label).click();
+    h.run();
+    h.get_by_label("+ New Shot (1A)").click();
+    h.run();
+    assert_eq!(h.state().shots_count_for_test(), 1);
+    assert!(
+        h.state().is_dirty(),
+        "creating a shot must mark project dirty"
+    );
+
+    // Select block 3 and create Shot 1B
+    let b2_text = h.state().block_text(2).unwrap_or_default();
+    let b2_label = format!("Script block 3: {}", b2_text.trim());
+    h.get_by_label(&b2_label).click();
+    h.run();
+    h.get_by_label("+ New Shot (1B)").click();
+    h.run();
+    assert_eq!(h.state().shots_count_for_test(), 2);
+
+    // Click block 2 again and overlap it with existing shot 1B
+    h.get_by_label(&b1_label).click();
+    h.run();
+    h.get_by_label("+ 1B").click();
+    h.run();
+    assert_eq!(h.state().shots_count_for_test(), 2);
+
+    // Click 50mm quick-lens preset chip in Shot Inspector
+    h.get_by_label("50mm").click();
+    h.run();
+
+    // Toggle Coverage Rails and back to Color Map without crashing
+    h.get_by_label("Coverage Rails").click();
+    h.run();
+    h.get_by_label("Color Map").click();
+    h.run();
+
+    // Verify all 3 exports produce valid outputs
+    let colored_pdf = h
+        .state_mut()
+        .colored_script_pdf_for_test()
+        .expect("colored script PDF renders");
+    assert!(colored_pdf.starts_with(b"%PDF-"));
+
+    let list_pdf = h
+        .state_mut()
+        .shot_list_pdf_for_test()
+        .expect("shot list PDF renders");
+    assert!(list_pdf.starts_with(b"%PDF-"));
+
+    let csv = h
+        .state()
+        .shot_list_csv_for_test()
+        .expect("shot list CSV renders");
+    assert!(csv.starts_with('\u{FEFF}'), "CSV must include UTF-8 BOM");
+    assert!(csv.contains("1A") && csv.contains("1B") && csv.contains("50mm"));
+}
+
+/// Shots created in the Shots workspace persist inside `.kitsp` across Save and
+/// reopen in a fresh app instance.
+#[test]
+fn shots_persist_across_save_and_reopen() {
+    let fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/../fixtures/A95.kitsp");
+    let dir = std::env::temp_dir().join(format!("scriptcraft-shots-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("ShotsRoundTrip.kitsp");
+    std::fs::copy(fixture, &path).unwrap();
+    let path_str = path.to_string_lossy().into_owned();
+
+    let mut h = harness(SideTab::Script);
+    h.run();
+    h.state_mut().open_path(&path_str);
+    h.run();
+
+    h.get_by_label("Shots").click();
+    h.run();
+
+    let b1_text = h.state().block_text(1).unwrap_or_default();
+    let b1_label = format!("Script block 2: {}", b1_text.trim());
+    h.get_by_label(&b1_label).click();
+    h.run();
+    h.get_by_label("+ New Shot (1A)").click();
+    h.run();
+    h.get_by_label("85mm").click();
+    h.run();
+    assert!(h.state().is_dirty());
+
+    open_file_menu(&mut h);
+    h.get_by_label("Save").click();
+    h.run();
+    assert!(!h.state().is_dirty(), "Save must clear dirty state");
+
+    let mut reopened = harness(SideTab::Script);
+    reopened.run();
+    reopened.state_mut().open_path(&path_str);
+    reopened.run();
+    assert_eq!(reopened.state().shots_count_for_test(), 1);
+    let csv = reopened.state().shot_list_csv_for_test().unwrap();
+    assert!(csv.contains("1A") && csv.contains("85mm"));
+
+    let _ = std::fs::remove_dir_all(&dir);
 }

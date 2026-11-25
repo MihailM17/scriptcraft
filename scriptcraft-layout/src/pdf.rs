@@ -180,6 +180,12 @@ pub struct PrintLine {
     /// Optional inline-styled runs covering `text` (populated only when the
     /// source block carries inline bold / italic / underline spans).
     pub runs: Vec<StyledRun>,
+    /// Optional shot-coverage pastel tint RGB (populated only for colored
+    /// shot-script exports).
+    pub shot_tint: Option<(u8, u8, u8)>,
+    /// Optional shot code badge `(label, rgb)` drawn in the right margin on
+    /// the first line of a shot-covered block.
+    pub shot_tag: Option<(String, (u8, u8, u8))>,
 }
 
 impl PrintLine {
@@ -197,6 +203,8 @@ impl PrintLine {
             margin: None,
             y_from_bottom_mm: None,
             runs: Vec::new(),
+            shot_tint: None,
+            shot_tag: None,
         }
     }
 }
@@ -420,6 +428,17 @@ pub fn layout_pages_with_marks_and_latest(
     marks: &[Option<RevisionColor>],
     latest: Option<&RevisionSet>,
 ) -> Vec<Vec<PrintLine>> {
+    layout_pages_inner(p, meta, opts, marks, latest, false)
+}
+
+fn layout_pages_inner(
+    p: &Project,
+    meta: &Metadata,
+    opts: &ExportOptions,
+    marks: &[Option<RevisionColor>],
+    latest: Option<&RevisionSet>,
+    include_shots: bool,
+) -> Vec<Vec<PrintLine>> {
     // Omitted scenes collapse to heading + OMITTED; everything downstream
     // (pagination, scene numbering, revision marks) sees the page view.
     let view = p.has_omitted_scenes().then(|| p.document_view());
@@ -499,7 +518,24 @@ pub fn layout_pages_with_marks_and_latest(
     } else {
         HashMap::new()
     };
+    let shot_cov: Vec<Vec<usize>> = if include_shots && !p.shots.is_empty() {
+        p.shots.resolve_block_coverage(&renum)
+    } else {
+        Vec::new()
+    };
+    let shot_for = |bi: usize| -> Option<((u8, u8, u8), String)> {
+        let hits = shot_cov.get(bi)?;
+        let primary = p.shots.shots.get(*hits.first()?)?;
+        let rgb = primary.color.rgb();
+        let tag = if hits.len() > 1 {
+            format!("{} +{}", primary.code, hits.len() - 1)
+        } else {
+            primary.code.clone()
+        };
+        Some((rgb, tag))
+    };
     let mut scene_i = 0usize;
+    let mut last_tagged_shot: Option<String> = None;
     let mut out = Vec::new();
     for (pi, page) in pages.iter().enumerate() {
         let mut lines: Vec<PrintLine> = Vec::new();
@@ -631,6 +667,7 @@ pub fn layout_pages_with_marks_and_latest(
             if b.element_type == ElementType::SceneHeading {
                 scene_i += 1;
             }
+            let block_shot = shot_for(chunk.bi);
             if b.styles.is_empty() {
                 let mut text = b
                     .text
@@ -651,6 +688,15 @@ pub fn layout_pages_with_marks_and_latest(
                     l.right_aligned = right_aligned;
                     l.share_row = li == 0 && number_pushed;
                     l.revision = revision;
+                    if let Some((rgb, ref tag)) = block_shot {
+                        l.shot_tint = Some(rgb);
+                        if li == 0 && last_tagged_shot.as_deref() != Some(tag.as_str()) {
+                            l.shot_tag = Some((tag.clone(), rgb));
+                            last_tagged_shot = Some(tag.clone());
+                        }
+                    } else if li == 0 {
+                        last_tagged_shot = None;
+                    }
                     lines.push(l);
                 }
             } else {
@@ -687,6 +733,15 @@ pub fn layout_pages_with_marks_and_latest(
                         l.share_row = li == 0 && number_pushed;
                         l.revision = revision;
                         l.runs = runs;
+                        if let Some((rgb, ref tag)) = block_shot {
+                            l.shot_tint = Some(rgb);
+                            if li == 0 && last_tagged_shot.as_deref() != Some(tag.as_str()) {
+                                l.shot_tag = Some((tag.clone(), rgb));
+                                last_tagged_shot = Some(tag.clone());
+                            }
+                        } else if li == 0 {
+                            last_tagged_shot = None;
+                        }
                         lines.push(l);
                         li += 1;
                     }
@@ -792,6 +847,8 @@ pub fn layout_title_page_for(
             margin: None,
             y_from_bottom_mm: None,
             runs: Vec::new(),
+            shot_tint: None,
+            shot_tag: None,
         }
     };
     let blank = || PrintLine::text_line(margin_l, String::new(), false);
@@ -953,6 +1010,29 @@ pub fn to_pdf_bytes_with_marks_and_latest(
     latest: Option<&RevisionSet>,
     fonts: &ExportFonts<'_>,
 ) -> Result<Vec<u8>, PdfError> {
+    to_pdf_bytes_inner(p, meta, opts, marks, latest, fonts, false)
+}
+
+/// Export the screenplay with shot-coverage pastel line highlights, left color
+/// bars, right-margin shot code tags, and a prepended **Shot Legend** table.
+pub fn to_colored_script_pdf_bytes(
+    p: &Project,
+    meta: &Metadata,
+    opts: &ExportOptions,
+    fonts: &ExportFonts<'_>,
+) -> Result<Vec<u8>, PdfError> {
+    to_pdf_bytes_inner(p, meta, opts, &[], None, fonts, true)
+}
+
+fn to_pdf_bytes_inner(
+    p: &Project,
+    meta: &Metadata,
+    opts: &ExportOptions,
+    marks: &[Option<RevisionColor>],
+    latest: Option<&RevisionSet>,
+    fonts: &ExportFonts<'_>,
+    include_shots: bool,
+) -> Result<Vec<u8>, PdfError> {
     if p.blocks.is_empty() {
         return Err(PdfError::Empty);
     }
@@ -1006,8 +1086,13 @@ pub fn to_pdf_bytes_with_marks_and_latest(
     if opts.title_page {
         pages.push(layout_title_page_for(meta, latest, opts.page_size));
     }
-    pages.extend(layout_pages_with_marks_and_latest(
-        p, meta, opts, marks, latest,
+    pages.extend(layout_pages_inner(
+        p,
+        meta,
+        opts,
+        marks,
+        latest,
+        include_shots,
     ));
     if opts.revision_pages_only {
         let skip_title = usize::from(opts.title_page);
@@ -1031,6 +1116,23 @@ pub fn to_pdf_bytes_with_marks_and_latest(
     let show = push_text;
 
     let mut doc_pages: Vec<PdfPage> = Vec::new();
+    if include_shots && !p.shots.is_empty() {
+        let legend_ops = build_shot_sheet_pages(
+            p,
+            meta,
+            &title,
+            page_w,
+            page_h,
+            &regular,
+            &bold,
+            &fallback_regular,
+            &fallback_bold,
+            true,
+        );
+        for ops in legend_ops {
+            doc_pages.push(PdfPage::new(Mm(page_w), Mm(page_h), ops));
+        }
+    }
     for lines in pages.iter() {
         let mut ops: Vec<Op> = vec![Op::SetOutlineThickness { pt: Pt(0.72) }];
         if let Some(wm) = watermark {
@@ -1090,6 +1192,59 @@ pub fn to_pdf_bytes_with_marks_and_latest(
                 continue;
             }
             let yy = line.y_from_bottom_mm.unwrap_or(y - line.dy_mm);
+            if let Some((r, g, b)) = line.shot_tint {
+                // Soft pastel highlight over white paper so black text stays crisp.
+                let tr = 0.84 + 0.16 * (r as f32 / 255.0);
+                let tg = 0.84 + 0.16 * (g as f32 / 255.0);
+                let tb = 0.84 + 0.16 * (b as f32 / 255.0);
+                ops.push(Op::SetFillColor {
+                    col: Color::Rgb(Rgb::new(tr, tg, tb, None)),
+                });
+                let mut strip = PdfRect::from_wh(
+                    Pt((text_right - margin_l + 4.0) * MM_TO_PT),
+                    Pt(PITCH_MM * MM_TO_PT),
+                );
+                strip.x = Pt((margin_l - 2.0) * MM_TO_PT);
+                strip.y = Pt((yy - DESCENT_MM * 0.85) * MM_TO_PT);
+                ops.push(Op::DrawPolygon {
+                    polygon: strip.to_polygon(),
+                });
+                // Solid 1.8mm color bar along the left edge of the text column.
+                ops.push(Op::SetFillColor {
+                    col: Color::Rgb(Rgb::new(
+                        r as f32 / 255.0,
+                        g as f32 / 255.0,
+                        b as f32 / 255.0,
+                        None,
+                    )),
+                });
+                let mut bar = PdfRect::from_wh(Pt(1.8 * MM_TO_PT), Pt(PITCH_MM * MM_TO_PT));
+                bar.x = Pt((margin_l - 4.0) * MM_TO_PT);
+                bar.y = Pt((yy - DESCENT_MM * 0.85) * MM_TO_PT);
+                ops.push(Op::DrawPolygon {
+                    polygon: bar.to_polygon(),
+                });
+                if let Some((ref tag, (sr, sg, sb))) = line.shot_tag {
+                    ops.push(Op::SetFillColor {
+                        col: Color::Rgb(Rgb::new(
+                            (sr as f32 / 255.0) * 0.72,
+                            (sg as f32 / 255.0) * 0.72,
+                            (sb as f32 / 255.0) * 0.72,
+                            None,
+                        )),
+                    });
+                    draw_summary_text(
+                        &mut ops,
+                        &bold,
+                        &fallback_bold,
+                        8.5,
+                        text_right + 3.0,
+                        yy + 0.3,
+                        tag,
+                    );
+                }
+                ops.push(Op::SetFillColor { col: black.clone() });
+            }
             if let Some(revision) = line.revision {
                 let (r, g, b) = revision.rgb();
                 ops.push(Op::SetFillColor {
@@ -1456,6 +1611,389 @@ pub fn to_summary_pdf_bytes(
     let mut warnings = Vec::new();
     let bytes = doc.save(&PdfSaveOptions::default(), &mut warnings);
     Ok(bytes)
+}
+
+/// Export a standalone production **Shot List** PDF grouped by scene with
+/// color swatches, shot codes, size/movement/lens specs, descriptions, and
+/// covered screenplay excerpts.
+pub fn to_shot_list_pdf_bytes(
+    p: &Project,
+    meta: &Metadata,
+    opts: &ExportOptions,
+    fonts: &ExportFonts<'_>,
+) -> Result<Vec<u8>, PdfError> {
+    if p.blocks.is_empty() {
+        return Err(PdfError::Empty);
+    }
+    let title = if p.title.is_empty() {
+        "Untitled".to_string()
+    } else {
+        p.title.clone()
+    };
+    let mut doc = PdfDocument::new(&format!("{title} - Shot List"));
+    let mut font_warnings = Vec::new();
+    let mut parse = |bytes: &[u8]| ParsedFont::from_bytes(bytes, 0, &mut font_warnings);
+    let regular_font = parse(fonts.regular).ok_or(PdfError::Font)?;
+    let bold_font = parse(fonts.bold).ok_or(PdfError::Font)?;
+    let fallback_regular_font = parse(fonts.fallback_regular).ok_or(PdfError::Font)?;
+    let fallback_bold_font = parse(fonts.fallback_bold).ok_or(PdfError::Font)?;
+    let regular = Face {
+        id: doc.add_font(&regular_font),
+        font: regular_font,
+    };
+    let bold = Face {
+        id: doc.add_font(&bold_font),
+        font: bold_font,
+    };
+    let fallback_regular = Face {
+        id: doc.add_font(&fallback_regular_font),
+        font: fallback_regular_font,
+    };
+    let fallback_bold = Face {
+        id: doc.add_font(&fallback_bold_font),
+        font: fallback_bold_font,
+    };
+    let spec = page_spec(opts.page_size);
+    let raw_pages = build_shot_sheet_pages(
+        p,
+        meta,
+        &title,
+        spec.width_mm,
+        spec.height_mm,
+        &regular,
+        &bold,
+        &fallback_regular,
+        &fallback_bold,
+        false,
+    );
+    let pages: Vec<PdfPage> = raw_pages
+        .into_iter()
+        .map(|ops| PdfPage::new(Mm(spec.width_mm), Mm(spec.height_mm), ops))
+        .collect();
+    doc.with_pages(pages);
+    let mut warnings = Vec::new();
+    let bytes = doc.save(&PdfSaveOptions::default(), &mut warnings);
+    Ok(bytes)
+}
+
+/// Shared paginated builder for both the **Shot Legend** (prepended to the
+/// colored script PDF) and the standalone **Shot List** PDF.
+#[allow(clippy::too_many_arguments)]
+fn build_shot_sheet_pages(
+    p: &Project,
+    meta: &Metadata,
+    title: &str,
+    page_w: f32,
+    page_h: f32,
+    regular: &Face,
+    bold: &Face,
+    fallback_regular: &Face,
+    fallback_bold: &Face,
+    legend_mode: bool,
+) -> Vec<Vec<Op>> {
+    let margin = 20.0_f32;
+    let bottom = 22.0_f32;
+    let line_h = 5.4_f32;
+    let black = Color::Greyscale(Greyscale::new(0.0, None));
+    let muted = Color::Greyscale(Greyscale::new(0.42, None));
+    let heading_text = if legend_mode {
+        "SHOT LEGEND"
+    } else {
+        "SHOT LIST"
+    };
+
+    let scenes = p.scenes();
+    let locked = locked_scene_labels(meta);
+    let prefix = meta.scene_number_prefix.trim();
+    let start_num: u32 = meta.scene_number_start.trim().parse().unwrap_or(1);
+    let scene_labels: Vec<String> = (0..scenes.len())
+        .map(|i| {
+            scene_label(&locked, prefix, start_num, i)
+                .trim_end_matches('.')
+                .to_string()
+        })
+        .collect();
+
+    let mut pages: Vec<Vec<Op>> = Vec::new();
+    let mut ops: Vec<Op> = vec![Op::SetOutlineThickness { pt: Pt(0.6) }];
+    let mut y = page_h - margin;
+
+    let flush_new_page = |pages: &mut Vec<Vec<Op>>, ops: &mut Vec<Op>, y: &mut f32| {
+        pages.push(std::mem::take(ops));
+        *ops = vec![Op::SetOutlineThickness { pt: Pt(0.6) }];
+        *y = page_h - margin;
+        ops.push(Op::SetFillColor { col: black.clone() });
+        draw_summary_text(
+            ops,
+            bold,
+            fallback_bold,
+            11.0,
+            margin,
+            *y,
+            &format!("{heading_text} (continued)"),
+        );
+        *y -= line_h * 1.4;
+    };
+
+    // Header block
+    ops.push(Op::SetFillColor { col: black.clone() });
+    draw_summary_text(&mut ops, bold, fallback_bold, 15.0, margin, y, heading_text);
+    y -= 6.5;
+    draw_summary_text(&mut ops, regular, fallback_regular, 11.0, margin, y, title);
+    y -= 5.5;
+    let cov = p.shots.resolve_block_coverage(&p.blocks);
+    let covered_blocks = p
+        .blocks
+        .iter()
+        .enumerate()
+        .filter(|(i, b)| {
+            b.element_type != ElementType::SceneHeading
+                && b.element_type.is_printable()
+                && cov.get(*i).is_some_and(|v| !v.is_empty())
+        })
+        .count();
+    let total_blocks = p
+        .blocks
+        .iter()
+        .filter(|b| b.element_type != ElementType::SceneHeading && b.element_type.is_printable())
+        .count();
+    let pct = (covered_blocks * 100)
+        .checked_div(total_blocks)
+        .unwrap_or(0);
+    ops.push(Op::SetFillColor { col: muted.clone() });
+    draw_summary_text(
+        &mut ops,
+        regular,
+        fallback_regular,
+        9.5,
+        margin,
+        y,
+        &format!(
+            "{} shots across {} scene(s)  |  {}% script coverage",
+            p.shots.len(),
+            scenes.len(),
+            pct
+        ),
+    );
+    y -= 7.0;
+
+    if p.shots.is_empty() {
+        ops.push(Op::SetFillColor { col: black.clone() });
+        draw_summary_text(
+            &mut ops,
+            regular,
+            fallback_regular,
+            10.0,
+            margin,
+            y,
+            "No shots have been assigned yet.",
+        );
+        pages.push(ops);
+        return pages;
+    }
+
+    // Column X coordinates (mm)
+    let x_swatch = margin;
+    let x_code = margin + 6.0;
+    let x_size = margin + 22.0;
+    let x_move = margin + 39.0;
+    let x_lens = margin + 62.0;
+    let x_desc = margin + 80.0;
+    let desc_chars = ((page_w - margin - x_desc) / (CHAR_MM * (9.0 / FONT_PT)))
+        .floor()
+        .max(24.0) as usize;
+
+    // Group shots by scene (plus any unassigned shots at the end).
+    let mut rendered_ids = std::collections::HashSet::new();
+    for (si, scene) in scenes.iter().enumerate() {
+        let shot_indices = p.shots.shots_for_scene(scene, &p.blocks);
+        if shot_indices.is_empty() {
+            continue;
+        }
+        if y - line_h * 3.0 < bottom {
+            flush_new_page(&mut pages, &mut ops, &mut y);
+        }
+        // Scene banner tint
+        ops.push(Op::SetFillColor {
+            col: Color::Greyscale(Greyscale::new(0.93, None)),
+        });
+        let mut banner =
+            PdfRect::from_wh(Pt((page_w - 2.0 * margin) * MM_TO_PT), Pt(6.2 * MM_TO_PT));
+        banner.x = Pt(margin * MM_TO_PT);
+        banner.y = Pt((y - 1.5) * MM_TO_PT);
+        ops.push(Op::DrawPolygon {
+            polygon: banner.to_polygon(),
+        });
+        ops.push(Op::SetFillColor { col: black.clone() });
+        let banner_label = format!("SCENE {} - {}", scene_labels[si], scene.heading);
+        let max_banner = ((page_w - 2.0 * margin - 4.0) / (CHAR_MM * (9.5 / FONT_PT))) as usize;
+        let banner_trimmed: String = banner_label.chars().take(max_banner).collect();
+        draw_summary_text(
+            &mut ops,
+            bold,
+            fallback_bold,
+            9.5,
+            margin + 2.0,
+            y,
+            &banner_trimmed,
+        );
+        y -= 6.5;
+
+        // Column header row
+        ops.push(Op::SetFillColor { col: muted.clone() });
+        for (x, label) in [
+            (x_code, "SHOT"),
+            (x_size, "SIZE"),
+            (x_move, "MOVE"),
+            (x_lens, "LENS"),
+            (x_desc, "DESCRIPTION"),
+        ] {
+            draw_summary_text(&mut ops, bold, fallback_bold, 8.0, x, y, label);
+        }
+        y -= 4.8;
+
+        for idx in shot_indices {
+            let shot = &p.shots.shots[idx];
+            rendered_ids.insert(shot.id);
+            let desc = if shot.description.trim().is_empty() {
+                p.shots.covered_excerpt(shot, &p.blocks)
+            } else {
+                shot.description.trim().to_string()
+            };
+            let desc_lines = wrap_title_line(&desc, desc_chars);
+            let excerpt_lines = if !legend_mode && !shot.description.trim().is_empty() {
+                let ex = p.shots.covered_excerpt(shot, &p.blocks);
+                if ex.is_empty() {
+                    Vec::new()
+                } else {
+                    wrap_title_line(&ex, desc_chars)
+                }
+            } else {
+                Vec::new()
+            };
+            let needed = desc_lines.len().max(1) + excerpt_lines.len();
+            if y - (needed as f32) * line_h < bottom {
+                flush_new_page(&mut pages, &mut ops, &mut y);
+            }
+
+            // Color swatch box
+            let (r, g, b) = shot.color.rgb();
+            ops.push(Op::SetFillColor {
+                col: Color::Rgb(Rgb::new(
+                    r as f32 / 255.0,
+                    g as f32 / 255.0,
+                    b as f32 / 255.0,
+                    None,
+                )),
+            });
+            let mut swatch = PdfRect::from_wh(Pt(3.6 * MM_TO_PT), Pt(3.6 * MM_TO_PT));
+            swatch.x = Pt(x_swatch * MM_TO_PT);
+            swatch.y = Pt((y - 0.5) * MM_TO_PT);
+            ops.push(Op::DrawPolygon {
+                polygon: swatch.to_polygon(),
+            });
+
+            ops.push(Op::SetFillColor { col: black.clone() });
+            draw_summary_text(&mut ops, bold, fallback_bold, 9.0, x_code, y, &shot.code);
+            draw_summary_text(
+                &mut ops,
+                regular,
+                fallback_regular,
+                9.0,
+                x_size,
+                y,
+                shot.size.short(),
+            );
+            draw_summary_text(
+                &mut ops,
+                regular,
+                fallback_regular,
+                9.0,
+                x_move,
+                y,
+                shot.movement.label(),
+            );
+            let lens_txt = if shot.lens.trim().is_empty() {
+                "-"
+            } else {
+                shot.lens.trim()
+            };
+            draw_summary_text(
+                &mut ops,
+                regular,
+                fallback_regular,
+                9.0,
+                x_lens,
+                y,
+                lens_txt,
+            );
+
+            for (di, dline) in desc_lines.iter().enumerate() {
+                if di > 0 {
+                    y -= line_h * 0.85;
+                }
+                draw_summary_text(&mut ops, regular, fallback_regular, 9.0, x_desc, y, dline);
+            }
+            if !excerpt_lines.is_empty() {
+                ops.push(Op::SetFillColor { col: muted.clone() });
+                for eline in &excerpt_lines {
+                    y -= line_h * 0.82;
+                    draw_summary_text(&mut ops, regular, fallback_regular, 8.2, x_desc, y, eline);
+                }
+            }
+            y -= line_h;
+        }
+        y -= 2.5;
+    }
+
+    // Any shots not linked to a scene heading
+    for shot in &p.shots.shots {
+        if rendered_ids.contains(&shot.id) {
+            continue;
+        }
+        if y - line_h * 2.0 < bottom {
+            flush_new_page(&mut pages, &mut ops, &mut y);
+        }
+        let (r, g, b) = shot.color.rgb();
+        ops.push(Op::SetFillColor {
+            col: Color::Rgb(Rgb::new(
+                r as f32 / 255.0,
+                g as f32 / 255.0,
+                b as f32 / 255.0,
+                None,
+            )),
+        });
+        let mut swatch = PdfRect::from_wh(Pt(3.6 * MM_TO_PT), Pt(3.6 * MM_TO_PT));
+        swatch.x = Pt(x_swatch * MM_TO_PT);
+        swatch.y = Pt((y - 0.5) * MM_TO_PT);
+        ops.push(Op::DrawPolygon {
+            polygon: swatch.to_polygon(),
+        });
+        ops.push(Op::SetFillColor { col: black.clone() });
+        draw_summary_text(&mut ops, bold, fallback_bold, 9.0, x_code, y, &shot.code);
+        draw_summary_text(
+            &mut ops,
+            regular,
+            fallback_regular,
+            9.0,
+            x_size,
+            y,
+            shot.size.short(),
+        );
+        draw_summary_text(
+            &mut ops,
+            regular,
+            fallback_regular,
+            9.0,
+            x_desc,
+            y,
+            &shot.description,
+        );
+        y -= line_h;
+    }
+
+    pages.push(ops);
+    pages
 }
 
 #[cfg(test)]

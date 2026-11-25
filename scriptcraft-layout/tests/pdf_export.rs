@@ -426,3 +426,75 @@ fn liberation_mono_exports_latin_and_cyrillic() {
         "the PDF must embed Liberation Mono"
     );
 }
+
+#[test]
+fn colored_script_and_shot_list_pdfs_render_with_legend() {
+    use scriptcraft_core::shots::{ShotMovement, ShotRange, ShotSize};
+
+    let mut p = kitsp::load_file(FIXTURE).expect("load A95");
+    let meta = kitsp::load_metadata(FIXTURE).expect("load metadata");
+    let scenes = p.scenes();
+    let s0 = &scenes[0];
+    let start_id = p.blocks[s0.blocks[1]].id;
+    let end_id = p.blocks[s0.blocks[3.min(s0.blocks.len() - 1)]].id;
+    p.shots.add_shot(
+        Some(s0.id),
+        "1",
+        ShotSize::Ws,
+        ShotMovement::Dolly,
+        "28mm".into(),
+        "Wide establishing master".into(),
+        ShotRange::blocks(start_id, end_id),
+    );
+    p.shots.add_shot(
+        Some(s0.id),
+        "1",
+        ShotSize::Cu,
+        ShotMovement::Static,
+        "85mm".into(),
+        "Close on Ivan".into(),
+        ShotRange::blocks(end_id, end_id),
+    );
+
+    let read = |name: &str| {
+        std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../scriptcraft-app/assets/fonts")
+                .join(name),
+        )
+        .expect("font")
+    };
+    let fonts = scriptcraft_layout::pdf::ExportFonts {
+        regular: &read("CourierPrime-Regular.ttf"),
+        bold: &read("CourierPrime-Bold.ttf"),
+        italic: Some(&read("CourierPrime-Italic.ttf")),
+        fallback_regular: &read("IBMPlexMono-Regular.ttf"),
+        fallback_bold: &read("IBMPlexMono-Bold.ttf"),
+        fallback_italic: Some(&read("LiberationMono-Italic.ttf")),
+    };
+    let opts = scriptcraft_layout::pdf::ExportOptions::default();
+
+    let colored = scriptcraft_layout::pdf::to_colored_script_pdf_bytes(&p, &meta, &opts, &fonts)
+        .expect("colored script PDF renders");
+    let doc = lopdf::Document::load_mem(&colored).expect("colored PDF parses");
+    // Title page + 1 Shot Legend page + all script pages
+    assert_eq!(
+        doc.get_pages().len(),
+        scriptcraft_layout::pdf::layout_pages(&p, &meta, &opts).len() + 2
+    );
+    let page1_text = doc.extract_text(&[1]).unwrap_or_default();
+    assert!(
+        page1_text.contains("SHOT LEGEND") && page1_text.contains("1A"),
+        "legend page must list shot 1A: {page1_text}"
+    );
+
+    let list_pdf = scriptcraft_layout::pdf::to_shot_list_pdf_bytes(&p, &meta, &opts, &fonts)
+        .expect("shot list PDF renders");
+    let list_doc = lopdf::Document::load_mem(&list_pdf).expect("shot list PDF parses");
+    assert!(!list_doc.get_pages().is_empty());
+    let list_text = list_doc.extract_text(&[1]).unwrap_or_default();
+    assert!(
+        list_text.contains("SHOT LIST") && list_text.contains("28mm"),
+        "shot list PDF must contain shots and lens: {list_text}"
+    );
+}
