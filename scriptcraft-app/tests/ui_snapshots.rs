@@ -920,6 +920,7 @@ fn seed_demo_floor_plan(app: &mut ScriptCraftApp, ids: [uuid::Uuid; 4]) {
             y: 3.1,
             angle_deg: -46.0,
             fov_deg: None,
+            cone_length: Some(3.1),
             track_to: Some((-1.1, 2.3)),
         },
         PlanCamera {
@@ -928,6 +929,7 @@ fn seed_demo_floor_plan(app: &mut ScriptCraftApp, ids: [uuid::Uuid; 4]) {
             y: 2.4,
             angle_deg: -72.0,
             fov_deg: None,
+            cone_length: None,
             track_to: None,
         },
         PlanCamera {
@@ -936,6 +938,7 @@ fn seed_demo_floor_plan(app: &mut ScriptCraftApp, ids: [uuid::Uuid; 4]) {
             y: 1.7,
             angle_deg: -145.0,
             fov_deg: None,
+            cone_length: Some(2.8),
             track_to: None,
         },
         PlanCamera {
@@ -944,6 +947,7 @@ fn seed_demo_floor_plan(app: &mut ScriptCraftApp, ids: [uuid::Uuid; 4]) {
             y: 1.5,
             angle_deg: -28.0,
             fov_deg: None,
+            cone_length: Some(2.1),
             track_to: None,
         },
     ];

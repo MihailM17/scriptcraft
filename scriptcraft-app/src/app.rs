@@ -2421,6 +2421,12 @@ impl ScriptCraftApp {
         self.settings.bold_character_cues
     }
 
+    /// Current script zoom factor inside the Shots workspace (tests).
+    #[doc(hidden)]
+    pub fn shots_script_zoom_for_test(&self) -> f32 {
+        self.shots_ui.script_zoom
+    }
+
     /// Toggle automatic bold speaking character cues (tests).
     #[doc(hidden)]
     pub fn set_bold_character_cues_for_test(&mut self, on: bool) {
@@ -6461,16 +6467,28 @@ impl ScriptCraftApp {
             MenuCommand::ToggleFormatPanel => self.show_format_panel = !self.show_format_panel,
             MenuCommand::ToggleTypewriter => self.typewriter = !self.typewriter,
             MenuCommand::ZoomIn => {
-                self.fit = FitMode::Off;
-                self.zoom = (self.zoom * 1.1).min(4.0);
+                if self.side_tab == SideTab::Shots {
+                    self.shots_ui.zoom_in();
+                } else {
+                    self.fit = FitMode::Off;
+                    self.zoom = (self.zoom * 1.1).min(4.0);
+                }
             }
             MenuCommand::ZoomOut => {
-                self.fit = FitMode::Off;
-                self.zoom = (self.zoom / 1.1).max(0.25);
+                if self.side_tab == SideTab::Shots {
+                    self.shots_ui.zoom_out();
+                } else {
+                    self.fit = FitMode::Off;
+                    self.zoom = (self.zoom / 1.1).max(0.25);
+                }
             }
             MenuCommand::ZoomReset => {
-                self.fit = FitMode::Off;
-                self.zoom = 1.0;
+                if self.side_tab == SideTab::Shots {
+                    self.shots_ui.zoom_reset();
+                } else {
+                    self.fit = FitMode::Off;
+                    self.zoom = 1.0;
+                }
             }
             MenuCommand::ZoomFitPage => self.fit = FitMode::Page,
             MenuCommand::ZoomFitWidth => self.fit = FitMode::Width,
@@ -6694,16 +6712,28 @@ impl ScriptCraftApp {
                 menu::ID_FORMAT_PANEL => self.show_format_panel = !self.show_format_panel,
                 menu::ID_TYPEWRITER => self.typewriter = !self.typewriter,
                 menu::ID_ZOOM_IN => {
-                    self.fit = FitMode::Off;
-                    self.zoom = (self.zoom * 1.1).min(4.0);
+                    if self.side_tab == SideTab::Shots {
+                        self.shots_ui.zoom_in();
+                    } else {
+                        self.fit = FitMode::Off;
+                        self.zoom = (self.zoom * 1.1).min(4.0);
+                    }
                 }
                 menu::ID_ZOOM_OUT => {
-                    self.fit = FitMode::Off;
-                    self.zoom = (self.zoom / 1.1).max(0.25);
+                    if self.side_tab == SideTab::Shots {
+                        self.shots_ui.zoom_out();
+                    } else {
+                        self.fit = FitMode::Off;
+                        self.zoom = (self.zoom / 1.1).max(0.25);
+                    }
                 }
                 menu::ID_ZOOM_RESET => {
-                    self.fit = FitMode::Off;
-                    self.zoom = 1.0;
+                    if self.side_tab == SideTab::Shots {
+                        self.shots_ui.zoom_reset();
+                    } else {
+                        self.fit = FitMode::Off;
+                        self.zoom = 1.0;
+                    }
                 }
                 menu::ID_ZOOM_FIT_PAGE => self.fit = FitMode::Page,
                 menu::ID_ZOOM_FIT_WIDTH => self.fit = FitMode::Width,
@@ -7097,6 +7127,7 @@ impl ScriptCraftApp {
                 title: &self.title,
                 research: &self.research,
                 has_revisions: !self.revisions.is_empty(),
+                has_shots: self.project.as_ref().is_some_and(|p| !p.shots.is_empty()),
                 open: &mut self.show_export,
                 tab: &mut self.export_tab,
                 format: &mut self.export_format,
@@ -8159,8 +8190,28 @@ impl ScriptCraftApp {
         let mut opts = self.export_options.clone();
         opts.page_size = self.settings.page_size;
         opts.bold_character_cues = self.settings.bold_character_cues;
+        opts.color_by_shots = true;
+        opts.include_shot_legend = true;
+        if self.revisions.is_empty() {
+            opts.revision_marks = false;
+            opts.revision_pages_only = false;
+        }
+        opts.watermark = if self.export_watermark_on {
+            let text = self.export_watermark.trim();
+            Some(if text.is_empty() {
+                "DRAFT".to_string()
+            } else {
+                text.to_string()
+            })
+        } else {
+            None
+        };
+        let marks = self.revisions.latest_marks(&p.blocks).colors;
+        let latest = self.revisions.latest();
         let res = self.with_script_export_fonts(|fonts| {
-            scriptcraft_layout::pdf::to_colored_script_pdf_bytes(p, &self.meta, &opts, fonts)
+            scriptcraft_layout::pdf::to_pdf_bytes_with_marks_and_latest(
+                p, &self.meta, &opts, &marks, latest, fonts,
+            )
         });
         match res {
             Ok(bytes) => Some(bytes),

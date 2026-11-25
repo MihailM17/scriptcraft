@@ -498,3 +498,93 @@ fn colored_script_and_shot_list_pdfs_render_with_legend() {
         "shot list PDF must contain shots and lens: {list_text}"
     );
 }
+
+#[test]
+fn normal_export_color_by_shots_and_untruncated_shot_list_pdf() {
+    use scriptcraft_core::model::{ElementType, Project, ScriptBlock};
+    use scriptcraft_core::shots::{ShotMovement, ShotRange, ShotSize};
+    use scriptcraft_layout::pdf;
+
+    let long_desc = "Slow push-in from wide master through the doorway framing Ivan at the workbench with rain streaking down the glass behind him, holding beat until he turns to face Elena.";
+    let mut p = Project {
+        title: "ExportShots".into(),
+        blocks: vec![
+            ScriptBlock::new(
+                ElementType::SceneHeading,
+                "INT. ABANDONED ROOFTOP OBSERVATORY CONTROL ROOM - CONTINUOUS NIGHT".into(),
+            ),
+            ScriptBlock::new(
+                ElementType::Action,
+                "Ivan stares at the flickering neon sign while thunder rolls across the wet concrete courtyard outside.".into(),
+            ),
+        ],
+        ..Default::default()
+    };
+    let b1 = p.blocks[1].id;
+    let sid = p.shots.add_shot(
+        Some(p.blocks[0].id),
+        "1",
+        ShotSize::Ws,
+        ShotMovement::Dolly,
+        "28mm anamorphic".into(),
+        long_desc.into(),
+        ShotRange::blocks(b1, b1),
+    );
+    p.shots.get_mut(sid).unwrap().code = "ROOFTOP-MASTER-WIDE-01A".into();
+
+    let read = |name: &str| {
+        std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../scriptcraft-app/assets/fonts")
+                .join(name),
+        )
+        .expect("font")
+    };
+    let fonts = pdf::ExportFonts {
+        regular: &read("CourierPrime-Regular.ttf"),
+        bold: &read("CourierPrime-Bold.ttf"),
+        italic: Some(&read("CourierPrime-Italic.ttf")),
+        fallback_regular: &read("IBMPlexMono-Regular.ttf"),
+        fallback_bold: &read("IBMPlexMono-Bold.ttf"),
+        fallback_italic: Some(&read("LiberationMono-Italic.ttf")),
+    };
+    let meta = kitsp::Metadata::default();
+
+    // 1. Normal export colored by shots WITHOUT legend page
+    let opts_no_legend = pdf::ExportOptions {
+        title_page: false,
+        color_by_shots: true,
+        include_shot_legend: false,
+        ..Default::default()
+    };
+    let pdf_no =
+        pdf::to_pdf_bytes(&p, &meta, &opts_no_legend, &fonts).expect("colored without legend");
+    let doc_no = lopdf::Document::load_mem(&pdf_no).expect("parse no-legend pdf");
+
+    // 2. Normal export colored by shots WITH legend page
+    let opts_with_legend = pdf::ExportOptions {
+        include_shot_legend: true,
+        ..opts_no_legend.clone()
+    };
+    let pdf_with =
+        pdf::to_pdf_bytes(&p, &meta, &opts_with_legend, &fonts).expect("colored with legend");
+    let doc_with = lopdf::Document::load_mem(&pdf_with).expect("parse with-legend pdf");
+    assert_eq!(
+        doc_with.get_pages().len(),
+        doc_no.get_pages().len() + 1,
+        "include_shot_legend must add the Shot Legend page"
+    );
+
+    // 3. Dedicated Shot List PDF preserves wrapped long description and long custom shot code
+    let list_pdf = pdf::to_shot_list_pdf_bytes(&p, &meta, &pdf::ExportOptions::default(), &fonts)
+        .expect("shot list pdf");
+    let list_doc = lopdf::Document::load_mem(&list_pdf).expect("parse shot list pdf");
+    let mut all_text = String::new();
+    for pg in list_doc.get_pages().keys() {
+        all_text.push_str(&list_doc.extract_text(&[*pg]).unwrap_or_default());
+    }
+    assert!(
+        all_text.contains("Elena") && all_text.contains("ROOFTOP-"),
+        "long description end and long code must wrap instead of being cut off: {all_text}"
+    );
+}

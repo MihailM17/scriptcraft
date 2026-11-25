@@ -4052,3 +4052,56 @@ fn floor_plan_auto_populates_adds_props_and_persists_across_save() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Shots script zoom controls (`-`/`100%`/`+`), darker color swatches, and
+/// normal Export dialog `"Color script by shots"` option all work end-to-end.
+#[test]
+fn shots_script_zoom_dark_colors_and_export_dialog_color_by_shots() {
+    let mut h = harness(SideTab::Script);
+    h.run();
+
+    h.get_by_label("Shots").click();
+    h.run();
+
+    // 1. Zoom in, reset, and zoom out in Shots script view
+    assert!((h.state().shots_script_zoom_for_test() - 1.0).abs() < 1e-4);
+    h.get_by_label("Zoom in script").click();
+    h.run();
+    assert!(
+        h.state().shots_script_zoom_for_test() > 1.05,
+        "zoom in must increase script_zoom"
+    );
+    h.get_by_label("Reset script zoom").click();
+    h.run();
+    assert!((h.state().shots_script_zoom_for_test() - 1.0).abs() < 1e-4);
+    h.get_by_label("Zoom out script").click();
+    h.run();
+    assert!(
+        h.state().shots_script_zoom_for_test() < 0.95,
+        "zoom out must decrease script_zoom"
+    );
+
+    // 2. Add a shot and pick one of the 10 new darker color variants
+    h.state_mut()
+        .set_shots_char_selection_for_test((1, 0), (1, 20));
+    h.run();
+    h.get_by_label("+ New Shot (1A)").click();
+    h.run();
+    h.get_by_label("Color Dark Cobalt").click();
+    h.run();
+    assert_eq!(
+        h.state().project_for_test().unwrap().shots.shots[0].color,
+        scriptcraft_core::shots::ShotColor::Navy
+    );
+
+    // 3. Normal Export dialog offers "Color script by shots" when shots exist
+    open_file_menu(&mut h);
+    h.get_by_label("Export…").click();
+    h.run();
+    h.get_by_label("Color script by shots").click_accesskit();
+    h.run();
+    assert!(
+        h.query_by_label("Include shot legend page").is_some(),
+        "nested legend option must appear when Color script by shots is enabled"
+    );
+}

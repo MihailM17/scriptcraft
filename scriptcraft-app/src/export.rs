@@ -47,6 +47,7 @@ pub struct ExportDialog<'a> {
     pub title: &'a str,
     pub research: &'a [kitsp::ResearchEntry],
     pub has_revisions: bool,
+    pub has_shots: bool,
     pub open: &'a mut bool,
     pub tab: &'a mut ExportTab,
     pub format: &'a mut ExportFormat,
@@ -78,11 +79,16 @@ pub fn dialog(ctx: &Context, state: &mut ExportDialog<'_>) -> ExportAction {
     let mut do_export = false;
     let mut browse = false;
     let mut action = ExportAction::None;
+    let win_h = if state.has_shots && *state.additional {
+        544.0
+    } else {
+        500.0
+    };
     egui::Window::new("Export Scenario")
         .open(&mut win_open)
         .collapsible(false)
         .resizable(false)
-        .fixed_size(egui::vec2(560.0, 500.0))
+        .fixed_size(egui::vec2(560.0, win_h))
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
         .show(ctx, |ui| {
             let c = kit();
@@ -184,6 +190,25 @@ pub fn dialog(ctx: &Context, state: &mut ExportDialog<'_>) -> ExportAction {
                         }
                     });
                     ui.add_space(8.0);
+                    if state.has_shots && *state.format == ExportFormat::Pdf {
+                        ui.checkbox(
+                            &mut state.options.color_by_shots,
+                            "Color script by shots",
+                        )
+                        .on_hover_text(
+                            "Highlight screenplay lines with their assigned shot colors and margin tags",
+                        );
+                        if state.options.color_by_shots {
+                            ui.horizontal(|ui| {
+                                ui.add_space(18.0);
+                                ui.checkbox(
+                                    &mut state.options.include_shot_legend,
+                                    "Include shot legend page",
+                                );
+                            });
+                        }
+                        ui.add_space(4.0);
+                    }
                     ui.checkbox(state.additional, "Additional (Numbering, Title Page etc.)");
                     if *state.additional {
                         ui.add_space(6.0);

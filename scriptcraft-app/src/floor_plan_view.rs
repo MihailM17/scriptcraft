@@ -28,6 +28,14 @@ pub enum PlanSelection {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PropEdge {
+    Left,
+    Right,
+    Top,
+    Bottom,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum DragKind {
     Pan,
     MoveCamera(Uuid),
@@ -38,6 +46,7 @@ enum DragKind {
     MoveActorTarget(Uuid),
     MoveProp(Uuid),
     RotateProp(Uuid),
+    ResizeProp(Uuid, PropEdge),
 }
 
 /// Persistent UI state for the 2D floor plan canvas.
@@ -138,6 +147,14 @@ fn screen_to_world(center: Pos2, pan: Vec2, zoom: f32, p: Pos2) -> Vec2 {
 fn rot2(x: f32, y: f32, angle_rad: f32) -> Vec2 {
     let (s, c) = angle_rad.sin_cos();
     Vec2::new(x * c - y * s, x * s + y * c)
+}
+
+fn snap_grid(v: f32) -> f32 {
+    (v * 2.0).round() * 0.5
+}
+
+fn snap_step(v: f32, step: f32) -> f32 {
+    (v / step).round() * step
 }
 
 /// Render the complete interactive Floor Plan panel (toolbar + vector canvas +
@@ -340,6 +357,8 @@ pub fn show(
         state.last_pan_pos = None;
     }
 
+    let snap_ctrl = ui.input(|i| i.modifiers.ctrl);
+
     if primary_pressed {
         if let Some(pos) = ptr_pos {
             if canvas_rect.contains(pos) {
@@ -385,10 +404,16 @@ pub fn show(
                 DragKind::MoveCamera(sid) => {
                     if let Some(plan) = project.shots.plan_for_scene_mut(scene_id) {
                         if let Some(cam) = plan.cameras.iter_mut().find(|c| c.shot_id == sid) {
-                            let dx = (wpos.x + state.drag_offset.x) - cam.x;
-                            let dy = (wpos.y + state.drag_offset.y) - cam.y;
-                            cam.x += dx;
-                            cam.y += dy;
+                            let mut nx = wpos.x + state.drag_offset.x;
+                            let mut ny = wpos.y + state.drag_offset.y;
+                            if snap_ctrl {
+                                nx = snap_grid(nx);
+                                ny = snap_grid(ny);
+                            }
+                            let dx = nx - cam.x;
+                            let dy = ny - cam.y;
+                            cam.x = nx;
+                            cam.y = ny;
                             if let Some((tx, ty)) = cam.track_to.as_mut() {
                                 *tx += dx;
                                 *ty += dy;
@@ -400,7 +425,16 @@ pub fn show(
                 DragKind::AimCamera(sid) => {
                     if let Some(plan) = project.shots.plan_for_scene_mut(scene_id) {
                         if let Some(cam) = plan.cameras.iter_mut().find(|c| c.shot_id == sid) {
-                            cam.angle_deg = (wpos.y - cam.y).atan2(wpos.x - cam.x).to_degrees();
+                            let dx = wpos.x - cam.x;
+                            let dy = wpos.y - cam.y;
+                            let mut deg = dy.atan2(dx).to_degrees();
+                            let mut dist = dx.hypot(dy).clamp(0.7, 12.0);
+                            if snap_ctrl {
+                                deg = snap_step(deg, 15.0);
+                                dist = snap_step(dist, 0.25).clamp(0.7, 12.0);
+                            }
+                            cam.angle_deg = deg;
+                            cam.cone_length = Some(dist);
                             changed = true;
                         }
                     }
@@ -408,7 +442,9 @@ pub fn show(
                 DragKind::MoveCameraTrack(sid) => {
                     if let Some(plan) = project.shots.plan_for_scene_mut(scene_id) {
                         if let Some(cam) = plan.cameras.iter_mut().find(|c| c.shot_id == sid) {
-                            cam.track_to = Some((wpos.x, wpos.y));
+                            let tx = if snap_ctrl { snap_grid(wpos.x) } else { wpos.x };
+                            let ty = if snap_ctrl { snap_grid(wpos.y) } else { wpos.y };
+                            cam.track_to = Some((tx, ty));
                             changed = true;
                         }
                     }
@@ -416,10 +452,16 @@ pub fn show(
                 DragKind::MoveActor(aid) => {
                     if let Some(plan) = project.shots.plan_for_scene_mut(scene_id) {
                         if let Some(actor) = plan.actors.iter_mut().find(|a| a.id == aid) {
-                            let dx = (wpos.x + state.drag_offset.x) - actor.x;
-                            let dy = (wpos.y + state.drag_offset.y) - actor.y;
-                            actor.x += dx;
-                            actor.y += dy;
+                            let mut nx = wpos.x + state.drag_offset.x;
+                            let mut ny = wpos.y + state.drag_offset.y;
+                            if snap_ctrl {
+                                nx = snap_grid(nx);
+                                ny = snap_grid(ny);
+                            }
+                            let dx = nx - actor.x;
+                            let dy = ny - actor.y;
+                            actor.x = nx;
+                            actor.y = ny;
                             if let Some((mx, my)) = actor.move_to.as_mut() {
                                 *mx += dx;
                                 *my += dy;
@@ -431,8 +473,11 @@ pub fn show(
                 DragKind::AimActor(aid) => {
                     if let Some(plan) = project.shots.plan_for_scene_mut(scene_id) {
                         if let Some(actor) = plan.actors.iter_mut().find(|a| a.id == aid) {
-                            actor.angle_deg =
-                                (wpos.y - actor.y).atan2(wpos.x - actor.x).to_degrees();
+                            let mut deg = (wpos.y - actor.y).atan2(wpos.x - actor.x).to_degrees();
+                            if snap_ctrl {
+                                deg = snap_step(deg, 15.0);
+                            }
+                            actor.angle_deg = deg;
                             changed = true;
                         }
                     }
@@ -440,7 +485,9 @@ pub fn show(
                 DragKind::MoveActorTarget(aid) => {
                     if let Some(plan) = project.shots.plan_for_scene_mut(scene_id) {
                         if let Some(actor) = plan.actors.iter_mut().find(|a| a.id == aid) {
-                            actor.move_to = Some((wpos.x, wpos.y));
+                            let mx = if snap_ctrl { snap_grid(wpos.x) } else { wpos.x };
+                            let my = if snap_ctrl { snap_grid(wpos.y) } else { wpos.y };
+                            actor.move_to = Some((mx, my));
                             changed = true;
                         }
                     }
@@ -448,8 +495,14 @@ pub fn show(
                 DragKind::MoveProp(pid) => {
                     if let Some(plan) = project.shots.plan_for_scene_mut(scene_id) {
                         if let Some(prop) = plan.props.iter_mut().find(|p| p.id == pid) {
-                            prop.x = wpos.x + state.drag_offset.x;
-                            prop.y = wpos.y + state.drag_offset.y;
+                            let mut nx = wpos.x + state.drag_offset.x;
+                            let mut ny = wpos.y + state.drag_offset.y;
+                            if snap_ctrl {
+                                nx = snap_grid(nx);
+                                ny = snap_grid(ny);
+                            }
+                            prop.x = nx;
+                            prop.y = ny;
                             changed = true;
                         }
                     }
@@ -457,7 +510,72 @@ pub fn show(
                 DragKind::RotateProp(pid) => {
                     if let Some(plan) = project.shots.plan_for_scene_mut(scene_id) {
                         if let Some(prop) = plan.props.iter_mut().find(|p| p.id == pid) {
-                            prop.angle_deg = (wpos.y - prop.y).atan2(wpos.x - prop.x).to_degrees();
+                            let mut deg = (wpos.y - prop.y).atan2(wpos.x - prop.x).to_degrees();
+                            if snap_ctrl {
+                                deg = snap_step(deg, 15.0);
+                            }
+                            prop.angle_deg = deg;
+                            changed = true;
+                        }
+                    }
+                }
+                DragKind::ResizeProp(pid, edge) => {
+                    if let Some(plan) = project.shots.plan_for_scene_mut(scene_id) {
+                        if let Some(prop) = plan.props.iter_mut().find(|p| p.id == pid) {
+                            let rad = prop.angle_deg.to_radians();
+                            let local = rot2(wpos.x - prop.x, wpos.y - prop.y, -rad);
+                            let hw = prop.w * 0.5;
+                            let hh = prop.h * 0.5;
+                            match edge {
+                                PropEdge::Right => {
+                                    let mut new_w = local.x + hw;
+                                    if snap_ctrl {
+                                        new_w = snap_step(new_w, 0.25);
+                                    }
+                                    new_w = new_w.clamp(0.25, 20.0);
+                                    let delta = new_w - prop.w;
+                                    let shift = rot2(delta * 0.5, 0.0, rad);
+                                    prop.x += shift.x;
+                                    prop.y += shift.y;
+                                    prop.w = new_w;
+                                }
+                                PropEdge::Left => {
+                                    let mut new_w = hw - local.x;
+                                    if snap_ctrl {
+                                        new_w = snap_step(new_w, 0.25);
+                                    }
+                                    new_w = new_w.clamp(0.25, 20.0);
+                                    let delta = new_w - prop.w;
+                                    let shift = rot2(-delta * 0.5, 0.0, rad);
+                                    prop.x += shift.x;
+                                    prop.y += shift.y;
+                                    prop.w = new_w;
+                                }
+                                PropEdge::Bottom => {
+                                    let mut new_h = local.y + hh;
+                                    if snap_ctrl {
+                                        new_h = snap_step(new_h, 0.25);
+                                    }
+                                    new_h = new_h.clamp(0.15, 20.0);
+                                    let delta = new_h - prop.h;
+                                    let shift = rot2(0.0, delta * 0.5, rad);
+                                    prop.x += shift.x;
+                                    prop.y += shift.y;
+                                    prop.h = new_h;
+                                }
+                                PropEdge::Top => {
+                                    let mut new_h = hh - local.y;
+                                    if snap_ctrl {
+                                        new_h = snap_step(new_h, 0.25);
+                                    }
+                                    new_h = new_h.clamp(0.15, 20.0);
+                                    let delta = new_h - prop.h;
+                                    let shift = rot2(0.0, -delta * 0.5, rad);
+                                    prop.x += shift.x;
+                                    prop.y += shift.y;
+                                    prop.h = new_h;
+                                }
+                            }
                             changed = true;
                         }
                     }
@@ -518,7 +636,7 @@ pub fn show(
     }
 
     // Architectural scale indicator in bottom-left corner of canvas
-    paint_scale_bar(&p, canvas_rect, state.zoom);
+    paint_scale_bar(&p, canvas_rect, state.zoom, snap_ctrl);
 
     // 3. Bottom contextual property strip for the selected canvas item
     if has_selection {
@@ -538,12 +656,24 @@ pub fn show(
                             if let Some(shot) = project.shots.get(sid) {
                                 let code = shot.code.clone();
                                 let lens = shot.lens.clone();
-                                let fov = project
+                                let (fov, mut beam_len, has_track) = project
                                     .shots
                                     .plan_for_scene(scene_id)
                                     .and_then(|pl| pl.cameras.iter().find(|c| c.shot_id == sid))
-                                    .and_then(|c| c.fov_deg)
-                                    .unwrap_or_else(|| lens_to_fov_deg(&lens));
+                                    .map(|c| {
+                                        (
+                                            c.fov_deg.unwrap_or_else(|| lens_to_fov_deg(&lens)),
+                                            c.effective_cone_length(),
+                                            c.track_to.is_some(),
+                                        )
+                                    })
+                                    .unwrap_or_else(|| {
+                                        (
+                                            lens_to_fov_deg(&lens),
+                                            scriptcraft_core::shots::DEFAULT_CAMERA_CONE_M,
+                                            false,
+                                        )
+                                    });
                                 let col = shot_color32(shot.color);
                                 let (dot, _) =
                                     ui.allocate_exact_size(Vec2::new(10.0, 10.0), Sense::hover());
@@ -555,34 +685,59 @@ pub fn show(
                                 } else {
                                     code.clone()
                                 };
+                                let narrow = ui.available_width() < 440.0;
+                                let lens_str = if lens.trim().is_empty() {
+                                    "35mm"
+                                } else {
+                                    lens.trim()
+                                };
+                                let cam_title = if narrow {
+                                    format!("{code_display} · {lens_str} · {fov:.0}°")
+                                } else {
+                                    format!(
+                                        "Camera {code_display}  ·  {lens_str}  ·  {fov:.0}° FOV"
+                                    )
+                                };
                                 ui.label(
-                                    RichText::new(format!(
-                                        "Camera {code_display}  ·  {}  ·  {:.0}° FOV",
-                                        if lens.trim().is_empty() {
-                                            "35mm"
-                                        } else {
-                                            lens.trim()
-                                        },
-                                        fov
-                                    ))
-                                    .size(12.0)
-                                    .strong()
-                                    .color(kit().heading_text),
+                                    RichText::new(cam_title)
+                                        .size(12.0)
+                                        .strong()
+                                        .color(kit().heading_text),
                                 );
 
-                                let has_track = project
-                                    .shots
-                                    .plan_for_scene(scene_id)
-                                    .and_then(|pl| pl.cameras.iter().find(|c| c.shot_id == sid))
-                                    .is_some_and(|c| c.track_to.is_some());
+                                ui.label(
+                                    RichText::new("Beam").size(11.0).color(kit().disabled_text),
+                                );
+                                if ui
+                                    .add(
+                                        egui::DragValue::new(&mut beam_len)
+                                            .speed(0.1)
+                                            .range(0.7..=12.0)
+                                            .fixed_decimals(1)
+                                            .suffix("m"),
+                                    )
+                                    .on_hover_text("Camera FOV beam length (or drag aim handle)")
+                                    .changed()
+                                {
+                                    if let Some(plan) = project.shots.plan_for_scene_mut(scene_id) {
+                                        if let Some(cam) =
+                                            plan.cameras.iter_mut().find(|c| c.shot_id == sid)
+                                        {
+                                            cam.cone_length = Some(beam_len.clamp(0.7, 12.0));
+                                            changed = true;
+                                        }
+                                    }
+                                }
 
+                                let track_label = match (has_track, narrow) {
+                                    (true, true) => "Clear Track",
+                                    (true, false) => "Clear Dolly Track",
+                                    (false, true) => "+ Track",
+                                    (false, false) => "+ Dolly Track",
+                                };
                                 if tool_chip(
                                     ui,
-                                    if has_track {
-                                        "Clear Dolly Track"
-                                    } else {
-                                        "+ Dolly Track"
-                                    },
+                                    track_label,
                                     has_track,
                                     "Toggle camera movement track arrow",
                                 )
@@ -606,11 +761,11 @@ pub fn show(
                                     }
                                 }
 
-                                if ui.available_width() > 235.0 {
+                                if ui.available_width() > 215.0 {
                                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                         ui.label(
                                             RichText::new(
-                                                "Drag camera or aim dot · Edit lens in Inspector",
+                                                "Drag aim dot for angle & beam · Hold Ctrl to snap",
                                             )
                                             .size(11.0)
                                             .color(kit().disabled_text),
@@ -803,17 +958,18 @@ fn hit_test_plan(
     let plan = project.shots.plan_for_scene(scene_id)?;
     let wpos = screen_to_world(center, pan, zoom, pos);
 
-    // 1. Check active selection handles first (aim / rotate / motion endpoints)
+    // 1. Check active selection handles first (aim / rotate / resize / motion endpoints)
     match selected {
         Some(PlanSelection::Camera(sid)) => {
             if let Some(cam) = plan.cameras.iter().find(|c| c.shot_id == sid) {
                 let rad = cam.angle_deg.to_radians();
+                let cone_dist = cam.effective_cone_length();
                 let aim_p = world_to_screen(
                     center,
                     pan,
                     zoom,
-                    cam.x + rad.cos() * 1.45,
-                    cam.y + rad.sin() * 1.45,
+                    cam.x + rad.cos() * cone_dist,
+                    cam.y + rad.sin() * cone_dist,
                 );
                 if aim_p.distance(pos) <= 13.0 {
                     return Some((
@@ -866,20 +1022,35 @@ fn hit_test_plan(
         Some(PlanSelection::Prop(pid)) => {
             if let Some(prop) = plan.props.iter().find(|p| p.id == pid) {
                 let rad = prop.angle_deg.to_radians();
-                let handle_dist = prop.w * 0.5 + 0.55;
-                let hp = world_to_screen(
-                    center,
-                    pan,
-                    zoom,
-                    prop.x + rad.cos() * handle_dist,
-                    prop.y + rad.sin() * handle_dist,
-                );
-                if hp.distance(pos) <= 13.0 {
+                let hw = prop.w * 0.5;
+                let hh = prop.h * 0.5;
+                let to_pt = |lx: f32, ly: f32| -> Pos2 {
+                    let r = rot2(lx, ly, rad);
+                    world_to_screen(center, pan, zoom, prop.x + r.x, prop.y + r.y)
+                };
+                // Rotate handle (outside right edge)
+                let hp = to_pt(hw + 0.65, 0.0);
+                if hp.distance(pos) <= 12.0 {
                     return Some((
                         PlanSelection::Prop(pid),
                         DragKind::RotateProp(pid),
                         Vec2::ZERO,
                     ));
+                }
+                // 4 interactive edge resize handles (Left / Right / Top / Bottom)
+                for (edge, lx, ly) in [
+                    (PropEdge::Right, hw, 0.0),
+                    (PropEdge::Left, -hw, 0.0),
+                    (PropEdge::Top, 0.0, -hh),
+                    (PropEdge::Bottom, 0.0, hh),
+                ] {
+                    if to_pt(lx, ly).distance(pos) <= 10.5 {
+                        return Some((
+                            PlanSelection::Prop(pid),
+                            DragKind::ResizeProp(pid, edge),
+                            Vec2::ZERO,
+                        ));
+                    }
                 }
             }
         }
@@ -1254,13 +1425,26 @@ fn paint_prop(
         );
     }
 
-    // Rotate handle when selected
+    // Interactive resize & rotate handles when selected
     if selected {
-        let handle = to_pt(hw + 0.55, 0.0);
-        let edge = to_pt(hw, 0.0);
-        p.line_segment([edge, handle], Stroke::new(1.2_f32, kit().accent));
-        p.circle_filled(handle, 5.0, kit().accent);
-        p.circle_stroke(handle, 5.0, Stroke::new(1.4_f32, kit().page));
+        let rot_handle = to_pt(hw + 0.65, 0.0);
+        let edge_r = to_pt(hw, 0.0);
+        p.line_segment([edge_r, rot_handle], Stroke::new(1.2_f32, kit().accent));
+        p.circle_filled(rot_handle, 5.0, kit().accent);
+        p.circle_stroke(rot_handle, 5.0, Stroke::new(1.4_f32, kit().page));
+
+        // 4 crisp square edge resize handles (Left, Right, Top, Bottom)
+        for (lx, ly) in [(-hw, 0.0), (hw, 0.0), (0.0, -hh), (0.0, hh)] {
+            let hp = to_pt(lx, ly);
+            let sq = Rect::from_center_size(hp, Vec2::splat(7.5));
+            p.rect_filled(sq, CornerRadius::same(1), kit().page);
+            p.rect_stroke(
+                sq,
+                CornerRadius::same(1),
+                Stroke::new(1.6_f32, kit().accent),
+                StrokeKind::Inside,
+            );
+        }
     }
 }
 
@@ -1403,8 +1587,8 @@ fn paint_camera(
     let fov_deg = cam.fov_deg.unwrap_or_else(|| lens_to_fov_deg(&shot.lens));
     let half_fov = (fov_deg * 0.5).to_radians();
 
-    // 1. Live focal-length FOV cone
-    let cone_dist_m = 3.4_f32;
+    // 1. Live focal-length FOV cone (with editable beam length)
+    let cone_dist_m = cam.effective_cone_length();
     let steps = 10usize;
     let mut wedge = Vec::with_capacity(steps + 2);
     wedge.push(cp);
@@ -1549,21 +1733,21 @@ fn paint_camera(
         );
     }
 
-    // 4. Interactive Aim Handle dot when selected
+    // 4. Interactive Aim + Beam Length Handle dot at tip of optical axis when selected
     if selected {
         let aim = world_to_screen(
             center,
             pan,
             zoom,
-            cam.x + rad.cos() * 1.45,
-            cam.y + rad.sin() * 1.45,
+            cam.x + rad.cos() * cone_dist_m,
+            cam.y + rad.sin() * cone_dist_m,
         );
         p.circle_filled(aim, 5.5, col);
         p.circle_stroke(aim, 5.5, Stroke::new(1.8_f32, kit().heading_text));
     }
 }
 
-fn paint_scale_bar(p: &egui::Painter, rect: Rect, zoom: f32) {
+fn paint_scale_bar(p: &egui::Painter, rect: Rect, zoom: f32, snap_active: bool) {
     let x0 = rect.left() + 14.0;
     let y0 = rect.bottom() - 16.0;
     let bar_w = zoom.clamp(24.0, 120.0);
@@ -1590,4 +1774,24 @@ fn paint_scale_bar(p: &egui::Painter, rect: Rect, zoom: f32) {
         FontId::monospace(10.0),
         col,
     );
+    if snap_active {
+        let g = p.layout_no_wrap(
+            "SNAP · 0.5m / 15°".into(),
+            FontId::monospace(10.0),
+            ink_on_accent(kit().accent),
+        );
+        let pill = Rect::from_min_size(
+            Pos2::new(x0 + bar_w + 12.0, y0 - 15.0),
+            g.size() + Vec2::new(10.0, 4.0),
+        );
+        p.rect_filled(pill, CornerRadius::same(4), kit().accent);
+        p.galley(
+            Pos2::new(
+                pill.center().x - g.size().x * 0.5,
+                pill.center().y - g.size().y * 0.5,
+            ),
+            g,
+            Color32::TRANSPARENT,
+        );
+    }
 }

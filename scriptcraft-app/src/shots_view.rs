@@ -62,8 +62,10 @@ impl ShotsViewMode {
     }
 }
 
+pub const SCRIPT_ZOOM_MIN: f32 = 0.65;
+pub const SCRIPT_ZOOM_MAX: f32 = 2.0;
+
 /// Persistent UI state for the Shots workspace.
-#[derive(Default)]
 pub struct ShotsUiState {
     pub selected_scene: usize,
     pub selected_shot: Option<Uuid>,
@@ -73,7 +75,24 @@ pub struct ShotsUiState {
     pub sel_focus: Option<(usize, usize)>,
     pub view_mode: ShotsViewMode,
     pub floor_plan: crate::floor_plan_view::FloorPlanUiState,
+    /// Zoom factor for the script view inside the Shots tab (`1.0` = 100%).
+    pub script_zoom: f32,
     dragging_selection: bool,
+}
+
+impl Default for ShotsUiState {
+    fn default() -> Self {
+        Self {
+            selected_scene: 0,
+            selected_shot: None,
+            sel_anchor: None,
+            sel_focus: None,
+            view_mode: ShotsViewMode::default(),
+            floor_plan: crate::floor_plan_view::FloorPlanUiState::default(),
+            script_zoom: 1.0,
+            dragging_selection: false,
+        }
+    }
 }
 
 impl ShotsUiState {
@@ -82,9 +101,34 @@ impl ShotsUiState {
         self.selected_shot = None;
         self.sel_anchor = None;
         self.sel_focus = None;
+        self.script_zoom = 1.0;
         self.dragging_selection = false;
         self.floor_plan.selected = None;
         self.floor_plan.reset_view();
+    }
+
+    pub fn zoom_in(&mut self) {
+        if self.view_mode == ShotsViewMode::FloorPlan {
+            self.floor_plan.zoom = (self.floor_plan.zoom * 1.15).clamp(22.0, 140.0);
+        } else {
+            self.script_zoom = (self.script_zoom + 0.1).clamp(SCRIPT_ZOOM_MIN, SCRIPT_ZOOM_MAX);
+        }
+    }
+
+    pub fn zoom_out(&mut self) {
+        if self.view_mode == ShotsViewMode::FloorPlan {
+            self.floor_plan.zoom = (self.floor_plan.zoom / 1.15).clamp(22.0, 140.0);
+        } else {
+            self.script_zoom = (self.script_zoom - 0.1).clamp(SCRIPT_ZOOM_MIN, SCRIPT_ZOOM_MAX);
+        }
+    }
+
+    pub fn zoom_reset(&mut self) {
+        if self.view_mode == ShotsViewMode::FloorPlan {
+            self.floor_plan.reset_view();
+        } else {
+            self.script_zoom = 1.0;
+        }
     }
 
     /// Ordered non-empty character selection `((lo_block, lo_char), (hi_block, hi_char))`.
@@ -309,6 +353,98 @@ pub fn show(
                             .color(kit().text),
                         );
                     });
+
+                // Script zoom controls (shown whenever the script pane is visible)
+                if state.view_mode != ShotsViewMode::FloorPlan {
+                    egui::Frame::new()
+                        .fill(kit().base)
+                        .stroke(Stroke::new(1.0_f32, kit().stroke))
+                        .corner_radius(CornerRadius::same(6))
+                        .inner_margin(Margin::same(2))
+                        .show(ui, |ui| {
+                            ui.spacing_mut().item_spacing.x = 1.0;
+                            let can_out = state.script_zoom > SCRIPT_ZOOM_MIN + 1e-3;
+                            let minus = ui
+                                .add_enabled(
+                                    can_out,
+                                    egui::Button::new(
+                                        RichText::new("-").size(12.5).strong().color(if can_out {
+                                            kit().text
+                                        } else {
+                                            kit().disabled_text
+                                        }),
+                                    )
+                                    .fill(Color32::TRANSPARENT)
+                                    .stroke(Stroke::NONE)
+                                    .corner_radius(CornerRadius::same(4))
+                                    .min_size(Vec2::new(22.0, 22.0)),
+                                )
+                                .on_hover_text("Zoom out script");
+                            minus.widget_info(|| {
+                                egui::WidgetInfo::labeled(
+                                    egui::WidgetType::Button,
+                                    can_out,
+                                    "Zoom out script",
+                                )
+                            });
+                            if minus.clicked() {
+                                state.zoom_out();
+                            }
+
+                            let pct = (state.script_zoom * 100.0).round() as i32;
+                            let reset = ui
+                                .add(
+                                    egui::Button::new(
+                                        RichText::new(format!("{pct}%"))
+                                            .font(FontId::monospace(11.0))
+                                            .color(kit().text),
+                                    )
+                                    .fill(Color32::TRANSPARENT)
+                                    .stroke(Stroke::NONE)
+                                    .corner_radius(CornerRadius::same(4))
+                                    .min_size(Vec2::new(40.0, 22.0)),
+                                )
+                                .on_hover_text("Reset script zoom to 100%");
+                            reset.widget_info(|| {
+                                egui::WidgetInfo::labeled(
+                                    egui::WidgetType::Button,
+                                    true,
+                                    "Reset script zoom",
+                                )
+                            });
+                            if reset.clicked() {
+                                state.zoom_reset();
+                            }
+
+                            let can_in = state.script_zoom < SCRIPT_ZOOM_MAX - 1e-3;
+                            let plus = ui
+                                .add_enabled(
+                                    can_in,
+                                    egui::Button::new(
+                                        RichText::new("+").size(12.5).strong().color(if can_in {
+                                            kit().text
+                                        } else {
+                                            kit().disabled_text
+                                        }),
+                                    )
+                                    .fill(Color32::TRANSPARENT)
+                                    .stroke(Stroke::NONE)
+                                    .corner_radius(CornerRadius::same(4))
+                                    .min_size(Vec2::new(22.0, 22.0)),
+                                )
+                                .on_hover_text("Zoom in script");
+                            plus.widget_info(|| {
+                                egui::WidgetInfo::labeled(
+                                    egui::WidgetType::Button,
+                                    can_in,
+                                    "Zoom in script",
+                                )
+                            });
+                            if plus.clicked() {
+                                state.zoom_in();
+                            }
+                        });
+                }
 
                 // Right-aligned export actions
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -1109,42 +1245,44 @@ fn show_right_pane(
                 }
             });
 
-            // Row 2: 10-color studio swatch picker
+            // Row 2: 20-color studio swatch picker (10 standard + 10 darker variants)
             ui.label(RichText::new("Color").size(11.0).color(kit().disabled_text));
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(6.0, 6.0);
-                for color in ShotColor::ALL {
-                    let active = shot.color == color;
-                    let (rect, resp) =
-                        ui.allocate_exact_size(Vec2::new(22.0, 22.0), Sense::click());
-                    let resp = resp
-                        .on_hover_cursor(egui::CursorIcon::PointingHand)
-                        .on_hover_text(color.label());
-                    resp.widget_info(|| {
-                        egui::WidgetInfo::labeled(
-                            egui::WidgetType::Button,
-                            true,
-                            format!("Color {}", color.label()),
-                        )
-                    });
-                    let c = shot_color32(color);
-                    let p = ui.painter();
-                    if active {
-                        p.circle_stroke(
-                            rect.center(),
-                            10.0,
-                            Stroke::new(2.0_f32, kit().heading_text),
-                        );
-                    } else if resp.hovered() {
-                        p.circle_stroke(rect.center(), 10.0, Stroke::new(1.2_f32, kit().stroke));
+            for row_colors in [&ShotColor::ALL_STANDARD[..], &ShotColor::ALL_DARK[..]] {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 5.0;
+                    for &color in row_colors {
+                        let active = shot.color == color;
+                        let (rect, resp) =
+                            ui.allocate_exact_size(Vec2::new(21.0, 21.0), Sense::click());
+                        let resp = resp
+                            .on_hover_cursor(egui::CursorIcon::PointingHand)
+                            .on_hover_text(color.label());
+                        resp.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::WidgetType::Button,
+                                true,
+                                format!("Color {}", color.label()),
+                            )
+                        });
+                        let c = shot_color32(color);
+                        let p = ui.painter();
+                        if active {
+                            p.circle_stroke(
+                                rect.center(),
+                                9.5,
+                                Stroke::new(2.0_f32, kit().heading_text),
+                            );
+                        } else if resp.hovered() {
+                            p.circle_stroke(rect.center(), 9.5, Stroke::new(1.2_f32, kit().stroke));
+                        }
+                        p.circle_filled(rect.center(), 6.8, c);
+                        if resp.clicked() {
+                            shot.color = color;
+                            changed = true;
+                        }
                     }
-                    p.circle_filled(rect.center(), 7.2, c);
-                    if resp.clicked() {
-                        shot.color = color;
-                        changed = true;
-                    }
-                }
-            });
+                });
+            }
 
             // Row 3: Shot Size + Movement
             ui.label(
@@ -1638,6 +1776,16 @@ fn show_center_pane(
         Stroke::new(1.0_f32, kit().sep),
     );
 
+    // Handle trackpad pinch / Cmd+scroll zooming over the script viewport
+    let script_stage_rect = ui.available_rect_before_wrap();
+    if ui.rect_contains_pointer(script_stage_rect) {
+        let pinch = ui.input(|i| i.zoom_delta());
+        if (pinch - 1.0).abs() > 1e-3 {
+            state.script_zoom = (state.script_zoom * pinch).clamp(SCRIPT_ZOOM_MIN, SCRIPT_ZOOM_MAX);
+            ui.ctx().request_repaint();
+        }
+    }
+
     // 2. Centered Screenplay Paper Stage (disable drag_to_scroll so dragging
     // selects text cleanly instead of grabbing and pushing the page!)
     ScrollArea::vertical()
@@ -1648,15 +1796,18 @@ fn show_center_pane(
         })
         .auto_shrink([false, false])
         .show(ui, |ui| {
+            let zoom = state.script_zoom.clamp(SCRIPT_ZOOM_MIN, SCRIPT_ZOOM_MAX);
             ui.add_space(18.0);
             let avail_w = ui.available_width();
             let is_split = state.view_mode == ShotsViewMode::Split;
-            let max_sheet_w = match state.view_mode {
+            let base_sheet_w = match state.view_mode {
                 ShotsViewMode::CoverageRails => 820.0_f32,
                 _ => 740.0_f32,
             };
             let pad = if is_split { 20.0 } else { 40.0 };
-            let sheet_w = (avail_w - pad).min(max_sheet_w).max(200.0);
+            let sheet_w = (base_sheet_w * zoom)
+                .min((avail_w - pad).max(200.0))
+                .max(200.0);
             let side_pad = ((avail_w - sheet_w) * 0.5).max(8.0);
             let inner_x: i8 = if is_split { 14 } else { 28 };
             let inner_y: i8 = if is_split { 16 } else { 22 };
@@ -2046,7 +2197,10 @@ fn render_script_block_row(
         display_text
     };
 
-    let font = FontId::new(12.5, if bold { bold_mono() } else { MONO });
+    let zoom = state.script_zoom.clamp(SCRIPT_ZOOM_MIN, SCRIPT_ZOOM_MAX);
+    let top_pad = top_pad * zoom;
+    let bot_pad = bot_pad * zoom;
+    let font = FontId::new(12.5 * zoom, if bold { bold_mono() } else { MONO });
     let left_pad = 12.0 + text_area_w * indent_frac;
     let wrap_w = (text_area_w * (1.0 - indent_frac - right_frac) - 16.0).max(120.0);
 
@@ -2075,7 +2229,7 @@ fn render_script_block_row(
         },
     );
     let galley = ui.fonts(|f| f.layout_job(job));
-    let row_h = (galley.size().y + top_pad + bot_pad).max(22.0);
+    let row_h = (galley.size().y + top_pad + bot_pad).max(22.0 * zoom);
 
     let (row_rect, resp) =
         ui.allocate_exact_size(Vec2::new(total_w, row_h), Sense::click_and_drag());

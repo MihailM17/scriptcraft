@@ -123,8 +123,8 @@ impl ShotMovement {
     }
 }
 
-/// Curated 10-color studio palette for distinguishing camera setups on both
-/// dark/light UI surfaces and white printed PDF pages.
+/// Curated 20-color studio palette (10 vivid + 10 rich darker variants) for
+/// distinguishing camera setups on dark/light UI surfaces and white PDF pages.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ShotColor {
     #[default]
@@ -138,10 +138,21 @@ pub enum ShotColor {
     Indigo,
     Olive,
     Magenta,
+    // Darker variants (matched 1-to-1 underneath the 10 primary hues)
+    Navy,
+    Forest,
+    Ochre,
+    Burgundy,
+    Plum,
+    DeepTeal,
+    Rust,
+    Midnight,
+    Moss,
+    Wine,
 }
 
 impl ShotColor {
-    pub const ALL: [Self; 10] = [
+    pub const ALL_STANDARD: [Self; 10] = [
         Self::Cobalt,
         Self::Emerald,
         Self::Amber,
@@ -152,6 +163,42 @@ impl ShotColor {
         Self::Indigo,
         Self::Olive,
         Self::Magenta,
+    ];
+
+    pub const ALL_DARK: [Self; 10] = [
+        Self::Navy,
+        Self::Forest,
+        Self::Ochre,
+        Self::Burgundy,
+        Self::Plum,
+        Self::DeepTeal,
+        Self::Rust,
+        Self::Midnight,
+        Self::Moss,
+        Self::Wine,
+    ];
+
+    pub const ALL: [Self; 20] = [
+        Self::Cobalt,
+        Self::Emerald,
+        Self::Amber,
+        Self::Crimson,
+        Self::Violet,
+        Self::Teal,
+        Self::Coral,
+        Self::Indigo,
+        Self::Olive,
+        Self::Magenta,
+        Self::Navy,
+        Self::Forest,
+        Self::Ochre,
+        Self::Burgundy,
+        Self::Plum,
+        Self::DeepTeal,
+        Self::Rust,
+        Self::Midnight,
+        Self::Moss,
+        Self::Wine,
     ];
 
     pub fn from_index(i: usize) -> Self {
@@ -170,6 +217,16 @@ impl ShotColor {
             Self::Indigo => "Indigo",
             Self::Olive => "Olive",
             Self::Magenta => "Magenta",
+            Self::Navy => "Dark Cobalt",
+            Self::Forest => "Dark Emerald",
+            Self::Ochre => "Dark Amber",
+            Self::Burgundy => "Dark Crimson",
+            Self::Plum => "Dark Violet",
+            Self::DeepTeal => "Dark Teal",
+            Self::Rust => "Dark Coral",
+            Self::Midnight => "Dark Indigo",
+            Self::Moss => "Dark Olive",
+            Self::Wine => "Dark Magenta",
         }
     }
 
@@ -185,6 +242,17 @@ impl ShotColor {
             Self::Indigo => (99, 102, 241),
             Self::Olive => (132, 204, 22),
             Self::Magenta => (236, 72, 153),
+            // Rich darker variants
+            Self::Navy => (30, 64, 175),
+            Self::Forest => (6, 105, 76),
+            Self::Ochre => (154, 92, 8),
+            Self::Burgundy => (153, 27, 27),
+            Self::Plum => (88, 28, 135),
+            Self::DeepTeal => (15, 104, 96),
+            Self::Rust => (164, 58, 12),
+            Self::Midnight => (55, 48, 163),
+            Self::Moss => (77, 124, 15),
+            Self::Wine => (157, 23, 77),
         }
     }
 }
@@ -440,6 +508,9 @@ pub struct PlanProp {
     pub angle_deg: f32,
 }
 
+/// Default visual reach (meters) of a camera FOV cone on the 2D floor plan.
+pub const DEFAULT_CAMERA_CONE_M: f32 = 2.6;
+
 /// One camera setup placed on a scene's 2D top-down floor plan, linked 1-to-1
 /// to a [`Shot`] via `shot_id` (inheriting its code, color, lens, and movement).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -454,9 +525,20 @@ pub struct PlanCamera {
     /// derived automatically from the linked shot's `lens` string.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fov_deg: Option<f32>,
+    /// Optional visual FOV beam length in meters (defaults to [`DEFAULT_CAMERA_CONE_M`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cone_length: Option<f32>,
     /// Optional dolly / tracking end position `(x, y)` in meters.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub track_to: Option<(f32, f32)>,
+}
+
+impl PlanCamera {
+    pub fn effective_cone_length(&self) -> f32 {
+        self.cone_length
+            .unwrap_or(DEFAULT_CAMERA_CONE_M)
+            .clamp(0.7, 12.0)
+    }
 }
 
 /// 2D top-down blocking diagram for one scene (anchored by `Scene::id`).
@@ -592,6 +674,7 @@ impl ShotList {
             y,
             angle_deg,
             fov_deg: None,
+            cone_length: None,
             track_to: None,
         });
     }
@@ -701,6 +784,7 @@ impl ShotList {
                 y,
                 angle_deg,
                 fov_deg: None,
+                cone_length: None,
                 track_to,
             });
         }
@@ -1072,8 +1156,8 @@ impl ShotList {
         (shot_count, covered, total)
     }
 
-    /// Short readable excerpt of the exact screenplay text covered by `shot`.
-    pub fn covered_excerpt(&self, shot: &Shot, blocks: &[ScriptBlock]) -> String {
+    /// Full readable text covered by `shot` across all its spans (no truncation).
+    pub fn covered_text_full(&self, shot: &Shot, blocks: &[ScriptBlock]) -> String {
         let index = block_index_map(blocks);
         let mut per_block: HashMap<usize, Vec<(usize, usize)>> = HashMap::new();
         for span in &shot.spans {
@@ -1102,7 +1186,12 @@ impl ShotList {
                 }
             }
         }
-        let joined = parts.join(" / ");
+        parts.join(" / ")
+    }
+
+    /// Short readable excerpt of the exact screenplay text covered by `shot`.
+    pub fn covered_excerpt(&self, shot: &Shot, blocks: &[ScriptBlock]) -> String {
+        let joined = self.covered_text_full(shot, blocks);
         if joined.chars().count() > 96 {
             let mut s: String = joined.chars().take(95).collect();
             s.push('…');
@@ -1184,7 +1273,7 @@ impl ShotList {
         let mut out = String::from("\u{FEFF}Scene,Heading,Shot,Size,Movement,Lens,Color,Description,Covered Text,Est. Duration (s)\r\n");
         for shot in &self.shots {
             let (sc_num, heading) = scene_label_for(shot.scene_id);
-            let excerpt = self.covered_excerpt(shot, blocks);
+            let excerpt = self.covered_text_full(shot, blocks);
             let dur = self.shot_duration_secs(shot, blocks).round() as u64;
             let row = [
                 esc(&sc_num),
@@ -1555,5 +1644,76 @@ mod tests {
         assert!(list.unassign_range(None, &ShotRange::blocks(b3, b3), &p.blocks));
         let cov_after = list.resolve_block_coverage(&p.blocks);
         assert!(cov_after[3].is_empty());
+    }
+
+    #[test]
+    fn twenty_shot_colors_and_camera_beam_length() {
+        assert_eq!(ShotColor::ALL_STANDARD.len(), 10);
+        assert_eq!(ShotColor::ALL_DARK.len(), 10);
+        assert_eq!(ShotColor::ALL.len(), 20);
+        // Every color has a unique label and distinct RGB
+        let mut labels = std::collections::HashSet::new();
+        let mut rgbs = std::collections::HashSet::new();
+        for c in ShotColor::ALL {
+            assert!(labels.insert(c.label()), "duplicate label {}", c.label());
+            assert!(rgbs.insert(c.rgb()), "duplicate rgb for {}", c.label());
+        }
+        // Standard colors remain brighter on average than their paired dark variants
+        for (std_c, dark_c) in ShotColor::ALL_STANDARD
+            .iter()
+            .zip(ShotColor::ALL_DARK.iter())
+        {
+            let (sr, sg, sb) = std_c.rgb();
+            let (dr, dg, db) = dark_c.rgb();
+            let std_luma = u16::from(sr) + u16::from(sg) + u16::from(sb);
+            let dark_luma = u16::from(dr) + u16::from(dg) + u16::from(db);
+            assert!(
+                dark_luma < std_luma,
+                "{} should be darker than {}",
+                dark_c.label(),
+                std_c.label()
+            );
+        }
+
+        // Camera cone length defaults cleanly and clamps extremes
+        let mut cam = PlanCamera {
+            shot_id: Uuid::new_v4(),
+            x: 0.0,
+            y: 0.0,
+            angle_deg: 0.0,
+            fov_deg: None,
+            cone_length: None,
+            track_to: None,
+        };
+        assert!((cam.effective_cone_length() - DEFAULT_CAMERA_CONE_M).abs() < 1e-4);
+        cam.cone_length = Some(0.1);
+        assert!((cam.effective_cone_length() - 0.7).abs() < 1e-4);
+        cam.cone_length = Some(99.0);
+        assert!((cam.effective_cone_length() - 12.0).abs() < 1e-4);
+        cam.cone_length = Some(1.8);
+        assert!((cam.effective_cone_length() - 1.8).abs() < 1e-4);
+    }
+
+    #[test]
+    fn covered_text_full_preserves_long_text_without_truncation() {
+        let long_line = "Rain hammers the skylights above the warehouse while Ivan slowly unlocks the rusted steel briefcase and spreads every photograph across the workbench.";
+        assert!(long_line.chars().count() > 120);
+        let b0 = ScriptBlock::new(ElementType::SceneHeading, "INT. WAREHOUSE - NIGHT".into());
+        let b1 = ScriptBlock::new(ElementType::Action, long_line.into());
+        let b1_id = b1.id;
+        let blocks = vec![b0, b1];
+        let mut list = ShotList::default();
+        let sid = list.add_shot(
+            Some(blocks[0].id),
+            "1",
+            ShotSize::Ws,
+            ShotMovement::Static,
+            "28mm".into(),
+            String::new(),
+            ShotRange::blocks(b1_id, b1_id),
+        );
+        let shot = list.get(sid).unwrap();
+        assert_eq!(list.covered_text_full(shot, &blocks), long_line);
+        assert!(list.covered_excerpt(shot, &blocks).ends_with('…'));
     }
 }
