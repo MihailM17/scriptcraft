@@ -67,7 +67,7 @@ impl ShotsViewMode {
 }
 
 pub const SCRIPT_ZOOM_MIN: f32 = 0.65;
-pub const SCRIPT_ZOOM_MAX: f32 = 2.0;
+pub const SCRIPT_ZOOM_MAX: f32 = 3.5;
 
 /// Persistent UI state for the Shots workspace.
 pub struct ShotsUiState {
@@ -86,6 +86,9 @@ pub struct ShotsUiState {
     last_script_offset: Vec2,
     /// Cached GPU textures for attached shot storyboard/reference frames.
     ref_textures: HashMap<Uuid, (u64, egui::TextureHandle)>,
+    /// Inline composer for adding a moment-specific cue/note on the active selection.
+    adding_note_open: bool,
+    note_draft: String,
     dragging_selection: bool,
 }
 
@@ -102,6 +105,8 @@ impl Default for ShotsUiState {
             last_script_zoom: None,
             last_script_offset: Vec2::ZERO,
             ref_textures: HashMap::new(),
+            adding_note_open: false,
+            note_draft: String::new(),
             dragging_selection: false,
         }
     }
@@ -117,6 +122,8 @@ impl ShotsUiState {
         self.last_script_zoom = None;
         self.last_script_offset = Vec2::ZERO;
         self.ref_textures.clear();
+        self.adding_note_open = false;
+        self.note_draft.clear();
         self.dragging_selection = false;
         self.floor_plan.selected = None;
         self.floor_plan.reset_view();
@@ -124,23 +131,23 @@ impl ShotsUiState {
 
     pub fn zoom_in(&mut self) {
         if self.view_mode == ShotsViewMode::FloorPlan {
-            self.floor_plan.zoom = (self.floor_plan.zoom * 1.15).clamp(22.0, 140.0);
+            self.floor_plan.zoom_in();
         } else {
-            self.script_zoom = (self.script_zoom + 0.1).clamp(SCRIPT_ZOOM_MIN, SCRIPT_ZOOM_MAX);
+            self.script_zoom = (self.script_zoom + 0.15).clamp(SCRIPT_ZOOM_MIN, SCRIPT_ZOOM_MAX);
         }
     }
 
     pub fn zoom_out(&mut self) {
         if self.view_mode == ShotsViewMode::FloorPlan {
-            self.floor_plan.zoom = (self.floor_plan.zoom / 1.15).clamp(22.0, 140.0);
+            self.floor_plan.zoom_out();
         } else {
-            self.script_zoom = (self.script_zoom - 0.1).clamp(SCRIPT_ZOOM_MIN, SCRIPT_ZOOM_MAX);
+            self.script_zoom = (self.script_zoom - 0.15).clamp(SCRIPT_ZOOM_MIN, SCRIPT_ZOOM_MAX);
         }
     }
 
     pub fn zoom_reset(&mut self) {
         if self.view_mode == ShotsViewMode::FloorPlan {
-            self.floor_plan.reset_view();
+            self.floor_plan.zoom_reset();
         } else {
             self.script_zoom = 1.0;
         }
@@ -200,6 +207,8 @@ impl ShotsUiState {
     pub fn clear_selection(&mut self) {
         self.sel_anchor = None;
         self.sel_focus = None;
+        self.adding_note_open = false;
+        self.note_draft.clear();
         self.dragging_selection = false;
     }
 }
@@ -373,8 +382,30 @@ pub fn show(
                         );
                     });
 
-                // Script zoom controls (shown whenever the script pane is visible)
-                if state.view_mode != ShotsViewMode::FloorPlan {
+                // Zoom controls (controls Floor Plan zoom in Floor Plan mode, script zoom otherwise)
+                {
+                    let is_fp = state.view_mode == ShotsViewMode::FloorPlan;
+                    let can_out = if is_fp {
+                        state.floor_plan.zoom > crate::floor_plan_view::MIN_ZOOM + 0.5
+                    } else {
+                        state.script_zoom > SCRIPT_ZOOM_MIN + 1e-3
+                    };
+                    let can_in = if is_fp {
+                        state.floor_plan.zoom < crate::floor_plan_view::MAX_ZOOM - 0.5
+                    } else {
+                        state.script_zoom < SCRIPT_ZOOM_MAX - 1e-3
+                    };
+                    let pct = if is_fp {
+                        ((state.floor_plan.zoom / crate::floor_plan_view::DEFAULT_ZOOM) * 100.0)
+                            .round() as i32
+                    } else {
+                        (state.script_zoom * 100.0).round() as i32
+                    };
+                    let (out_lbl, reset_lbl, in_lbl) = if is_fp {
+                        ("Zoom out floor plan", "Reset floor plan zoom", "Zoom in floor plan")
+                    } else {
+                        ("Zoom out script", "Reset script zoom", "Zoom in script")
+                    };
                     egui::Frame::new()
                         .fill(kit().base)
                         .stroke(Stroke::new(1.0_f32, kit().stroke))
@@ -382,7 +413,6 @@ pub fn show(
                         .inner_margin(Margin::same(2))
                         .show(ui, |ui| {
                             ui.spacing_mut().item_spacing.x = 1.0;
-                            let can_out = state.script_zoom > SCRIPT_ZOOM_MIN + 1e-3;
                             let minus = ui
                                 .add_enabled(
                                     can_out,
@@ -398,19 +428,18 @@ pub fn show(
                                     .corner_radius(CornerRadius::same(4))
                                     .min_size(Vec2::new(22.0, 22.0)),
                                 )
-                                .on_hover_text("Zoom out script");
+                                .on_hover_text(out_lbl);
                             minus.widget_info(|| {
                                 egui::WidgetInfo::labeled(
                                     egui::WidgetType::Button,
                                     can_out,
-                                    "Zoom out script",
+                                    out_lbl,
                                 )
                             });
                             if minus.clicked() {
                                 state.zoom_out();
                             }
 
-                            let pct = (state.script_zoom * 100.0).round() as i32;
                             let reset = ui
                                 .add(
                                     egui::Button::new(
@@ -423,19 +452,18 @@ pub fn show(
                                     .corner_radius(CornerRadius::same(4))
                                     .min_size(Vec2::new(40.0, 22.0)),
                                 )
-                                .on_hover_text("Reset script zoom to 100%");
+                                .on_hover_text("Reset zoom to 100%");
                             reset.widget_info(|| {
                                 egui::WidgetInfo::labeled(
                                     egui::WidgetType::Button,
                                     true,
-                                    "Reset script zoom",
+                                    reset_lbl,
                                 )
                             });
                             if reset.clicked() {
                                 state.zoom_reset();
                             }
 
-                            let can_in = state.script_zoom < SCRIPT_ZOOM_MAX - 1e-3;
                             let plus = ui
                                 .add_enabled(
                                     can_in,
@@ -451,12 +479,12 @@ pub fn show(
                                     .corner_radius(CornerRadius::same(4))
                                     .min_size(Vec2::new(22.0, 22.0)),
                                 )
-                                .on_hover_text("Zoom in script");
+                                .on_hover_text(in_lbl);
                             plus.widget_info(|| {
                                 egui::WidgetInfo::labeled(
                                     egui::WidgetType::Button,
                                     can_in,
-                                    "Zoom in script",
+                                    in_lbl,
                                 )
                             });
                             if plus.clicked() {
@@ -679,6 +707,8 @@ pub fn show(
             }
         });
 
+    let block_notes = project.shots.resolve_block_notes(&project.blocks);
+
     // 4. Center Interactive Screenplay Coverage / 2D Floor Plan stage
     egui::CentralPanel::default()
         .frame(
@@ -696,6 +726,7 @@ pub fn show(
                     &active_scene_label,
                     &block_coverage,
                     &char_coverage,
+                    &block_notes,
                     state,
                     bold_character_cues,
                     paper_mono,
@@ -741,6 +772,7 @@ pub fn show(
                     &active_scene_label,
                     &block_coverage,
                     &char_coverage,
+                    &block_notes,
                     state,
                     bold_character_cues,
                     paper_mono,
@@ -1560,9 +1592,107 @@ fn show_right_pane(
                 }
             }
 
+            // Row 4c: Moment-specific Camera Cues / Beat Notes
+            let block_index = block_index_map(&project.blocks);
+            let notes_count = shot.notes.len();
+            let sel_range_for_note = state.selection_shot_range(&project.blocks);
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(format!("Moment Notes ({notes_count})"))
+                        .size(11.0)
+                        .color(kit().disabled_text),
+                );
+                if let Some(range) = sel_range_for_note {
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        let add_note = egui::Button::new(
+                            RichText::new("+ Note on selection")
+                                .size(10.5)
+                                .color(kit().accent_text),
+                        )
+                        .fill(kit().accent_soft)
+                        .stroke(Stroke::NONE)
+                        .corner_radius(CornerRadius::same(4))
+                        .min_size(Vec2::new(0.0, 18.0));
+                        if ui
+                            .add(add_note)
+                            .on_hover_text(
+                                "Attach a camera movement cue or special note to the selected phrase",
+                            )
+                            .clicked()
+                        {
+                            shot.notes.push(scriptcraft_core::shots::ShotBeatNote {
+                                id: Uuid::new_v4(),
+                                range,
+                                text: String::new(),
+                            });
+                            state.clear_selection();
+                            changed = true;
+                        }
+                    });
+                }
+            });
+            let mut remove_note_id: Option<Uuid> = None;
+            for note in &mut shot.notes {
+                let ex = note.range.excerpt(&block_index, &project.blocks);
+                let ex_short = if ex.is_empty() {
+                    "Deleted text".to_string()
+                } else if ex.chars().count() > 36 {
+                    let mut s: String = ex.chars().take(35).collect();
+                    s.push('…');
+                    s
+                } else {
+                    ex
+                };
+                let note_id = note.id;
+                egui::Frame::new()
+                    .fill(kit().base)
+                    .stroke(Stroke::new(1.0_f32, kit().stroke))
+                    .corner_radius(CornerRadius::same(5))
+                    .inner_margin(Margin::symmetric(8, 5))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                RichText::new(format!("\"{ex_short}\""))
+                                    .size(10.5)
+                                    .italics()
+                                    .color(kit().disabled_text),
+                            );
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                let rm = ui
+                                    .add(
+                                        egui::Button::new(
+                                            RichText::new("x")
+                                                .size(10.5)
+                                                .color(kit().disabled_text),
+                                        )
+                                        .fill(Color32::TRANSPARENT)
+                                        .stroke(Stroke::NONE)
+                                        .min_size(Vec2::new(16.0, 16.0)),
+                                    )
+                                    .on_hover_text("Delete moment note");
+                                if rm.clicked() {
+                                    remove_note_id = Some(note_id);
+                                }
+                            });
+                        });
+                        let resp = ui.add_sized(
+                            Vec2::new(ui.available_width(), 22.0),
+                            TextEdit::singleline(&mut note.text)
+                                .font(FontId::proportional(11.5))
+                                .hint_text("e.g. Pan right to follow movement..."),
+                        );
+                        if resp.changed() {
+                            changed = true;
+                        }
+                    });
+            }
+            if let Some(rm_id) = remove_note_id {
+                shot.notes.retain(|n| n.id != rm_id);
+                changed = true;
+            }
+
             // Row 5: Covered Text Spans
             let spans_snapshot = shot.spans.clone();
-            let block_index = block_index_map(&project.blocks);
             ui.horizontal(|ui| {
                 ui.label(
                     RichText::new(format!("Covered Spans ({})", spans_snapshot.len()))
@@ -1671,6 +1801,7 @@ fn show_center_pane(
     scene_label: &str,
     block_coverage: &[Vec<usize>],
     char_coverage: &[Vec<(usize, usize, usize)>],
+    block_notes: &[Vec<(usize, usize, usize, usize)>],
     state: &mut ShotsUiState,
     bold_character_cues: bool,
     paper_mono: bool,
@@ -1900,6 +2031,33 @@ fn show_center_pane(
                             }
                         }
 
+                        // "+ Note" button: attach a moment-specific cue / camera movement comment
+                        // directly onto this phrase without splitting into a new shot.
+                        let note_btn = egui::Button::new(
+                            RichText::new("+ Note").size(11.5).color(if state.adding_note_open {
+                                ink_on_accent(kit().accent)
+                            } else {
+                                kit().text
+                            }),
+                        )
+                        .fill(if state.adding_note_open {
+                            kit().accent
+                        } else {
+                            kit().button
+                        })
+                        .stroke(Stroke::new(1.0_f32, kit().stroke))
+                        .corner_radius(CornerRadius::same(6))
+                        .min_size(Vec2::new(0.0, 24.0));
+                        if ui
+                            .add(note_btn)
+                            .on_hover_text(
+                                "Add a moment-specific cue/note to this phrase (e.g. camera pan or special action)",
+                            )
+                            .clicked()
+                        {
+                            state.adding_note_open = !state.adding_note_open;
+                        }
+
                         if let Some(sid) = add_target {
                             if project.shots.assign_range_merged(
                                 sid,
@@ -1955,6 +2113,7 @@ fn show_center_pane(
                         }
                     });
                 } else {
+                    state.adding_note_open = false;
                     let hint = if state.view_mode == ShotsViewMode::Split {
                         "Drag text to highlight, then assign a shot."
                     } else {
@@ -1984,6 +2143,111 @@ fn show_center_pane(
                     }
                 }
             });
+
+            // Inline Moment Note composer row (when "+ Note" is toggled open with text selected)
+            if state.adding_note_open {
+                if let Some(shot_range) = state.selection_shot_range(&project.blocks) {
+                    // Pick the shot to attach the cue to: prefer selected shot if it covers
+                    // the selection, else tightest covering shot, else selected shot, else first shot.
+                    let covering_shot_id = state.selection_range().and_then(|((lo_b, lo_c), _)| {
+                        let spans = char_coverage.get(lo_b)?;
+                        if let Some(sel_id) = state.selected_shot {
+                            let covers_sel = spans.iter().any(|&(si, c0, c1)| {
+                                lo_c >= c0
+                                    && lo_c < c1
+                                    && project.shots.shots.get(si).is_some_and(|s| s.id == sel_id)
+                            });
+                            if covers_sel {
+                                return Some(sel_id);
+                            }
+                        }
+                        spans
+                            .iter()
+                            .filter(|&&(_, c0, c1)| lo_c >= c0 && lo_c < c1)
+                            .min_by_key(|&&(_, c0, c1)| c1 - c0)
+                            .and_then(|&(si, _, _)| project.shots.shots.get(si).map(|s| s.id))
+                    });
+                    let target_shot_id = covering_shot_id
+                        .or(state.selected_shot)
+                        .or_else(|| {
+                            scene_shot_indices
+                                .first()
+                                .and_then(|&i| project.shots.shots.get(i).map(|s| s.id))
+                        });
+                    if let Some(target_id) = target_shot_id {
+                        let target_code = project
+                            .shots
+                            .get(target_id)
+                            .map(|s| s.code.clone())
+                            .unwrap_or_default();
+                        ui.add_space(6.0);
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 6.0;
+                            ui.label(
+                                RichText::new(format!("Cue on {target_code}:"))
+                                    .size(11.5)
+                                    .strong()
+                                    .color(kit().accent_text),
+                            );
+                            let input_w = (ui.available_width() - 135.0).max(120.0);
+                            let te = ui.add_sized(
+                                Vec2::new(input_w, 24.0),
+                                TextEdit::singleline(&mut state.note_draft)
+                                    .hint_text("e.g. Pan right to follow movement, push in slowly..."),
+                            );
+                            te.widget_info(|| {
+                                egui::WidgetInfo::labeled(
+                                    egui::WidgetType::TextEdit,
+                                    true,
+                                    "Moment note text",
+                                )
+                            });
+                            let enter_pressed =
+                                te.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                                state.adding_note_open = false;
+                                state.note_draft.clear();
+                            }
+                            let can_save = !state.note_draft.trim().is_empty();
+                            let save_btn = egui::Button::new(
+                                RichText::new("Add Note").size(11.5).strong().color(if can_save {
+                                    ink_on_accent(kit().accent)
+                                } else {
+                                    kit().disabled_text
+                                }),
+                            )
+                            .fill(if can_save { kit().accent } else { kit().button })
+                            .stroke(Stroke::NONE)
+                            .corner_radius(CornerRadius::same(5))
+                            .min_size(Vec2::new(0.0, 24.0));
+                            if (ui.add_enabled(can_save, save_btn).clicked() || enter_pressed)
+                                && can_save
+                            {
+                                let text = state.note_draft.trim().to_string();
+                                project.shots.add_beat_note(target_id, shot_range, text);
+                                state.selected_shot = Some(target_id);
+                                state.clear_selection();
+                                action = ShotsAction::Changed;
+                            }
+                            if ui
+                                .add(
+                                    egui::Button::new(
+                                        RichText::new("Cancel")
+                                            .size(11.5)
+                                            .color(kit().disabled_text),
+                                    )
+                                    .fill(Color32::TRANSPARENT)
+                                    .stroke(Stroke::NONE),
+                                )
+                                .clicked()
+                            {
+                                state.adding_note_open = false;
+                                state.note_draft.clear();
+                            }
+                        });
+                    }
+                }
+            }
         })
         .response;
     ui.painter().line_segment(
@@ -2244,6 +2508,7 @@ fn show_center_pane(
 
                             let spans_here =
                                 char_coverage.get(bi).map(Vec::as_slice).unwrap_or(&[]);
+                            let notes_here = block_notes.get(bi).map(Vec::as_slice).unwrap_or(&[]);
 
                             // Shots starting at char 0 of the next printable block (for continuous rails)
                             let next_block_start_shots: Vec<usize> = scene_blocks
@@ -2263,6 +2528,7 @@ fn show_center_pane(
                                 bi,
                                 block,
                                 spans_here,
+                                notes_here,
                                 &prev_block_end_shots,
                                 &next_block_start_shots,
                                 &mut prev_visual_row_primary,
@@ -2422,6 +2688,7 @@ fn render_script_block_row(
     bi: usize,
     block: &ScriptBlock,
     spans_here: &[(usize, usize, usize)],
+    notes_here: &[(usize, usize, usize, usize)],
     prev_block_end_shots: &[usize],
     next_block_start_shots: &[usize],
     prev_visual_row_primary: &mut Option<usize>,
@@ -2707,6 +2974,49 @@ fn render_script_block_row(
         // 3. Screenplay text
         p.galley(text_pos, galley.clone(), text_color);
 
+        // 3b. Moment-specific cue underlines + cue pin dots on noted phrases
+        for &(si, ni, nc0, nc1) in notes_here {
+            let Some(shot) = project.shots.shots.get(si) else {
+                continue;
+            };
+            let Some(note) = shot.notes.get(ni) else {
+                continue;
+            };
+            if note.text.trim().is_empty() || nc0 >= nc1 {
+                continue;
+            }
+            let cue_col = Color32::from_rgb(245, 158, 11);
+            let mut off = 0usize;
+            let mut drew_dot = false;
+            for placed in &galley.rows {
+                let len_no_nl = placed.char_count_excluding_newline();
+                let len_with_nl = placed.char_count_including_newline();
+                let r_start = off;
+                let r_end = off + len_no_nl;
+                off += len_with_nl;
+                if nc1 <= r_start || nc0 >= r_end {
+                    continue;
+                }
+                let local_0 = nc0.max(r_start) - r_start;
+                let local_1 = nc1.min(r_end) - r_start;
+                let x0 = text_pos.x + placed.x_offset(local_0);
+                let x1 = (text_pos.x + placed.x_offset(local_1)).max(x0 + 6.0);
+                let y = text_pos.y + placed.rect().max.y + 0.5;
+                p.line_segment(
+                    [Pos2::new(x0, y), Pos2::new(x1, y)],
+                    Stroke::new(2.0_f32 * zoom.clamp(0.8, 1.8), cue_col),
+                );
+                if !drew_dot {
+                    p.circle_filled(
+                        Pos2::new(x0, text_pos.y + placed.rect().min.y + 1.5),
+                        2.6 * zoom.clamp(0.85, 1.6),
+                        cue_col,
+                    );
+                    drew_dot = true;
+                }
+            }
+        }
+
         // 4. Coverage Rails (exact wrapped visual-line precision!)
         if state.view_mode == ShotsViewMode::CoverageRails && !rail_shots.is_empty() {
             let rail_x0 = row_rect.right() - rail_area_w + 12.0 * zoom;
@@ -2800,8 +3110,8 @@ fn render_script_block_row(
         }
     }
 
-    // Hover tooltip listing every shot covering the hovered character
-    if !spans_here.is_empty() && resp.hovered() {
+    // Hover tooltip listing every shot and moment note covering the hovered character
+    if (!spans_here.is_empty() || !notes_here.is_empty()) && resp.hovered() {
         if let Some(ptr) = ui.input(|i| i.pointer.hover_pos()) {
             let ci = galley
                 .cursor_from_pos(ptr - text_pos)
@@ -2826,9 +3136,26 @@ fn render_script_block_row(
                     }
                 }
             }
+            let mut note_lines = Vec::new();
+            for &(si, ni, c0, c1) in notes_here {
+                if ci >= c0 && ci < c1 {
+                    if let Some(s) = project.shots.shots.get(si) {
+                        if let Some(n) = s.notes.get(ni) {
+                            let nt = n.text.trim();
+                            if !nt.is_empty() {
+                                note_lines.push(format!("Cue ({}): {nt}", s.code));
+                            }
+                        }
+                    }
+                }
+            }
+            let mut tip_parts = Vec::new();
             if !names.is_empty() {
-                resp.clone()
-                    .on_hover_text(format!("Covered by: {}", names.join("  |  ")));
+                tip_parts.push(format!("Covered by: {}", names.join("  |  ")));
+            }
+            tip_parts.extend(note_lines);
+            if !tip_parts.is_empty() {
+                resp.clone().on_hover_text(tip_parts.join("\n"));
             }
         }
     }

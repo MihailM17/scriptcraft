@@ -395,6 +395,16 @@ fn slice_chars(s: &str, c0: usize, c1: usize) -> String {
     s.chars().skip(c0).take(c1 - c0).collect()
 }
 
+/// A moment-specific director's note or camera cue attached to an exact phrase
+/// or beat inside a [`Shot`] (e.g. `"Pan right to follow hand"`, `"Push in
+/// slowly"`, `"Rack focus to door"`) without splitting into a new shot.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShotBeatNote {
+    pub id: Uuid,
+    pub range: ShotRange,
+    pub text: String,
+}
+
 /// One production camera setup / shot covering one or more screenplay beats.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Shot {
@@ -419,6 +429,9 @@ pub struct Shot {
     /// Script ranges covered by this shot.
     #[serde(default)]
     pub spans: Vec<ShotRange>,
+    /// Optional moment-specific cues/notes tied to exact phrases inside this shot.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<ShotBeatNote>,
     /// Optional storyboard or reference frame image stored as base64-encoded PNG/JPEG.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reference_image: Option<String>,
@@ -900,9 +913,89 @@ impl ShotList {
             description,
             color,
             spans: vec![range],
+            notes: Vec::new(),
             reference_image: None,
         });
         id
+    }
+
+    /// Attach a moment-specific cue / director's note to `shot_id` at `range`.
+    pub fn add_beat_note(&mut self, shot_id: Uuid, range: ShotRange, text: String) -> Option<Uuid> {
+        let shot = self.get_mut(shot_id)?;
+        let id = Uuid::new_v4();
+        shot.notes.push(ShotBeatNote { id, range, text });
+        Some(id)
+    }
+
+    /// Remove a moment-specific cue / director's note from `shot_id`.
+    pub fn remove_beat_note(&mut self, shot_id: Uuid, note_id: Uuid) -> bool {
+        let Some(shot) = self.get_mut(shot_id) else {
+            return false;
+        };
+        let before = shot.notes.len();
+        shot.notes.retain(|n| n.id != note_id);
+        shot.notes.len() < before
+    }
+
+    /// Resolve per-block character spans of all moment-specific beat notes.
+    ///
+    /// Returns one `Vec<(shot_idx, note_idx, char_start, char_end)>` per block.
+    pub fn resolve_block_notes(
+        &self,
+        blocks: &[ScriptBlock],
+    ) -> Vec<Vec<(usize, usize, usize, usize)>> {
+        let mut out: Vec<Vec<(usize, usize, usize, usize)>> = vec![Vec::new(); blocks.len()];
+        if self.shots.is_empty() || blocks.is_empty() {
+            return out;
+        }
+        let index = block_index_map(blocks);
+        for (shot_idx, shot) in self.shots.iter().enumerate() {
+            for (note_idx, note) in shot.notes.iter().enumerate() {
+                let Some(((lo_b, _), (hi_b, _))) = note.range.resolve_chars(&index, blocks) else {
+                    continue;
+                };
+                for (bi, slot) in out.iter_mut().enumerate().take(hi_b + 1).skip(lo_b) {
+                    if let Some((c0, c1)) = note.range.char_span_in_block(bi, &index, blocks) {
+                        slot.push((shot_idx, note_idx, c0, c1));
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Return non-empty beat note texts on `shot_id` whose script span overlaps
+    /// any `(block_idx, char_start, char_end)` slice in `ranges` (used by live
+    /// Timeline playback to display moment cues on the Floor Plan HUD).
+    pub fn active_beat_notes(
+        &self,
+        shot_id: Uuid,
+        ranges: &[(usize, usize, usize)],
+        blocks: &[ScriptBlock],
+    ) -> Vec<String> {
+        let Some(shot) = self.get(shot_id) else {
+            return Vec::new();
+        };
+        if shot.notes.is_empty() || ranges.is_empty() {
+            return Vec::new();
+        }
+        let index = block_index_map(blocks);
+        let mut out = Vec::new();
+        for note in &shot.notes {
+            let trimmed = note.text.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let hits = ranges.iter().any(|&(bi, rc0, rc1)| {
+                note.range
+                    .char_span_in_block(bi, &index, blocks)
+                    .is_some_and(|(nc0, nc1)| nc0 < rc1 && nc1 > rc0)
+            });
+            if hits {
+                out.push(trimmed.to_string());
+            }
+        }
+        out
     }
 
     /// Add another screenplay range to an existing shot (avoiding exact dupes).
@@ -1305,10 +1398,27 @@ impl ShotList {
         };
 
         let mut out = String::from("\u{FEFF}Scene,Heading,Shot,Size,Movement,Lens,Color,Description,Covered Text,Est. Duration (s)\r\n");
+        let index = block_index_map(blocks);
         for shot in &self.shots {
             let (sc_num, heading) = scene_label_for(shot.scene_id);
             let excerpt = self.covered_text_full(shot, blocks);
             let dur = self.shot_duration_secs(shot, blocks).round() as u64;
+            let mut desc = shot.description.clone();
+            for note in &shot.notes {
+                let nt = note.text.trim();
+                if nt.is_empty() {
+                    continue;
+                }
+                if !desc.is_empty() {
+                    desc.push_str(" | ");
+                }
+                let ex = note.range.excerpt(&index, blocks);
+                if ex.is_empty() {
+                    desc.push_str(&format!("[Cue: {nt}]"));
+                } else {
+                    desc.push_str(&format!("[Cue \"{ex}\": {nt}]"));
+                }
+            }
             let row = [
                 esc(&sc_num),
                 esc(&heading),
@@ -1317,7 +1427,7 @@ impl ShotList {
                 esc(shot.movement.label()),
                 esc(&shot.lens),
                 esc(shot.color.label()),
-                esc(&shot.description),
+                esc(&desc),
                 esc(&excerpt),
                 dur.to_string(),
             ]
@@ -1495,7 +1605,7 @@ impl ShotList {
             return;
         }
         for shot in &mut self.shots {
-            for span in &mut shot.spans {
+            let shift_span = |span: &mut ShotRange| {
                 if span.start_block == block_id {
                     if let Some(sc) = span.start_char.as_mut() {
                         if *sc >= at {
@@ -1510,6 +1620,12 @@ impl ShotList {
                         }
                     }
                 }
+            };
+            for span in &mut shot.spans {
+                shift_span(span);
+            }
+            for note in &mut shot.notes {
+                shift_span(&mut note.range);
             }
         }
     }
@@ -1530,7 +1646,7 @@ impl ShotList {
             }
         };
         for shot in &mut self.shots {
-            for span in &mut shot.spans {
+            let shift_span = |span: &mut ShotRange| {
                 if span.start_block == block_id {
                     if let Some(sc) = span.start_char.as_mut() {
                         *sc = map_pos(*sc);
@@ -1541,9 +1657,15 @@ impl ShotList {
                         *ec = map_pos(*ec);
                     }
                 }
+            };
+            for span in &mut shot.spans {
+                shift_span(span);
+            }
+            for note in &mut shot.notes {
+                shift_span(&mut note.range);
             }
             // Drop any single-block char span that collapsed to empty
-            shot.spans.retain(|sp| {
+            let non_empty = |sp: &ShotRange| {
                 if sp.start_block == sp.end_block {
                     match (sp.start_char, sp.end_char) {
                         (Some(a), Some(b)) => a < b,
@@ -1552,7 +1674,9 @@ impl ShotList {
                 } else {
                     true
                 }
-            });
+            };
+            shot.spans.retain(non_empty);
+            shot.notes.retain(|n| non_empty(&n.range));
         }
     }
 
@@ -2309,5 +2433,59 @@ mod tests {
                 revision: None,
             })
         );
+    }
+
+    #[test]
+    fn beat_notes_resolve_shift_with_edits_and_export_to_csv() {
+        use crate::edit::EditCommand;
+        let mut p = sample_project();
+        let b1_id = p.blocks[1].id;
+        let mut list = ShotList::default();
+        let sid = list.add_shot(
+            Some(p.blocks[0].id),
+            "1",
+            ShotSize::Ws,
+            ShotMovement::Static,
+            "35mm".into(),
+            "Master".into(),
+            ShotRange::blocks(b1_id, b1_id),
+        );
+        let nid = list
+            .add_beat_note(
+                sid,
+                ShotRange::chars(b1_id, 7, b1_id, 15),
+                "Pan right to follow steam".into(),
+            )
+            .expect("beat note added");
+
+        let resolved = list.resolve_block_notes(&p.blocks);
+        assert_eq!(resolved[1], vec![(0, 0, 7, 15)]);
+        assert_eq!(
+            list.active_beat_notes(sid, &[(1, 8, 12)], &p.blocks),
+            vec!["Pan right to follow steam".to_string()]
+        );
+
+        // Editing script text before the note shifts the note's range cleanly
+        let ins = EditCommand::InsertText {
+            at: crate::edit::Pos {
+                bi: 1,
+                para: 0,
+                ch: 0,
+            },
+            text: "Now ".into(),
+        };
+        list.sync_for_edit_commands(&p.blocks, std::slice::from_ref(&ins));
+        p.blocks[1].text.insert_str(0, "Now ");
+        let note = &list.get(sid).unwrap().notes[0];
+        assert_eq!(note.range.start_char, Some(11));
+        assert_eq!(note.range.end_char, Some(19));
+
+        // CSV includes moment cues
+        let csv = list.to_csv(&p.blocks, &p.scenes(), &["1".into()]);
+        assert!(csv.contains("Pan right to follow steam"));
+
+        // Removing note cleans it up
+        assert!(list.remove_beat_note(sid, nid));
+        assert!(list.get(sid).unwrap().notes.is_empty());
     }
 }

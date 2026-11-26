@@ -770,6 +770,11 @@ fn directors_breakdown_pdf_renders_floor_plan_shapes_and_storyboard_images() {
         ShotRange::blocks(b0, b1),
     );
     p.shots.get_mut(id1).unwrap().color = ShotColor::Cobalt;
+    p.shots.add_beat_note(
+        id1,
+        ShotRange::chars(b1, 79, b1, 127),
+        "Pan right to follow envelope sliding across booth".into(),
+    );
 
     let id2 = p.shots.add_shot(
         Some(s0),

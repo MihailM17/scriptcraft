@@ -16,9 +16,9 @@ use uuid::Uuid;
 
 use crate::theme::{ink_on_accent, kit, kit_is_light};
 
-const DEFAULT_ZOOM: f32 = 54.0; // pixels per meter
-const MIN_ZOOM: f32 = 22.0;
-const MAX_ZOOM: f32 = 140.0;
+pub const DEFAULT_ZOOM: f32 = 54.0; // pixels per meter
+pub const MIN_ZOOM: f32 = 16.0;
+pub const MAX_ZOOM: f32 = 450.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PlanSelection {
@@ -94,6 +94,18 @@ impl Default for FloorPlanUiState {
 }
 
 impl FloorPlanUiState {
+    pub fn zoom_in(&mut self) {
+        self.zoom = (self.zoom * 1.25).clamp(MIN_ZOOM, MAX_ZOOM);
+    }
+
+    pub fn zoom_out(&mut self) {
+        self.zoom = (self.zoom / 1.25).clamp(MIN_ZOOM, MAX_ZOOM);
+    }
+
+    pub fn zoom_reset(&mut self) {
+        self.zoom = DEFAULT_ZOOM;
+    }
+
     pub fn reset_view(&mut self) {
         self.pan = Vec2::new(0.0, 0.4);
         self.zoom = DEFAULT_ZOOM;
@@ -493,12 +505,33 @@ pub fn show(
     let (canvas_rect, resp) = ui.allocate_exact_size(canvas_size, Sense::click_and_drag());
     let center = canvas_rect.center();
 
-    // Smooth wheel zoom when hovering canvas
+    // Smooth wheel + trackpad pinch zoom anchored around the cursor position
     if resp.hovered() {
+        let pinch = ui.input(|i| i.zoom_delta());
         let scroll_y = ui.input(|i| i.raw_scroll_delta.y);
-        if scroll_y.abs() > 0.1 {
-            let factor = (1.0 + scroll_y * 0.0025).clamp(0.85, 1.18);
-            state.zoom = (state.zoom * factor).clamp(MIN_ZOOM, MAX_ZOOM);
+        let factor = if (pinch - 1.0).abs() > 1e-3 {
+            pinch.clamp(0.75, 1.35)
+        } else if scroll_y.abs() > 0.1 {
+            (1.0 + scroll_y * 0.0028).clamp(0.82, 1.22)
+        } else {
+            1.0
+        };
+        if (factor - 1.0).abs() > 1e-4 {
+            let old_zoom = state.zoom;
+            let new_zoom = (old_zoom * factor).clamp(MIN_ZOOM, MAX_ZOOM);
+            if let Some(hover) = ui.input(|i| i.pointer.hover_pos()) {
+                if canvas_rect.contains(hover) {
+                    let before = screen_to_world(center, state.pan, old_zoom, hover);
+                    state.zoom = new_zoom;
+                    let after = screen_to_world(center, state.pan, new_zoom, hover);
+                    state.pan += before - after;
+                } else {
+                    state.zoom = new_zoom;
+                }
+            } else {
+                state.zoom = new_zoom;
+            }
+            ui.ctx().request_repaint();
         }
     }
 
@@ -811,6 +844,56 @@ pub fn show(
 
     // Architectural scale indicator in bottom-left corner of canvas
     paint_scale_bar(&p, canvas_rect, state.zoom, snap_ctrl);
+
+    // Live Director's Cue HUD badge when Timeline Spotlight hits a beat note
+    if state.timeline_active {
+        if let Some(cid) = active_cam_id {
+            let cues =
+                project
+                    .shots
+                    .active_beat_notes(cid, &state.active_beat_ranges, &project.blocks);
+            if !cues.is_empty() {
+                let code = project
+                    .shots
+                    .get(cid)
+                    .map(|s| s.code.as_str())
+                    .unwrap_or("Shot");
+                let accent = project
+                    .shots
+                    .get(cid)
+                    .map(|s| shot_color32(s.color))
+                    .unwrap_or_else(|| kit().accent);
+                let text = format!("Cue ({code}): {}", cues.join("  ·  "));
+                let max_w = (canvas_rect.width() - 32.0).max(120.0);
+                let g = crate::theme::ellipsized(
+                    &p,
+                    &text,
+                    FontId::proportional(11.5),
+                    kit().heading_text,
+                    max_w - 20.0,
+                );
+                let pill_rect = Rect::from_center_size(
+                    Pos2::new(canvas_rect.center().x, canvas_rect.top() + 20.0),
+                    g.size() + Vec2::new(18.0, 10.0),
+                );
+                p.rect_filled(pill_rect, CornerRadius::same(6), kit().surface);
+                p.rect_stroke(
+                    pill_rect,
+                    CornerRadius::same(6),
+                    Stroke::new(1.5_f32, accent),
+                    StrokeKind::Inside,
+                );
+                p.galley(
+                    Pos2::new(
+                        pill_rect.center().x - g.size().x * 0.5,
+                        pill_rect.center().y - g.size().y * 0.5,
+                    ),
+                    g,
+                    Color32::TRANSPARENT,
+                );
+            }
+        }
+    }
 
     // 2.5. Interactive Scene Timeline Bar (scrub through beats & spotlight only the active camera)
     if has_timeline {
@@ -1483,10 +1566,11 @@ fn hit_test_plan(
         }
     }
 
-    // 3. Actors
+    // 3. Actors (hit radius scales true-to-size with zoom)
+    let actor_hit_r = (0.30 * zoom).max(19.0);
     for actor in plan.actors.iter().rev() {
         let ap = world_to_screen(center, pan, zoom, actor.x, actor.y);
-        if ap.distance(pos) <= 19.0 {
+        if ap.distance(pos) <= actor_hit_r {
             return Some((
                 PlanSelection::Actor(actor.id),
                 DragKind::MoveActor(actor.id),
@@ -1526,6 +1610,31 @@ fn paint_grid(p: &egui::Painter, rect: Rect, center: Pos2, pan: Vec2, zoom: f32)
     let major_col = kit()
         .sep
         .gamma_multiply(if kit_is_light() { 0.85 } else { 0.72 });
+
+    // Fine 0.25m sub-grid when zoomed in closely
+    if zoom >= 130.0 {
+        let fine_col = kit()
+            .sep
+            .gamma_multiply(if kit_is_light() { 0.26 } else { 0.20 });
+        let mut x = (tl.x * 4.0).floor() * 0.25;
+        while x <= br.x {
+            let sx = center.x + (x - pan.x) * zoom;
+            p.line_segment(
+                [Pos2::new(sx, rect.top()), Pos2::new(sx, rect.bottom())],
+                Stroke::new(0.5_f32, fine_col),
+            );
+            x += 0.25;
+        }
+        let mut y = (tl.y * 4.0).floor() * 0.25;
+        while y <= br.y {
+            let sy = center.y + (y - pan.y) * zoom;
+            p.line_segment(
+                [Pos2::new(rect.left(), sy), Pos2::new(rect.right(), sy)],
+                Stroke::new(0.5_f32, fine_col),
+            );
+            y += 0.25;
+        }
+    }
 
     // Minor 0.5m grid when zoomed in enough
     if zoom >= 36.0 {
@@ -1969,29 +2078,35 @@ fn paint_actor(
         }
     }
 
-    // Overhead shoulders capsule (rotated perpendicular to facing direction)
+    // Overhead shoulders capsule (true-to-scale ~0.64m architectural figure,
+    // scaling linearly with zoom so actors always match the metric scale bar).
     let fwd = Vec2::new(rad.cos(), rad.sin());
     let right = Vec2::new(-fwd.y, fwd.x);
-    let sh_half = (0.28 * zoom).clamp(10.0, 22.0);
-    let sh_thick = (0.12 * zoom).clamp(5.0, 10.0);
+    let sh_half = (0.32 * zoom).max(12.0);
+    let sh_thick = (0.16 * zoom).max(6.0);
     let sh_pts = vec![
-        ap - right * sh_half - fwd * (sh_thick * 0.7),
-        ap + right * sh_half - fwd * (sh_thick * 0.7),
-        ap + right * (sh_half * 0.85) + fwd * (sh_thick * 0.7),
-        ap - right * (sh_half * 0.85) + fwd * (sh_thick * 0.7),
+        ap - right * sh_half - fwd * (sh_thick * 0.72),
+        ap + right * sh_half - fwd * (sh_thick * 0.72),
+        ap + right * (sh_half * 0.85) + fwd * (sh_thick * 0.72),
+        ap - right * (sh_half * 0.85) + fwd * (sh_thick * 0.72),
     ];
+    let shoulder_fill = if kit_is_light() {
+        Color32::from_rgba_unmultiplied(accent_col.r(), accent_col.g(), accent_col.b(), 64)
+    } else {
+        Color32::from_rgba_unmultiplied(accent_col.r(), accent_col.g(), accent_col.b(), 95)
+    };
     p.add(Shape::convex_polygon(
         sh_pts,
-        kit().surface,
+        shoulder_fill,
         Stroke::new(
-            if selected { 2.0_f32 } else { 1.4_f32 },
+            if selected { 2.2_f32 } else { 1.8_f32 },
             if selected { kit().accent } else { accent_col },
         ),
     ));
 
     // Directional gaze nose triangle
-    let nose_tip = ap + fwd * (sh_thick * 1.65);
-    let nose_base = ap + fwd * (sh_thick * 0.65);
+    let nose_tip = ap + fwd * (sh_thick * 1.75);
+    let nose_base = ap + fwd * (sh_thick * 0.68);
     p.add(Shape::convex_polygon(
         vec![
             nose_tip,
@@ -2002,8 +2117,8 @@ fn paint_actor(
         Stroke::NONE,
     ));
 
-    // Circular head
-    let head_r = (0.13 * zoom).clamp(5.5, 11.0);
+    // Circular head (true-to-scale overhead silhouette)
+    let head_r = (0.13 * zoom).max(6.0);
     p.circle_filled(ap, head_r, col);
     p.circle_stroke(
         ap,
@@ -2291,7 +2406,18 @@ fn fmt_mmss(secs: f32) -> String {
 fn paint_scale_bar(p: &egui::Painter, rect: Rect, zoom: f32, snap_active: bool) {
     let x0 = rect.left() + 14.0;
     let y0 = rect.bottom() - 16.0;
-    let bar_w = zoom.clamp(24.0, 120.0);
+    // Choose a clean architectural metric step whose true pixel width fits
+    // naturally on screen — never clamping away from the actual world scale.
+    let (meters, label) = if zoom >= 240.0 {
+        (0.25_f32, "25 cm")
+    } else if zoom >= 120.0 {
+        (0.5_f32, "50 cm")
+    } else if zoom >= 36.0 {
+        (1.0_f32, "1 m")
+    } else {
+        (2.0_f32, "2 m")
+    };
+    let bar_w = meters * zoom;
     let col = kit().disabled_text;
     p.line_segment(
         [Pos2::new(x0, y0), Pos2::new(x0 + bar_w, y0)],
@@ -2311,7 +2437,7 @@ fn paint_scale_bar(p: &egui::Painter, rect: Rect, zoom: f32, snap_active: bool) 
     p.text(
         Pos2::new(x0 + bar_w * 0.5, y0 - 6.0),
         Align2::CENTER_BOTTOM,
-        "1 m",
+        label,
         FontId::monospace(10.0),
         col,
     );

@@ -4180,7 +4180,37 @@ fn phase3_timeline_basic_shapes_breakdown_pdf_and_live_span_sync() {
         .expect("director's breakdown PDF");
     assert!(breakdown.starts_with(b"%PDF-"));
 
-    // Editing text in Script shifts shot 1A's character span automatically
+    // Floor Plan zoom-in goes well past old 140 px/m cap
+    for _ in 0..8 {
+        h.get_by_label("Zoom in floor plan").click();
+        h.run();
+    }
+
+    // Switch back to Color Map and attach a moment-specific cue via "+ Note"
+    h.get_by_label("Color Map").click();
+    h.run();
+    h.state_mut()
+        .set_shots_char_selection_for_test((1, 8), (1, 18));
+    h.run();
+    h.get_by_label("+ Note").click();
+    h.run();
+    h.get_by_label("Moment note text").click();
+    h.run();
+    h.input_mut()
+        .events
+        .push(egui::Event::Text("Pan right to follow".into()));
+    h.run();
+    h.get_by_label("Add Note").click();
+    h.run();
+    assert_eq!(
+        h.state().project_for_test().unwrap().shots.shots[0]
+            .notes
+            .len(),
+        1,
+        "moment note must attach to covering shot 1A"
+    );
+
+    // Editing text in Script shifts shot 1A's character span AND its moment note automatically
     h.state_mut().apply_editor_commands_for_test(vec![
         scriptcraft_core::edit::EditCommand::InsertText {
             at: scriptcraft_core::edit::Pos {
@@ -4192,7 +4222,20 @@ fn phase3_timeline_basic_shapes_breakdown_pdf_and_live_span_sync() {
         },
     ]);
     h.run();
-    let span = &h.state().project_for_test().unwrap().shots.shots[0].spans[0];
-    assert_eq!(span.start_char, Some(12), "start_char must shift by +7");
-    assert_eq!(span.end_char, Some(32), "end_char must shift by +7");
+    let shot0 = &h.state().project_for_test().unwrap().shots.shots[0];
+    assert_eq!(
+        shot0.spans[0].start_char,
+        Some(12),
+        "start_char must shift by +7"
+    );
+    assert_eq!(
+        shot0.spans[0].end_char,
+        Some(32),
+        "end_char must shift by +7"
+    );
+    assert_eq!(
+        shot0.notes[0].range.start_char,
+        Some(15),
+        "moment note start_char must shift by +7"
+    );
 }

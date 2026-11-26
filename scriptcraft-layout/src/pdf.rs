@@ -197,6 +197,10 @@ pub struct PrintLine {
     /// Optional shot code badge `(label, rgb)` drawn in the right margin on
     /// the first line of a shot-covered span.
     pub shot_tag: Option<(String, (u8, u8, u8))>,
+    /// Moment-specific beat cue spans `(col_start, col_end, margin_note_text)` on `text`.
+    /// `margin_note_text` is non-empty on the first wrapped line of a note and empty on
+    /// continuation lines so the underline spans cleanly while the margin callout prints once.
+    pub shot_notes: Vec<(usize, usize, String)>,
 }
 
 impl PrintLine {
@@ -217,6 +221,7 @@ impl PrintLine {
             shot_tint: None,
             shot_highlights: Vec::new(),
             shot_tag: None,
+            shot_notes: Vec::new(),
         }
     }
 }
@@ -592,6 +597,14 @@ fn layout_pages_inner(
     } else {
         Vec::new()
     };
+    let shot_block_notes: Vec<Vec<(usize, usize, usize, usize)>> =
+        if include_shots && !p.shots.is_empty() {
+            p.shots.resolve_block_notes(&renum)
+        } else {
+            Vec::new()
+        };
+    let mut emitted_note_callouts: std::collections::HashSet<(usize, usize)> =
+        std::collections::HashSet::new();
     let mut shot_total_chars = vec![0usize; p.shots.shots.len()];
     for spans in &shot_char_cov {
         for &(si, c0, c1) in spans {
@@ -748,7 +761,11 @@ fn layout_pages_inner(
                 .get(chunk.bi)
                 .map(Vec::as_slice)
                 .unwrap_or(&[]);
-            if b.styles.is_empty() && block_char_spans.is_empty() {
+            let block_note_spans: &[(usize, usize, usize, usize)] = shot_block_notes
+                .get(chunk.bi)
+                .map(Vec::as_slice)
+                .unwrap_or(&[]);
+            if b.styles.is_empty() && block_char_spans.is_empty() && block_note_spans.is_empty() {
                 let mut text = b
                     .text
                     .split('\n')
@@ -844,6 +861,40 @@ fn layout_pages_inner(
                             }
                         } else if li == 0 {
                             last_tagged_shot = None;
+                        }
+                        if !block_note_spans.is_empty() {
+                            let shown = wl.cols.len().saturating_sub(1);
+                            for &(si, ni, nc0, nc1) in block_note_spans {
+                                let note_text = p
+                                    .shots
+                                    .shots
+                                    .get(si)
+                                    .and_then(|s| s.notes.get(ni))
+                                    .map(|n| n.text.trim())
+                                    .unwrap_or("");
+                                if note_text.is_empty() {
+                                    continue;
+                                }
+                                let mut c_lo: Option<usize> = None;
+                                let mut c_hi: usize = 0;
+                                for (ci, &src_col) in wl.cols.iter().take(shown).enumerate() {
+                                    let abs = para_off + src_col;
+                                    if abs >= nc0 && abs < nc1 {
+                                        if c_lo.is_none() {
+                                            c_lo = Some(ci);
+                                        }
+                                        c_hi = ci + 1;
+                                    }
+                                }
+                                if let Some(col0) = c_lo {
+                                    let callout = if emitted_note_callouts.insert((si, ni)) {
+                                        note_text.to_string()
+                                    } else {
+                                        String::new()
+                                    };
+                                    l.shot_notes.push((col0, c_hi, callout));
+                                }
+                            }
                         }
                         lines.push(l);
                         li += 1;
@@ -953,6 +1004,7 @@ pub fn layout_title_page_for(
             shot_tint: None,
             shot_highlights: Vec::new(),
             shot_tag: None,
+            shot_notes: Vec::new(),
         }
     };
     let blank = || PrintLine::text_line(margin_l, String::new(), false);
@@ -1411,6 +1463,18 @@ fn to_pdf_bytes_inner(
                         draw_summary_text(&mut ops, &bold, &fallback_bold, tag_pt, tx, ty, part);
                     }
                 }
+                ops.push(Op::SetFillColor { col: black.clone() });
+            }
+            if !line.shot_notes.is_empty() {
+                draw_shot_note_ops(
+                    &mut ops,
+                    line,
+                    yy,
+                    text_right,
+                    page_w,
+                    &regular,
+                    &fallback_regular,
+                );
                 ops.push(Op::SetFillColor { col: black.clone() });
             }
             if let Some(revision) = line.revision {
@@ -2054,7 +2118,29 @@ fn build_shot_sheet_pages(
         };
         let lens_lines = wrap_paragraphs(lens_raw, lens_chars);
         let full_covered = p.shots.covered_text_full(shot, &p.blocks);
-        let (desc_lines, excerpt_lines) = if shot.description.trim().is_empty() {
+        let note_block_index = scriptcraft_core::shots::block_index_map(&p.blocks);
+        let mut note_suffix_lines: Vec<String> = Vec::new();
+        for note in &shot.notes {
+            let nt = note.text.trim();
+            if nt.is_empty() {
+                continue;
+            }
+            let ex = note.range.excerpt(&note_block_index, &p.blocks);
+            let ex_short = if ex.chars().count() > 28 {
+                let mut s: String = ex.chars().take(27).collect();
+                s.push('…');
+                s
+            } else {
+                ex
+            };
+            let line = if ex_short.is_empty() {
+                format!("* Cue: {nt}")
+            } else {
+                format!("* \"{ex_short}\" - {nt}")
+            };
+            note_suffix_lines.extend(wrap_paragraphs(&line, desc_chars));
+        }
+        let (mut desc_lines, excerpt_lines) = if shot.description.trim().is_empty() {
             let src = if legend_mode {
                 p.shots.covered_excerpt(shot, &p.blocks)
             } else {
@@ -2070,6 +2156,7 @@ fn build_shot_sheet_pages(
             };
             (d, ex)
         };
+        desc_lines.extend(note_suffix_lines);
 
         // Ensure at least the first line of the row fits on the current page.
         if *y - line_h * 1.5 < bottom {
@@ -2625,6 +2712,18 @@ fn render_script_page_ops(
                     draw_summary_text(&mut ops, bold, fallback_bold, tag_pt, tx, ty, part);
                 }
             }
+            ops.push(Op::SetFillColor { col: black.clone() });
+        }
+        if !line.shot_notes.is_empty() {
+            draw_shot_note_ops(
+                &mut ops,
+                line,
+                yy,
+                text_right,
+                page_w,
+                regular,
+                fallback_regular,
+            );
             ops.push(Op::SetFillColor { col: black.clone() });
         }
         if let Some(revision) = line.revision {
@@ -3194,34 +3293,39 @@ fn draw_floor_plan_vector(
             ops.push(Op::SetOutlineThickness { pt: Pt(0.8) });
             push_pdf_dashed_line(ops, ap, mp, 1.8, 1.4);
         }
-        // Shoulders + head
+        // Shoulders + head (true-to-scale ~0.60m overhead figure matching metric scale bar)
         let fwd = (rad.cos(), -rad.sin()); // PDF +Y is up
         let right = (-fwd.1, fwd.0);
-        let sh_half = (0.26 * scale).clamp(2.2, 4.4);
-        let sh_thick = (0.11 * scale).clamp(1.0, 2.0);
+        let sh_half = (0.30 * scale).max(2.2);
+        let sh_thick = (0.14 * scale).max(1.0);
         ops.push(Op::SetFillColor {
-            col: Color::Greyscale(Greyscale::new(0.97, None)),
+            col: Color::Rgb(Rgb::new(
+                0.80 + 0.20 * (r as f32 / 255.0),
+                0.80 + 0.20 * (g as f32 / 255.0),
+                0.80 + 0.20 * (b as f32 / 255.0),
+                None,
+            )),
         });
         ops.push(Op::SetOutlineColor { col: acol.clone() });
-        ops.push(Op::SetOutlineThickness { pt: Pt(0.85) });
+        ops.push(Op::SetOutlineThickness { pt: Pt(0.95) });
         push_pdf_polygon(
             ops,
             &[
                 (
-                    ap.0 - right.0 * sh_half - fwd.0 * sh_thick * 0.7,
-                    ap.1 - right.1 * sh_half - fwd.1 * sh_thick * 0.7,
+                    ap.0 - right.0 * sh_half - fwd.0 * sh_thick * 0.72,
+                    ap.1 - right.1 * sh_half - fwd.1 * sh_thick * 0.72,
                 ),
                 (
-                    ap.0 + right.0 * sh_half - fwd.0 * sh_thick * 0.7,
-                    ap.1 + right.1 * sh_half - fwd.1 * sh_thick * 0.7,
+                    ap.0 + right.0 * sh_half - fwd.0 * sh_thick * 0.72,
+                    ap.1 + right.1 * sh_half - fwd.1 * sh_thick * 0.72,
                 ),
                 (
-                    ap.0 + right.0 * sh_half * 0.85 + fwd.0 * sh_thick * 0.7,
-                    ap.1 + right.1 * sh_half * 0.85 + fwd.1 * sh_thick * 0.7,
+                    ap.0 + right.0 * sh_half * 0.85 + fwd.0 * sh_thick * 0.72,
+                    ap.1 + right.1 * sh_half * 0.85 + fwd.1 * sh_thick * 0.72,
                 ),
                 (
-                    ap.0 - right.0 * sh_half * 0.85 + fwd.0 * sh_thick * 0.7,
-                    ap.1 - right.1 * sh_half * 0.85 + fwd.1 * sh_thick * 0.7,
+                    ap.0 - right.0 * sh_half * 0.85 + fwd.0 * sh_thick * 0.72,
+                    ap.1 - right.1 * sh_half * 0.85 + fwd.1 * sh_thick * 0.72,
                 ),
             ],
             PaintMode::FillStroke,
@@ -3245,8 +3349,8 @@ fn draw_floor_plan_vector(
             ],
             PaintMode::Fill,
         );
-        // Head circle
-        let hr = (0.12 * scale).clamp(1.2, 2.2);
+        // Head circle (true-to-scale overhead silhouette)
+        let hr = (0.125 * scale).max(1.2);
         let head_pts: Vec<(f32, f32)> = (0..12)
             .map(|k| {
                 let a = std::f32::consts::TAU * (k as f32 / 12.0);
@@ -3389,10 +3493,17 @@ fn draw_floor_plan_vector(
         );
     }
 
-    // 1 m architectural scale bar in bottom-left corner
+    // True-to-scale metric architectural scale bar in bottom-left corner
     let sx0 = box_x + 4.0;
     let sy0 = box_y + 3.2;
-    let bar_w = scale.clamp(5.0, 26.0);
+    let (scale_m, scale_lbl) = if scale >= 24.0 {
+        (0.5_f32, "50 cm")
+    } else if scale >= 6.0 {
+        (1.0_f32, "1 m")
+    } else {
+        (2.0_f32, "2 m")
+    };
+    let bar_w = scale_m * scale;
     ops.push(Op::SetOutlineColor {
         col: Color::Greyscale(Greyscale::new(0.42, None)),
     });
@@ -3407,15 +3518,77 @@ fn draw_floor_plan_vector(
     ops.push(Op::SetFillColor {
         col: Color::Greyscale(Greyscale::new(0.42, None)),
     });
+    let lbl_w = scale_lbl.chars().count() as f32 * CHAR_MM * (6.5 / FONT_PT);
     draw_summary_text(
         ops,
         regular,
         fallback_regular,
         6.5,
-        sx0 + bar_w * 0.5 - 2.2,
+        (sx0 + (bar_w - lbl_w) * 0.5).max(box_x + 2.0),
         sy0 + 1.2,
-        "1 m",
+        scale_lbl,
     );
+}
+
+fn draw_shot_note_ops(
+    ops: &mut Vec<Op>,
+    line: &PrintLine,
+    yy: f32,
+    text_right: f32,
+    page_w: f32,
+    regular: &Face,
+    fallback_regular: &Face,
+) {
+    let base_x = if line.right_aligned {
+        line.x_mm - line.text.chars().count() as f32 * CHAR_MM
+    } else {
+        line.x_mm
+    };
+    let amber = Color::Rgb(Rgb::new(0.82, 0.48, 0.04, None));
+    ops.push(Op::SetOutlineColor { col: amber.clone() });
+    ops.push(Op::SetOutlineThickness { pt: Pt(0.9) });
+    let mut callouts: Vec<&str> = Vec::new();
+    for (c0, c1, note_text) in &line.shot_notes {
+        if c0 < c1 {
+            let ux0 = base_x + *c0 as f32 * CHAR_MM;
+            let ux1 = base_x + *c1 as f32 * CHAR_MM;
+            let uy = yy - 0.55;
+            push_pdf_polyline(ops, &[(ux0, uy), (ux1, uy)], false);
+        }
+        if !note_text.trim().is_empty() {
+            callouts.push(note_text.trim());
+        }
+    }
+    if !callouts.is_empty() {
+        let note_pt = 6.0_f32;
+        let note_char_w = CHAR_MM * (note_pt / FONT_PT);
+        let rx = text_right + 2.2;
+        let avail_w = (page_w - 3.5 - rx).max(12.0);
+        let max_chars = (avail_w / note_char_w).floor().max(8.0) as usize;
+        let joined = format!("* {}", callouts.join("; "));
+        let mut wrapped = wrap_title_line(&joined, max_chars);
+        if wrapped.len() > 4 {
+            wrapped.truncate(4);
+            if let Some(last) = wrapped.last_mut() {
+                let take_n = max_chars.saturating_sub(1);
+                let mut s: String = last.chars().take(take_n).collect();
+                s.push('…');
+                *last = s;
+            }
+        }
+        ops.push(Op::SetFillColor { col: amber });
+        for (ri, part) in wrapped.iter().enumerate() {
+            draw_summary_text(
+                ops,
+                regular,
+                fallback_regular,
+                note_pt,
+                rx,
+                yy + 0.3 - (ri as f32) * 2.8,
+                part,
+            );
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3590,9 +3763,32 @@ fn build_directors_breakdown_pages(
             } else {
                 Vec::new()
             };
+            let note_index = scriptcraft_core::shots::block_index_map(&p.blocks);
+            let mut note_wrapped: Vec<String> = Vec::new();
+            for note in &shot.notes {
+                let nt = note.text.trim();
+                if nt.is_empty() {
+                    continue;
+                }
+                let ex = note.range.excerpt(&note_index, &p.blocks);
+                let ex_short = if ex.chars().count() > 30 {
+                    let mut s: String = ex.chars().take(29).collect();
+                    s.push('…');
+                    s
+                } else {
+                    ex
+                };
+                let cue_line = if ex_short.is_empty() {
+                    format!("* Cue: {nt}")
+                } else {
+                    format!("* \"{ex_short}\" - {nt}")
+                };
+                note_wrapped.extend(wrap_title_line(&cue_line, max_chars));
+            }
 
             let text_h = (hdr_wrapped.len() as f32) * 4.3
                 + (desc_wrapped.len() as f32) * 4.0
+                + (note_wrapped.len() as f32) * 3.8
                 + (cov_wrapped.len() as f32) * 3.8
                 + 4.0;
             let card_h = if img_entry.is_some() {
@@ -3678,6 +3874,15 @@ fn build_directors_breakdown_pages(
             for dl in &desc_wrapped {
                 draw_summary_text(&mut ops, regular, fallback_regular, body_pt, text_x, ty, dl);
                 ty -= 4.0;
+            }
+            if !note_wrapped.is_empty() {
+                ops.push(Op::SetFillColor {
+                    col: Color::Rgb(Rgb::new(0.74, 0.42, 0.04, None)),
+                });
+                for nl in &note_wrapped {
+                    draw_summary_text(&mut ops, bold, fallback_bold, 7.6, text_x, ty, nl);
+                    ty -= 3.8;
+                }
             }
             if !cov_wrapped.is_empty() {
                 ops.push(Op::SetFillColor { col: muted.clone() });
