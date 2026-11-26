@@ -3,16 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ScriptCraft — the revision-first screenwriting &amp; shot breakdown studio</title>
-<meta name="description" content="ScriptCraft is a free, open-source screenwriting and shot breakdown studio for macOS, Windows and Linux. Production revisions, 2D blocking floor plans, Director's Breakdown PDFs, KIT Scenarist, Final Draft, Fade In, Fountain and Markdown — all local-first.">
+<title>ScriptCraft — free screenwriting &amp; shot planning studio</title>
+<meta name="description" content="A free, offline desktop app for screenwriting, production revisions, shot breakdowns, and 2D camera floor plans. For macOS, Windows, and Linux.">
 <meta name="theme-color" content="#f6f4ef" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0b0e14" media="(prefers-color-scheme: dark)">
 <link rel="icon" type="image/png" href="assets/icon.png">
 <link rel="apple-touch-icon" href="assets/icon.png">
 <link rel="stylesheet" href="styles.css">
 <meta property="og:type" content="website">
-<meta property="og:title" content="ScriptCraft — screenwriting, production revisions &amp; 2D shot breakdown">
-<meta property="og:description" content="Free and open source. Production revisions, character-level shot breakdown, interactive 2D blocking floor plans, Director's Breakdown PDFs, and real exchanges with KIT Scenarist, Final Draft and Fade In.">
+<meta property="og:title" content="ScriptCraft — free screenwriting &amp; shot planning studio">
+<meta property="og:description" content="Write scripts, track production revisions, block scenes on a 2D floor plan, and export print-ready PDFs. Free and offline.">
 <meta property="og:image" content="assets/icon.png">
 <meta name="twitter:card" content="summary">
 </head>
@@ -26,10 +26,9 @@
       <span>ScriptCraft</span>
     </a>
     <nav class="nav" aria-label="Main">
-      <a href="#shots">Shots &amp; Blocking</a>
       <a href="#features">Features</a>
-      <a href="#formats">Formats</a>
       <a href="#screenshots">Screenshots</a>
+      <a href="#formats">Formats</a>
       <a href="#faq">FAQ</a>
       <a class="nav-github" href="https://github.com/MihailM17/scriptcraft">GitHub</a>
     </nav>
@@ -47,199 +46,148 @@
   <section class="hero" id="top">
     <div class="wrap hero-grid">
       <div class="hero-copy">
-        <p class="eyebrow"><span class="dot"></span> Free &amp; open source · v0.9.0 · New Shots &amp; 2D Blocking Studio</p>
-        <h1>Write the script.<br>Track revisions.<br><em>Block every shot.</em></h1>
-        <p class="lede">ScriptCraft is a local-first screenwriting and directing studio built around what productions actually run on: coloured revisions, character-level shot breakdowns, interactive 2D floor plans, and print-ready Director's Breakdown PDFs.</p>
+        <p class="eyebrow"><span class="dot"></span> Free &amp; open source · v0.9.0</p>
+        <h1>Write the script.<br><em>Plan every shot.</em></h1>
+        <p class="lede">A free desktop studio for screenwriting, production revisions, and visual shot planning — with no accounts or subscriptions.</p>
         <div class="cta-row">
           <a class="btn" href="https://github.com/MihailM17/scriptcraft/releases/latest">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5M4 20h16"/></svg>
-            Download v0.9.0
+            Download for free
           </a>
-          <a class="btn btn-ghost" href="#shots">Explore v0.9.0 Shots</a>
+          <a class="btn btn-ghost" href="#screenshots">See how it looks</a>
         </div>
-        <p class="fineprint">macOS, Windows and Linux · Apache-2.0 · no account · your files stay on your disk</p>
+        <p class="fineprint">macOS, Windows &amp; Linux · Works completely offline · Your files stay on your computer</p>
       </div>
       <figure class="hero-shot">
         <div class="browser">
           <div class="browser-bar" aria-hidden="true"><span></span><span></span><span></span></div>
-          <img src="assets/shots-floor-plan.webp" alt="ScriptCraft v0.9.0 showing the interactive 2D top-down blocking floor plan with cameras, lens FOV cones, actors, props, 180-degree axis, and scene timeline." width="1360" height="880">
+          <img src="assets/shots-floor-plan.webp" alt="ScriptCraft showing a 2D camera floor plan with actors, props, camera angles, and a scene timeline." width="1360" height="880">
         </div>
-        <figcaption>New in v0.9.0: true-to-scale 2D blocking floor plans, live camera spotlight timeline, and shot inspector in one native Rust app.</figcaption>
+        <figcaption>Block actors and cameras on a 2D floor plan right inside your script project.</figcaption>
       </figure>
     </div>
   </section>
 
-  <section class="strip" aria-label="Principles">
-    <div class="wrap strip-grid strip-grid-4">
-      <div><strong>Revision-first</strong><span>Coloured revisions, locked pages, honest page counts.</span></div>
-      <div><strong>Shot breakdown &amp; blocking</strong><span>Lined script, 2D floor plans, timeline spotlight &amp; Breakdown PDFs.</span></div>
-      <div><strong>Real interchange</strong><span>KIT Scenarist, Final Draft, Fade In, Fountain, Markdown.</span></div>
-      <div><strong>Local by design</strong><span>No cloud account. No subscription. No lock-in.</span></div>
-    </div>
-  </section>
-
-  <section class="section section-alt" id="shots">
-    <div class="wrap">
-      <p class="kicker">New in v0.9.0 · Shots Workspace</p>
-      <h2>From script pages to camera blocking — without leaving your draft.</h2>
-      <p class="section-lede">Mark exact phrases in the script, block actors and lens-accurate cameras on a true-to-scale 2D floor plan, scrub through cuts in real time, attach storyboard frames, and export a complete Director's Breakdown PDF.</p>
-
-      <div class="cards cards-shots">
-        <article class="card">
-          <div class="card-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24"><path d="M4 6h16M4 11h11M4 16h14M18 11v8M15 15h6"/></svg>
-          </div>
-          <h3>Color Map, Coverage Rails &amp; Moment Cues</h3>
-          <p>Highlight any phrase or passage across 20 studio colors with automatic span merging. Attach moment-specific camera cues (like <em>"Pan right to follow hand"</em>) directly onto any beat without splitting the shot.</p>
-        </article>
-        <article class="card">
-          <div class="card-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="11" r="2.2"/><path d="M13 15 18 11v8z"/></svg>
-          </div>
-          <h3>True-to-Scale 2D Floor Plan &amp; Modeling Shapes</h3>
-          <p>Auto-populates cast and lens-calibrated FOV cones, 180° Line of Action, and dolly tracks. Model any set with walls, doors, cars, lights, and resizable Square, Circle, and Triangle shapes with <code>Ctrl</code> grid/angle snapping.</p>
-        </article>
-        <article class="card">
-          <div class="card-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m10 8.5 6 3.5-6 3.5z"/></svg>
-          </div>
-          <h3>Scene Timeline &amp; Active Camera Spotlight</h3>
-          <p>Scrub or play through a scene's chronological cuts to illuminate only the active camera while graying out inactive setups—live-synced with Split-view script highlights and on-canvas Director's Cue callouts.</p>
-        </article>
-        <article class="card">
-          <div class="card-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6zM15 3v4h4"/><rect x="8.5" y="10.5" width="7" height="4.5" rx=".8"/><path d="M8.5 18h7"/></svg>
-          </div>
-          <h3>Director's Breakdown PDF &amp; Storyboards</h3>
-          <p>Attach storyboard or reference photos per shot and export a unified Title Page → Vector 2D Floor Plans &amp; Shot Cards → Full Colored Script PDF, plus Shot List PDFs and Cyrillic-safe CSV.</p>
-        </article>
-      </div>
-
-      <div class="shot-grid">
-        <figure class="shot">
-          <div class="browser">
-            <div class="browser-bar" aria-hidden="true"><span></span><span></span><span></span></div>
-            <img src="assets/shots-color-map.webp" alt="ScriptCraft Shots workspace in Color Map mode with character-level shot highlights, 20-color palette, and Shot Inspector." width="1360" height="880" loading="lazy">
-          </div>
-          <figcaption><strong>Color Map &amp; Shot Inspector.</strong> Character-exact coverage highlights, 20 studio colors, lens presets, moment cues, and live duration estimates.</figcaption>
-        </figure>
-        <figure class="shot">
-          <div class="browser">
-            <div class="browser-bar" aria-hidden="true"><span></span><span></span><span></span></div>
-            <img src="assets/shots-split-view.webp" alt="ScriptCraft Split view showing the color-coded screenplay side by side with the interactive 2D blocking floor plan and beat timeline." width="1360" height="880" loading="lazy">
-          </div>
-          <figcaption><strong>Split View &amp; Live Timeline.</strong> Mark up beats on the left while blocking cameras and scrubbing cuts on the right.</figcaption>
-        </figure>
-      </div>
+  <section class="strip" aria-label="Highlights">
+    <div class="wrap strip-grid">
+      <div><strong>Write &amp; revise</strong><span>Standard screenplay pages, locked numbers, and coloured revisions.</span></div>
+      <div><strong>Plan every shot</strong><span>Highlight coverage, draw 2D floor plans, and scrub scene cuts.</span></div>
+      <div><strong>Yours to keep</strong><span>Free desktop app. No cloud account, no subscription, no lock-in.</span></div>
     </div>
   </section>
 
   <section class="section" id="features">
     <div class="wrap">
-      <p class="kicker">Why ScriptCraft</p>
-      <h2>The work a production actually depends on.</h2>
-      <p class="section-lede">A screenplay is not finished when the draft is. It is finished when pages are locked, scenes are numbered, revisions are issued, and everyone is working from the same coloured pages.</p>
+      <p class="kicker">What it does</p>
+      <h2>From first draft to shooting day in one app.</h2>
+      <p class="section-lede">Everything you need to write a screenplay, manage rewrites, and prepare your shot list — without juggling three paid subscriptions.</p>
 
       <div class="cards">
         <article class="card">
           <div class="card-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24"><path d="M4 5h16v14H4zM8 5v14M16 5v14M4 9h4M4 15h4M16 9h4M16 15h4"/></svg>
+            <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/><circle cx="19" cy="18" r="2"/></svg>
           </div>
-          <h3>Revisions that behave like production</h3>
-          <p>Blue → Pink → Yellow → … with dated sets and page-count baselines. Changed blocks get coloured margin bars; revision-pages mode shows only the current issue.</p>
+          <h3>Calm, fast writing</h3>
+          <p>Standard A4 or US Letter pages, smart character and location autocomplete, built-in spellcheck, and 35 light and dark themes.</p>
         </article>
         <article class="card">
           <div class="card-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24"><path d="M4 7h7v10H4zM13 7h7v10h-7zM7.5 12h.01M16.5 12h.01"/></svg>
+            <svg viewBox="0 0 24 24"><path d="M4 5h16v14H4zM8 5v14M16 5v14M4 9h4M4 15h4M16 9h4M16 15h4"/></svg>
           </div>
-          <h3>Speaks your tools</h3>
-          <p>Open <code>.kitsp</code> projects directly. Import Final Draft <code>.fdx</code>, Fade In <code>.fadein</code> and Fountain. Export PDF, FDX, Fade In, Fountain or Markdown.</p>
+          <h3>Production revisions</h3>
+          <p>Lock pages and scene numbers, track changes with coloured revision sets (Blue, Pink, Yellow…), and compare any two drafts side by side.</p>
+        </article>
+        <article class="card">
+          <div class="card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M4 6h16M4 11h11M4 16h14M18 11v8M15 15h6"/></svg>
+          </div>
+          <h3>Visual shot breakdown</h3>
+          <p>Highlight any phrase or line on the script to assign shots, colour-code your coverage, and attach quick camera cues to specific moments.</p>
+        </article>
+        <article class="card">
+          <div class="card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="11" r="2.2"/><path d="M13 15 18 11v8z"/></svg>
+          </div>
+          <h3>2D floor plans &amp; timeline</h3>
+          <p>Place actors, props, and cameras with real lens angles, then scrub the scene timeline to spotlight the active camera at each beat.</p>
         </article>
         <article class="card">
           <div class="card-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6zM15 3v4h4M9 12h7M9 16h7"/></svg>
           </div>
-          <h3>Page-exact output</h3>
-          <p>A4 and Hollywood US Letter geometry, 12&nbsp;pt Courier, inline Bold/Italic/Underline, optional bold character cues, scene numbers, <code>(MORE)</code>/<code>(CONT'D)</code>, locked pages, and full Director's Breakdown PDFs.</p>
-        </article>
-        <article class="card">
-          <div class="card-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/><circle cx="19" cy="18" r="2"/></svg>
-          </div>
-          <h3>Built for long days</h3>
-          <p>Typewriter scrolling, focus mode, find and replace, scene navigator, spellcheck in English, Bulgarian and Russian, four page faces including Liberation Mono, monochrome paper, and 35 contrast-tested themes.</p>
+          <h3>Print-ready PDFs</h3>
+          <p>Export clean scripts, shot lists, coloured shooting scripts, or a complete Director's Breakdown PDF with floor plans and storyboards.</p>
         </article>
         <article class="card">
           <div class="card-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24"><path d="M12 3 4 7v6c0 4.5 3.4 7.3 8 8 4.6-.7 8-3.5 8-8V7z"/><path d="m9 12 2 2 4-4"/></svg>
           </div>
-          <h3>Your files, not a subscription</h3>
-          <p>Projects live on your disk as KIT-compatible files. Autosave and crash recovery are built in. Nothing is uploaded, and there is no account to create.</p>
-        </article>
-        <article class="card">
-          <div class="card-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24"><path d="m8 6-5 6 5 6M16 6l5 6-5 6M13 4l-2 16"/></svg>
-          </div>
-          <h3>Open source, end to end</h3>
-          <p>Apache-2.0 Rust source. Read it, build it, audit it, or send a patch. The app has no telemetry and no hidden service dependency.</p>
+          <h3>Offline &amp; open source</h3>
+          <p>Your projects live on your own drive with automatic backups and crash recovery. Free forever, with no tracking and no account required.</p>
         </article>
       </div>
     </div>
   </section>
 
-  <section class="section section-alt" id="formats">
+  <section class="section section-alt" id="screenshots">
+    <div class="wrap">
+      <p class="kicker">A look inside</p>
+      <h2>Clean space for writing and directing.</h2>
+      <div class="shot-grid">
+        <figure class="shot">
+          <div class="browser">
+            <div class="browser-bar" aria-hidden="true"><span></span><span></span><span></span></div>
+            <img src="assets/scriptcraft-dark.webp" alt="ScriptCraft screenplay editor in dark mode with scene list and formatting panel." width="1360" height="880" loading="lazy">
+          </div>
+          <figcaption><strong>Screenplay editor.</strong> Distraction-free pages with a live scene list and fast formatting.</figcaption>
+        </figure>
+        <figure class="shot">
+          <div class="browser">
+            <div class="browser-bar" aria-hidden="true"><span></span><span></span><span></span></div>
+            <img src="assets/shots-color-map.webp" alt="ScriptCraft shot breakdown workspace with colour-coded script highlights and shot inspector." width="1360" height="880" loading="lazy">
+          </div>
+          <figcaption><strong>Shot breakdown.</strong> Highlight lines to tag shots, pick lenses, and attach moment cues or storyboards.</figcaption>
+        </figure>
+        <figure class="shot">
+          <div class="browser">
+            <div class="browser-bar" aria-hidden="true"><span></span><span></span><span></span></div>
+            <img src="assets/shots-split-view.webp" alt="ScriptCraft Split view with the coloured screenplay on the left and the 2D floor plan on the right." width="1360" height="880" loading="lazy">
+          </div>
+          <figcaption><strong>Split view.</strong> Keep your screenplay on the left while blocking cameras and scrubbing cuts on the right.</figcaption>
+        </figure>
+        <figure class="shot">
+          <div class="browser">
+            <div class="browser-bar" aria-hidden="true"><span></span><span></span><span></span></div>
+            <img src="assets/scriptcraft-light.webp" alt="ScriptCraft screenplay editor in a bright light theme." width="1360" height="880" loading="lazy">
+          </div>
+          <figcaption><strong>Light &amp; dark themes.</strong> Switch between 35 themes or keep crisp white paper in dark mode.</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="formats">
     <div class="wrap formats-grid">
       <div>
-        <p class="kicker">Interchange</p>
-        <h2>Move between apps without rewriting the script.</h2>
-        <p class="section-lede">ScriptCraft keeps your scene structure, title page and scene numbers when it can, and tells you when a format cannot carry something.</p>
-        <ul class="checks">
-          <li>KIT Scenarist projects open and save in the same schema.</li>
-          <li>Final Draft exports carry revision colours, marks and the title page.</li>
-          <li>Fade In exports are real ZIP + OSF documents, not renamed XML.</li>
-          <li>Markdown is a clean one-way copy for notes, wikis and review.</li>
-        </ul>
+        <p class="kicker">Compatibility</p>
+        <h2>Works with the formats you already use.</h2>
+        <p class="section-lede">Open your existing scripts without starting over, and share clean files with cast, crew, or co-writers on other apps.</p>
       </div>
       <div class="table-wrap">
         <table class="formats">
           <caption class="sr-only">Supported file formats</caption>
           <thead>
-            <tr><th scope="col">Format</th><th scope="col">Open</th><th scope="col">Save</th></tr>
+            <tr><th scope="col">Format</th><th scope="col">Open</th><th scope="col">Export</th></tr>
           </thead>
           <tbody>
             <tr><th scope="row">KIT Scenarist <code>.kitsp</code></th><td class="yes">Yes</td><td class="yes">Yes</td></tr>
             <tr><th scope="row">Final Draft <code>.fdx</code></th><td class="yes">Yes</td><td class="yes">Yes</td></tr>
             <tr><th scope="row">Fade In <code>.fadein</code></th><td class="yes">Yes</td><td class="yes">Yes</td></tr>
             <tr><th scope="row">Fountain <code>.fountain</code></th><td class="yes">Yes</td><td class="yes">Yes</td></tr>
-            <tr><th scope="row">Markdown <code>.md</code></th><td class="muted">—</td><td class="yes">Yes</td></tr>
-            <tr><th scope="row">PDF</th><td class="muted">—</td><td class="yes">Yes</td></tr>
+            <tr><th scope="row">PDF (Script, Shot List &amp; Breakdown)</th><td class="muted">—</td><td class="yes">Yes</td></tr>
+            <tr><th scope="row">CSV &amp; Markdown</th><td class="muted">—</td><td class="yes">Yes</td></tr>
           </tbody>
         </table>
-        <p class="table-note">Dual dialogue is native in FDX and Fade In. Fountain and Markdown exports mark it as consecutive dialogue and say so in the status line.</p>
-      </div>
-    </div>
-  </section>
-
-  <section class="section" id="screenshots">
-    <div class="wrap">
-      <p class="kicker">A look inside</p>
-      <h2>Dark room, paper page, same script.</h2>
-      <p class="section-lede">Pick a palette and keep the page you are writing. The editor and the PDF use the same line grid, so what you see is what prints.</p>
-      <div class="shot-grid">
-        <figure class="shot">
-          <div class="browser">
-            <div class="browser-bar" aria-hidden="true"><span></span><span></span><span></span></div>
-            <img src="assets/scriptcraft-dark.webp" alt="The ScriptCraft editor in a dark theme with the scene navigator and revision toolbar." width="1360" height="880" loading="lazy">
-          </div>
-          <figcaption><strong>Focused drafting.</strong> Scene navigator, revision tools and a page that stays a page.</figcaption>
-        </figure>
-        <figure class="shot">
-          <div class="browser">
-            <div class="browser-bar" aria-hidden="true"><span></span><span></span><span></span></div>
-            <img src="assets/scriptcraft-light.webp" alt="The ScriptCraft editor in the KIT Scenarist light theme, showing a formatted screenplay page." width="1360" height="880" loading="lazy">
-          </div>
-          <figcaption><strong>KIT light.</strong> The published KIT palette, with the familiar screenplay page in the middle.</figcaption>
-        </figure>
       </div>
     </div>
   </section>
@@ -248,18 +196,17 @@
     <div class="wrap">
       <div class="download-head">
         <div>
-          <p class="kicker">Get ScriptCraft</p>
-          <h2>Free on every desktop you write on.</h2>
-          <p class="section-lede">Every build is published on GitHub Releases with a SHA-256 checksum. The in-app updater verifies the download before it replaces the app.</p>
+          <p class="kicker">Download</p>
+          <h2>Free for Mac, Windows and Linux.</h2>
         </div>
-        <a class="btn" href="https://github.com/MihailM17/scriptcraft/releases/latest">Open the latest release</a>
+        <a class="btn" href="https://github.com/MihailM17/scriptcraft/releases/latest">Download v0.9.0</a>
       </div>
       <div class="os-grid">
         <a class="os-card" href="https://github.com/MihailM17/scriptcraft/releases/latest">
           <span class="os-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24"><path d="M16.4 12.8c0-2 1.7-3 1.8-3.1a3.9 3.9 0 0 0-3.1-1.7c-1.3-.1-2.6.8-3.2.8s-1.7-.8-2.8-.8A4.1 4.1 0 0 0 5.6 10c-1.5 2.6-.4 6.4 1 8.5.7 1 1.5 2.1 2.6 2.1s1.4-.7 2.7-.7 1.6.7 2.7.7 1.8-1 2.5-2a9 9 0 0 0 1.1-2.3 3.6 3.6 0 0 1-2.3-3.5ZM14.2 6.3a3.7 3.7 0 0 0 .8-2.6 3.8 3.8 0 0 0-2.5 1.3 3.6 3.6 0 0 0-.9 2.5 3.2 3.2 0 0 0 2.6-1.2Z"/></svg>
           </span>
-          <span><strong>macOS</strong><small>.dmg · Apple silicon &amp; Intel</small></span>
+          <span><strong>macOS</strong><small>.dmg · Apple silicon</small></span>
           <span class="os-arrow" aria-hidden="true">→</span>
         </a>
         <a class="os-card" href="https://github.com/MihailM17/scriptcraft/releases/latest">
@@ -277,44 +224,32 @@
           <span class="os-arrow" aria-hidden="true">→</span>
         </a>
       </div>
-      <p class="fineprint">The macOS build is ad-hoc signed, and Windows/Linux builds are unsigned. On first launch, macOS may ask you to right-click → Open. There is no Developer ID or notarisation yet.</p>
+      <p class="fineprint">Note: ScriptCraft isn't code-signed yet. On macOS, right-click the app and choose Open the first time you launch it.</p>
     </div>
   </section>
 
   <section class="section" id="faq">
     <div class="wrap faq-wrap">
       <div>
-        <p class="kicker">Questions</p>
-        <h2>Before you download.</h2>
+        <p class="kicker">FAQ</p>
+        <h2>Common questions.</h2>
       </div>
       <div class="faq">
         <details>
           <summary>Is ScriptCraft really free?</summary>
-          <p>Yes. It is Apache-2.0 open source. There is no account, no trial timer, no subscription and no telemetry.</p>
+          <p>Yes. It is completely free and open source — no account, no trial limit, and no subscription.</p>
         </details>
         <details>
-          <summary>Will it open my KIT Scenarist project?</summary>
-          <p>Yes. <code>.kitsp</code> is the native project format. ScriptCraft preserves unknown sidecar rows, so opening and saving a KIT project does not throw away data it does not understand.</p>
+          <summary>Will it open my Final Draft, Fade In, or KIT Scenarist files?</summary>
+          <p>Yes. You can open and export <code>.fdx</code>, <code>.fadein</code>, <code>.kitsp</code>, and <code>.fountain</code> scripts directly.</p>
         </details>
         <details>
-          <summary>Where are my shots, floor plans and storyboards saved?</summary>
-          <p>Directly inside your local <code>.kitsp</code> file as a versioned ScriptCraft sidecar row. KIT Scenarist safely ignores it, live script edits keep your shot spans and moment notes in sync, and nothing ever leaves your disk.</p>
+          <summary>Where are my scripts, shots, and floor plans saved?</summary>
+          <p>Everything stays on your computer inside your project file. Nothing is uploaded to any server, and autosave protects your work.</p>
         </details>
         <details>
-          <summary>Can I exchange files with Final Draft or Fade In?</summary>
-          <p>Import and export both work for Final Draft <code>.fdx</code> and Fade In <code>.fadein</code>. Scene numbers, the title page, notes and — where the format supports it — dual dialogue are carried across.</p>
-        </details>
-        <details>
-          <summary>Does the PDF match KIT's printed page?</summary>
-          <p>Yes. The body is regular Courier, and only the title-page title and page numbers are bold, exactly as KIT Scenarist prints them. The editor uses the same 12&nbsp;pt grid, so page breaks match.</p>
-        </details>
-        <details>
-          <summary>Does it update itself?</summary>
-          <p>The app checks GitHub Releases and can download, verify and install a newer build in place. Because the builds are not signed yet, Gatekeeper or SmartScreen may still ask you to confirm the first launch.</p>
-        </details>
-        <details>
-          <summary>Where do I report a bug?</summary>
-          <p>Open an issue on <a href="https://github.com/MihailM17/scriptcraft/issues">GitHub</a>. Include your platform, the app version and, if the app crashed, the <code>panic.log</code> written next to your configuration.</p>
+          <summary>Where can I report a bug or request a feature?</summary>
+          <p>Open an issue anytime on <a href="https://github.com/MihailM17/scriptcraft/issues">GitHub</a>.</p>
         </details>
       </div>
     </div>
@@ -327,7 +262,7 @@
       <img src="assets/icon.png" alt="" width="28" height="28">
       <span>ScriptCraft</span>
     </div>
-    <p>Built for writers who revise. Apache-2.0.</p>
+    <p>Free &amp; open-source screenwriting studio.</p>
     <nav aria-label="Footer">
       <a href="https://github.com/MihailM17/scriptcraft">Source</a>
       <a href="https://github.com/MihailM17/scriptcraft/releases">Releases</a>
