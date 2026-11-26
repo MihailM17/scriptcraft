@@ -9,6 +9,7 @@
 //! `scenario_data`, so KIT Scenarist ignores it cleanly.
 
 use crate::model::{ElementType, Scene, ScriptBlock, ACTION_S_PER_WORD, DIALOG_S_PER_WORD};
+use crate::revision::RevisionColor;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
@@ -418,9 +419,25 @@ pub struct Shot {
     /// Script ranges covered by this shot.
     #[serde(default)]
     pub spans: Vec<ShotRange>,
+    /// Optional storyboard or reference frame image stored as base64-encoded PNG/JPEG.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference_image: Option<String>,
 }
 
-/// Standard architectural & set prop types for the 2D top-down floor plan.
+impl Shot {
+    /// Decode the attached storyboard/reference image bytes (if any).
+    pub fn reference_image_bytes(&self) -> Option<Vec<u8>> {
+        self.reference_image.as_deref().and_then(decode_base64)
+    }
+
+    /// Store or clear the attached storyboard/reference image bytes.
+    pub fn set_reference_image_bytes(&mut self, bytes: Option<&[u8]>) {
+        self.reference_image = bytes.filter(|b| !b.is_empty()).map(encode_base64);
+    }
+}
+
+/// Standard architectural, furniture, basic geometry, & lighting prop types for
+/// the 2D top-down floor plan.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum PropKind {
     #[default]
@@ -431,11 +448,15 @@ pub enum PropKind {
     Chair,
     Bed,
     Car,
+    Square,
+    Circle,
+    Triangle,
+    Light,
     Custom,
 }
 
 impl PropKind {
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 12] = [
         Self::Wall,
         Self::Door,
         Self::Window,
@@ -443,6 +464,10 @@ impl PropKind {
         Self::Chair,
         Self::Bed,
         Self::Car,
+        Self::Square,
+        Self::Circle,
+        Self::Triangle,
+        Self::Light,
         Self::Custom,
     ];
 
@@ -455,6 +480,10 @@ impl PropKind {
             Self::Chair => "Chair",
             Self::Bed => "Bed",
             Self::Car => "Car",
+            Self::Square => "Square",
+            Self::Circle => "Circle",
+            Self::Triangle => "Triangle",
+            Self::Light => "Light",
             Self::Custom => "Prop",
         }
     }
@@ -469,6 +498,10 @@ impl PropKind {
             Self::Chair => (0.55, 0.55),
             Self::Bed => (2.0, 1.6),
             Self::Car => (4.2, 1.8),
+            Self::Square => (1.0, 1.0),
+            Self::Circle => (1.0, 1.0),
+            Self::Triangle => (1.1, 1.0),
+            Self::Light => (0.55, 0.55),
             Self::Custom => (1.0, 1.0),
         }
     }
@@ -867,6 +900,7 @@ impl ShotList {
             description,
             color,
             spans: vec![range],
+            reference_image: None,
         });
         id
     }
@@ -1293,6 +1327,400 @@ impl ShotList {
         }
         out
     }
+
+    /// Derive a chronological playback timeline for `scene` directly from the
+    /// screenplay order and word-based estimated screen duration.
+    ///
+    /// Adjacent runs belonging to the same active shot are merged into single
+    /// editorial beats so scrubbing smoothly tracks cuts across the scene.
+    pub fn scene_timeline(&self, scene: &Scene, blocks: &[ScriptBlock]) -> SceneTimeline {
+        let char_cov = self.resolve_block_char_coverage(blocks);
+        let mut shot_total_chars = vec![0usize; self.shots.len()];
+        for spans in &char_cov {
+            for &(si, c0, c1) in spans {
+                if let Some(slot) = shot_total_chars.get_mut(si) {
+                    *slot += c1.saturating_sub(c0);
+                }
+            }
+        }
+
+        let mut beats: Vec<TimelineBeat> = Vec::new();
+        let mut t = 0.0_f32;
+
+        for &bi in &scene.blocks {
+            let Some(block) = blocks.get(bi) else {
+                continue;
+            };
+            if !block.element_type.is_printable() || block.element_type == ElementType::SceneHeading
+            {
+                continue;
+            }
+            let char_len = block.text.chars().count();
+            if char_len == 0 {
+                continue;
+            }
+            let spans = char_cov.get(bi).map(Vec::as_slice).unwrap_or(&[]);
+            let sec_per_word = if matches!(
+                block.element_type,
+                ElementType::Dialogue | ElementType::Parenthetical | ElementType::Lyrics
+            ) {
+                DIALOG_S_PER_WORD as f32
+            } else {
+                ACTION_S_PER_WORD as f32
+            };
+
+            // Partition this block into contiguous runs with identical active shot + overlap set
+            let mut runs: Vec<(Option<usize>, Vec<Uuid>, usize, usize)> = Vec::new();
+            for ci in 0..char_len {
+                let mut best: Option<(usize, usize, usize)> = None;
+                let mut overlapping: Vec<Uuid> = Vec::new();
+                for &(si, c0, c1) in spans {
+                    if ci >= c0 && ci < c1 {
+                        if let Some(sh) = self.shots.get(si) {
+                            if !overlapping.contains(&sh.id) {
+                                overlapping.push(sh.id);
+                            }
+                        }
+                        let span_len = c1 - c0;
+                        let total_c = shot_total_chars.get(si).copied().unwrap_or(usize::MAX);
+                        if best.is_none_or(|(_, bl, bt)| (span_len, total_c) <= (bl, bt)) {
+                            best = Some((si, span_len, total_c));
+                        }
+                    }
+                }
+                let active_si = best.map(|(si, _, _)| si);
+                if let Some(last) = runs.last_mut() {
+                    if last.0 == active_si && last.3 == ci {
+                        for oid in overlapping {
+                            if !last.1.contains(&oid) {
+                                last.1.push(oid);
+                            }
+                        }
+                        last.3 = ci + 1;
+                        continue;
+                    }
+                }
+                runs.push((active_si, overlapping, ci, ci + 1));
+            }
+
+            for (active_si, overlapping, c0, c1) in runs {
+                let slice = slice_chars(&block.text, c0, c1);
+                let words = slice.split_whitespace().count();
+                let dur = if words > 0 {
+                    (words as f32 * sec_per_word).max(0.35)
+                } else {
+                    0.25
+                };
+                let shot_id = active_si.and_then(|si| self.shots.get(si).map(|s| s.id));
+                if let Some(last) = beats.last_mut() {
+                    if last.shot_id == shot_id {
+                        last.end_sec = t + dur;
+                        for oid in overlapping {
+                            if !last.overlapping_shot_ids.contains(&oid) {
+                                last.overlapping_shot_ids.push(oid);
+                            }
+                        }
+                        if let Some(lr) = last.ranges.last_mut() {
+                            if lr.0 == bi && lr.2 == c0 {
+                                lr.2 = c1;
+                            } else {
+                                last.ranges.push((bi, c0, c1));
+                            }
+                        } else {
+                            last.ranges.push((bi, c0, c1));
+                        }
+                        t += dur;
+                        continue;
+                    }
+                }
+                beats.push(TimelineBeat {
+                    shot_idx: active_si,
+                    shot_id,
+                    overlapping_shot_ids: overlapping,
+                    ranges: vec![(bi, c0, c1)],
+                    start_sec: t,
+                    end_sec: t + dur,
+                });
+                t += dur;
+            }
+        }
+
+        SceneTimeline {
+            beats,
+            total_secs: t,
+        }
+    }
+
+    /// Apply char-offset shifting for a batch of [`crate::edit::EditCommand`]s
+    /// against `blocks` (call right before applying `cmds` to `blocks`).
+    pub fn sync_for_edit_commands(
+        &mut self,
+        blocks: &[ScriptBlock],
+        cmds: &[crate::edit::EditCommand],
+    ) {
+        if self.shots.is_empty() {
+            return;
+        }
+        for cmd in cmds {
+            match cmd {
+                crate::edit::EditCommand::InsertText { at, text } => {
+                    if let Some(b) = blocks.get(at.bi) {
+                        let abs = crate::edit::char_index(&b.text, *at);
+                        let len = text.chars().count();
+                        self.shift_block_insert(b.id, abs, len);
+                    }
+                }
+                crate::edit::EditCommand::DeleteRange { start, end } => {
+                    let (lo, hi) = if start <= end {
+                        (*start, *end)
+                    } else {
+                        (*end, *start)
+                    };
+                    if lo.bi == hi.bi {
+                        if let Some(b) = blocks.get(lo.bi) {
+                            let s = crate::edit::char_index(&b.text, lo);
+                            let e = crate::edit::char_index(&b.text, hi);
+                            self.shift_block_delete(b.id, s, e);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Shift character-level shot spans after inserting `len` chars at `at` in `block_id`.
+    pub fn shift_block_insert(&mut self, block_id: Uuid, at: usize, len: usize) {
+        if len == 0 || self.shots.is_empty() {
+            return;
+        }
+        for shot in &mut self.shots {
+            for span in &mut shot.spans {
+                if span.start_block == block_id {
+                    if let Some(sc) = span.start_char.as_mut() {
+                        if *sc >= at {
+                            *sc += len;
+                        }
+                    }
+                }
+                if span.end_block == block_id {
+                    if let Some(ec) = span.end_char.as_mut() {
+                        if *ec > at {
+                            *ec += len;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Shift character-level shot spans after deleting `[start, end)` in `block_id`.
+    pub fn shift_block_delete(&mut self, block_id: Uuid, start: usize, end: usize) {
+        if start >= end || self.shots.is_empty() {
+            return;
+        }
+        let delta = end - start;
+        let map_pos = |pos: usize| -> usize {
+            if pos <= start {
+                pos
+            } else if pos <= end {
+                start
+            } else {
+                pos - delta
+            }
+        };
+        for shot in &mut self.shots {
+            for span in &mut shot.spans {
+                if span.start_block == block_id {
+                    if let Some(sc) = span.start_char.as_mut() {
+                        *sc = map_pos(*sc);
+                    }
+                }
+                if span.end_block == block_id {
+                    if let Some(ec) = span.end_char.as_mut() {
+                        *ec = map_pos(*ec);
+                    }
+                }
+            }
+            // Drop any single-block char span that collapsed to empty
+            shot.spans.retain(|sp| {
+                if sp.start_block == sp.end_block {
+                    match (sp.start_char, sp.end_char) {
+                        (Some(a), Some(b)) => a < b,
+                        _ => true,
+                    }
+                } else {
+                    true
+                }
+            });
+        }
+    }
+
+    /// Detect revision-modified coverage and deleted-block spans for every shot.
+    pub fn shot_alerts(
+        &self,
+        blocks: &[ScriptBlock],
+        revision_marks: &[Option<RevisionColor>],
+    ) -> HashMap<Uuid, ShotAlert> {
+        let index = block_index_map(blocks);
+        let mut out = HashMap::new();
+        for shot in &self.shots {
+            let mut deleted_spans = false;
+            let mut revision: Option<RevisionColor> = None;
+            for span in &shot.spans {
+                let Some((lo, hi)) = span.resolve(&index) else {
+                    deleted_spans = true;
+                    continue;
+                };
+                for bi in lo..=hi {
+                    if let Some(Some(col)) = revision_marks.get(bi) {
+                        revision = Some(*col);
+                    }
+                }
+            }
+            if deleted_spans || revision.is_some() {
+                out.insert(
+                    shot.id,
+                    ShotAlert {
+                        deleted_spans,
+                        revision,
+                    },
+                );
+            }
+        }
+        out
+    }
+}
+
+/// Revision / script-sync status alert for one [`Shot`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ShotAlert {
+    /// True if at least one of the shot's spans references a deleted script block.
+    pub deleted_spans: bool,
+    /// Present if any covered script block is marked in the active revision.
+    pub revision: Option<RevisionColor>,
+}
+
+/// One chronological beat on a scene's derived playback timeline.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TimelineBeat {
+    pub shot_idx: Option<usize>,
+    pub shot_id: Option<Uuid>,
+    pub overlapping_shot_ids: Vec<Uuid>,
+    /// Exact `(block_idx, char_start, char_end)` slices played during this beat.
+    pub ranges: Vec<(usize, usize, usize)>,
+    pub start_sec: f32,
+    pub end_sec: f32,
+}
+
+/// Chronological scene timeline derived automatically from shot spans and script timing.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SceneTimeline {
+    pub beats: Vec<TimelineBeat>,
+    pub total_secs: f32,
+}
+
+impl SceneTimeline {
+    pub fn is_empty(&self) -> bool {
+        self.beats.is_empty() || self.total_secs <= 0.0
+    }
+
+    /// Return `(beat_index, beat, local_progress_0_to_1)` at timestamp `t` (seconds).
+    pub fn beat_at(&self, t: f32) -> Option<(usize, &TimelineBeat, f32)> {
+        if self.beats.is_empty() {
+            return None;
+        }
+        let clamped = t.clamp(0.0, self.total_secs);
+        for (i, beat) in self.beats.iter().enumerate() {
+            if clamped <= beat.end_sec || i + 1 == self.beats.len() {
+                let len = (beat.end_sec - beat.start_sec).max(1e-4);
+                let frac = ((clamped - beat.start_sec) / len).clamp(0.0, 1.0);
+                return Some((i, beat, frac));
+            }
+        }
+        None
+    }
+
+    /// Timestamp of the previous beat start (for `<` Prev Cut stepping).
+    pub fn prev_cut_time(&self, t: f32) -> f32 {
+        let eps = 0.08;
+        for beat in self.beats.iter().rev() {
+            if beat.start_sec < t - eps {
+                return beat.start_sec;
+            }
+        }
+        0.0
+    }
+
+    /// Timestamp of the next beat start (for `>` Next Cut stepping).
+    pub fn next_cut_time(&self, t: f32) -> f32 {
+        let eps = 0.05;
+        for beat in &self.beats {
+            if beat.start_sec > t + eps {
+                return beat.start_sec;
+            }
+        }
+        self.beats
+            .last()
+            .map(|b| b.start_sec)
+            .unwrap_or(self.total_secs)
+    }
+}
+
+fn encode_base64(input: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
+    for chunk in input.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = chunk.get(1).copied().unwrap_or(0) as u32;
+        let b2 = chunk.get(2).copied().unwrap_or(0) as u32;
+        let n = (b0 << 16) | (b1 << 8) | b2;
+        out.push(TABLE[((n >> 18) & 63) as usize] as char);
+        out.push(TABLE[((n >> 12) & 63) as usize] as char);
+        if chunk.len() > 1 {
+            out.push(TABLE[((n >> 6) & 63) as usize] as char);
+        } else {
+            out.push('=');
+        }
+        if chunk.len() > 2 {
+            out.push(TABLE[(n & 63) as usize] as char);
+        } else {
+            out.push('=');
+        }
+    }
+    out
+}
+
+fn decode_base64(input: &str) -> Option<Vec<u8>> {
+    fn val(b: u8) -> Option<u8> {
+        match b {
+            b'A'..=b'Z' => Some(b - b'A'),
+            b'a'..=b'z' => Some(b - b'a' + 26),
+            b'0'..=b'9' => Some(b - b'0' + 52),
+            b'+' => Some(62),
+            b'/' => Some(63),
+            _ => None,
+        }
+    }
+    let cleaned: Vec<u8> = input.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
+    if !cleaned.len().is_multiple_of(4) {
+        return None;
+    }
+    let mut out = Vec::with_capacity((cleaned.len() / 4) * 3);
+    for chunk in cleaned.as_chunks::<4>().0 {
+        let a = val(chunk[0])?;
+        let b = val(chunk[1])?;
+        out.push((a << 2) | (b >> 4));
+        if chunk[2] != b'=' {
+            let c = val(chunk[2])?;
+            out.push((b << 4) | (c >> 2));
+            if chunk[3] != b'=' {
+                let d = val(chunk[3])?;
+                out.push((c << 6) | d);
+            }
+        }
+    }
+    Some(out)
 }
 
 fn merge_intervals(mut raw: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
@@ -1715,5 +2143,171 @@ mod tests {
         let shot = list.get(sid).unwrap();
         assert_eq!(list.covered_text_full(shot, &blocks), long_line);
         assert!(list.covered_excerpt(shot, &blocks).ends_with('…'));
+    }
+
+    #[test]
+    fn timeline_beats_and_cut_navigation() {
+        let p = sample_project();
+        let scenes = p.scenes();
+        let sc = &scenes[0];
+        let b1 = p.blocks[1].id;
+        let b2 = p.blocks[2].id;
+        let b3 = p.blocks[3].id;
+        let mut list = ShotList::default();
+        let s1 = list.add_shot(
+            Some(sc.id),
+            "1",
+            ShotSize::Ws,
+            ShotMovement::Static,
+            "35mm".into(),
+            "Master".into(),
+            ShotRange::blocks(b1, b3),
+        );
+        let s2 = list.add_shot(
+            Some(sc.id),
+            "1",
+            ShotSize::Cu,
+            ShotMovement::Static,
+            "85mm".into(),
+            "Cut-in on dialogue".into(),
+            ShotRange::blocks(b2, b3),
+        );
+
+        let tl = list.scene_timeline(sc, &p.blocks);
+        assert!(!tl.is_empty());
+        assert!(tl.total_secs > 1.0);
+        // First beat should belong to master s1, second beat to tighter cut-in s2
+        assert!(tl.beats.len() >= 2, "expected at least 2 beats: {tl:?}");
+        assert_eq!(tl.beats[0].shot_id, Some(s1));
+        assert!(tl.beats.iter().any(|b| b.shot_id == Some(s2)));
+
+        let (i0, b0, frac0) = tl.beat_at(0.0).unwrap();
+        assert_eq!(i0, 0);
+        assert_eq!(b0.shot_id, Some(s1));
+        assert!((0.0..=0.01).contains(&frac0));
+
+        let t_next = tl.next_cut_time(0.0);
+        assert!(t_next > 0.0);
+        let (i1, _, _) = tl.beat_at(t_next + 0.01).unwrap();
+        assert!(i1 >= 1);
+        let t_prev = tl.prev_cut_time(t_next + 0.01);
+        assert!((t_prev - 0.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn prop_basic_shapes_and_reference_image_roundtrip() {
+        assert!(PropKind::ALL.contains(&PropKind::Square));
+        assert!(PropKind::ALL.contains(&PropKind::Circle));
+        assert!(PropKind::ALL.contains(&PropKind::Triangle));
+        assert!(PropKind::ALL.contains(&PropKind::Light));
+        for kind in PropKind::ALL {
+            assert!(!kind.label().is_empty());
+            let (w, d) = kind.default_size();
+            assert!(w > 0.0 && d > 0.0);
+        }
+
+        let b0 = ScriptBlock::new(ElementType::Action, "Test".into());
+        let b0_id = b0.id;
+        let mut list = ShotList::default();
+        let sid = list.add_shot(
+            None,
+            "1",
+            ShotSize::Ms,
+            ShotMovement::Static,
+            "50mm".into(),
+            String::new(),
+            ShotRange::blocks(b0_id, b0_id),
+        );
+        let payload: Vec<u8> = (0u8..=255).collect();
+        list.get_mut(sid)
+            .unwrap()
+            .set_reference_image_bytes(Some(&payload));
+        assert_eq!(
+            list.get(sid).unwrap().reference_image_bytes().as_deref(),
+            Some(payload.as_slice())
+        );
+
+        let json = serde_json::to_string(&list).expect("serialize shots with ref image");
+        let parsed: ShotList =
+            serde_json::from_str(&json).expect("deserialize shots with ref image");
+        assert_eq!(
+            parsed.get(sid).unwrap().reference_image_bytes().as_deref(),
+            Some(payload.as_slice())
+        );
+    }
+
+    #[test]
+    fn script_edit_shifts_shot_spans_and_revision_alerts() {
+        use crate::edit::EditCommand;
+        let mut p = sample_project();
+        let b1_id = p.blocks[1].id;
+        let mut list = ShotList::default();
+        // Cover chars 7..15 ("boils on") of block 1 ("Coffee boils on a chipped stove.")
+        let sid = list.add_shot(
+            Some(p.blocks[0].id),
+            "1",
+            ShotSize::Cu,
+            ShotMovement::Static,
+            "85mm".into(),
+            String::new(),
+            ShotRange::chars(b1_id, 7, b1_id, 15),
+        );
+
+        // Insert 4 chars ("Hot ") at offset 0 of block 1
+        let ins = EditCommand::InsertText {
+            at: crate::edit::Pos {
+                bi: 1,
+                para: 0,
+                ch: 0,
+            },
+            text: "Hot ".into(),
+        };
+        list.sync_for_edit_commands(&p.blocks, std::slice::from_ref(&ins));
+        p.blocks[1].text.insert_str(0, "Hot ");
+        let span = &list.get(sid).unwrap().spans[0];
+        assert_eq!(span.start_char, Some(11));
+        assert_eq!(span.end_char, Some(19));
+
+        // Delete 4 chars ("Hot ") back at offset 0
+        let del = EditCommand::DeleteRange {
+            start: crate::edit::Pos {
+                bi: 1,
+                para: 0,
+                ch: 0,
+            },
+            end: crate::edit::Pos {
+                bi: 1,
+                para: 0,
+                ch: 4,
+            },
+        };
+        list.sync_for_edit_commands(&p.blocks, std::slice::from_ref(&del));
+        p.blocks[1].text.drain(..4);
+        let span = &list.get(sid).unwrap().spans[0];
+        assert_eq!(span.start_char, Some(7));
+        assert_eq!(span.end_char, Some(15));
+
+        // Revision alert & deleted-block alert
+        let mut marks = vec![None; p.blocks.len()];
+        marks[1] = Some(RevisionColor::Blue);
+        let alerts = list.shot_alerts(&p.blocks, &marks);
+        assert_eq!(
+            alerts.get(&sid),
+            Some(&ShotAlert {
+                deleted_spans: false,
+                revision: Some(RevisionColor::Blue),
+            })
+        );
+
+        // Removing block 1 triggers deleted_spans alert
+        p.blocks.remove(1);
+        let alerts_del = list.shot_alerts(&p.blocks, &[]);
+        assert_eq!(
+            alerts_del.get(&sid),
+            Some(&ShotAlert {
+                deleted_spans: true,
+                revision: None,
+            })
+        );
     }
 }

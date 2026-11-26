@@ -2354,6 +2354,12 @@ impl ScriptCraftApp {
         self.write_summary_csv(dst)
     }
 
+    /// Render the Director's Breakdown PDF (vector floor plans + shot cards + colored script, tests).
+    #[doc(hidden)]
+    pub fn breakdown_pdf_for_test(&mut self) -> Option<Vec<u8>> {
+        self.directors_breakdown_pdf_bytes()
+    }
+
     /// Render the colored script + shot legend PDF (tests).
     #[doc(hidden)]
     pub fn colored_script_pdf_for_test(&mut self) -> Option<Vec<u8>> {
@@ -2799,6 +2805,8 @@ impl ScriptCraftApp {
             changed |= self.editor2.history.redo(&mut p.blocks).unwrap_or(false);
         }
         if !out.commands.is_empty() {
+            // Keep character-level shot spans synced with live Script edits.
+            p.shots.sync_for_edit_commands(&p.blocks, &out.commands);
             match self.editor2.history.apply_seq(&mut p.blocks, out.commands) {
                 Ok(()) => changed = true,
                 Err(err) => {
@@ -8238,6 +8246,88 @@ impl ScriptCraftApp {
         }
     }
 
+    fn directors_breakdown_pdf_bytes(&mut self) -> Option<Vec<u8>> {
+        let p = self.project.as_ref()?;
+        let mut opts = self.export_options.clone();
+        opts.page_size = self.settings.page_size;
+        opts.bold_character_cues = self.settings.bold_character_cues;
+        opts.color_by_shots = true;
+        opts.include_shot_legend = false;
+        if self.revisions.is_empty() {
+            opts.revision_marks = false;
+            opts.revision_pages_only = false;
+        }
+        opts.watermark = if self.export_watermark_on {
+            let text = self.export_watermark.trim();
+            Some(if text.is_empty() {
+                "DRAFT".to_string()
+            } else {
+                text.to_string()
+            })
+        } else {
+            None
+        };
+        let mut shot_images = std::collections::HashMap::new();
+        for shot in &p.shots.shots {
+            if let Some(raw) = shot.reference_image_bytes() {
+                if let Ok(img) = image::load_from_memory(&raw) {
+                    let rgb = img.to_rgb8();
+                    shot_images.insert(
+                        shot.id,
+                        scriptcraft_layout::pdf::DecodedShotImage {
+                            width: rgb.width() as usize,
+                            height: rgb.height() as usize,
+                            rgb: rgb.into_raw(),
+                        },
+                    );
+                }
+            }
+        }
+        let marks = self.revisions.latest_marks(&p.blocks).colors;
+        let latest = self.revisions.latest();
+        let res = self.with_script_export_fonts(|fonts| {
+            scriptcraft_layout::pdf::to_directors_breakdown_pdf_bytes(
+                p,
+                &self.meta,
+                &opts,
+                &marks,
+                latest,
+                fonts,
+                &shot_images,
+            )
+        });
+        match res {
+            Ok(bytes) => Some(bytes),
+            Err(e) => {
+                self.status = format!("Director's breakdown PDF failed: {e}");
+                None
+            }
+        }
+    }
+
+    fn export_breakdown_pdf(&mut self) {
+        let stem = self.shots_file_stem("Director's Breakdown");
+        let Some(dst) = rfd::FileDialog::new()
+            .add_filter("PDF", &["pdf"])
+            .set_file_name(format!("{stem}.pdf"))
+            .save_file()
+        else {
+            return;
+        };
+        let Some(bytes) = self.directors_breakdown_pdf_bytes() else {
+            return;
+        };
+        match std::fs::write(&dst, &bytes) {
+            Ok(()) => {
+                self.status = format!(
+                    "Exported Director's Breakdown PDF to {}",
+                    dst.to_string_lossy()
+                )
+            }
+            Err(e) => self.status = format!("Export failed: {e}"),
+        }
+    }
+
     fn shot_list_csv_string(&self) -> Option<String> {
         let p = self.project.as_ref()?;
         let scenes = p.scenes();
@@ -8304,6 +8394,7 @@ impl ScriptCraftApp {
             crate::shots_view::show_empty(ctx);
             return;
         }
+        self.ensure_revision_marks();
         let labels = self.shots_scene_labels();
         let bold_cues = self.settings.bold_character_cues;
         let paper_mono = self.settings.paper_mono;
@@ -8311,12 +8402,23 @@ impl ScriptCraftApp {
             let Some(p) = self.project.as_mut() else {
                 return;
             };
-            crate::shots_view::show(ctx, p, &labels, &mut self.shots_ui, bold_cues, paper_mono)
+            crate::shots_view::show(
+                ctx,
+                p,
+                &labels,
+                &self.revision_marks.colors,
+                &mut self.shots_ui,
+                bold_cues,
+                paper_mono,
+            )
         };
         match action {
             crate::shots_view::ShotsAction::None => {}
             crate::shots_view::ShotsAction::Changed => {
                 self.dirty = true;
+            }
+            crate::shots_view::ShotsAction::ExportBreakdownPdf => {
+                self.export_breakdown_pdf();
             }
             crate::shots_view::ShotsAction::ExportColoredScriptPdf => {
                 self.export_colored_script_pdf();

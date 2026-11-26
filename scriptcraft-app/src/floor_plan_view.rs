@@ -59,6 +59,16 @@ pub struct FloorPlanUiState {
     pub selected: Option<PlanSelection>,
     /// Show the classic 180-degree Line of Action between the first two actors.
     pub show_axis_line: bool,
+    /// When true, spotlight only the camera active at `timeline_sec` and gray out all others.
+    pub timeline_active: bool,
+    /// Playback running state for the Scene Timeline.
+    pub timeline_playing: bool,
+    /// Current playhead timestamp (seconds) within the active scene.
+    pub timeline_sec: f32,
+    /// Active beat's `(block_idx, char_start, char_end)` spans for Split-view script highlighting.
+    pub active_beat_ranges: Vec<(usize, usize, usize)>,
+    /// Shot ID of the camera currently active on the timeline (when `timeline_active` is true).
+    pub active_camera_id: Option<Uuid>,
     drag: Option<DragKind>,
     drag_offset: Vec2,
     last_pan_pos: Option<Pos2>,
@@ -71,6 +81,11 @@ impl Default for FloorPlanUiState {
             zoom: DEFAULT_ZOOM,
             selected: None,
             show_axis_line: true,
+            timeline_active: false,
+            timeline_playing: false,
+            timeline_sec: 0.0,
+            active_beat_ranges: Vec::new(),
+            active_camera_id: None,
             drag: None,
             drag_offset: Vec2::ZERO,
             last_pan_pos: None,
@@ -83,6 +98,10 @@ impl FloorPlanUiState {
         self.pan = Vec2::new(0.0, 0.4);
         self.zoom = DEFAULT_ZOOM;
         self.drag = None;
+        self.timeline_playing = false;
+        self.timeline_sec = 0.0;
+        self.active_beat_ranges.clear();
+        self.active_camera_id = None;
     }
 
     pub fn fit_to_plan(&mut self, plan: &SceneFloorPlan, canvas_size: Vec2) {
@@ -276,37 +295,134 @@ pub fn show(
                     }
                 }
 
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.spacing_mut().item_spacing.x = 5.0;
+                // Basic geometry shapes & extra props dropdown (Square, Circle, Triangle, Bed, Light)
+                let mut shape_add: Option<PropKind> = None;
+                ui.menu_button(
+                    RichText::new("+ Shapes").size(11.5).color(kit().text),
+                    |ui| {
+                        ui.set_min_width(142.0);
+                        for (kind, item_label) in [
+                            (PropKind::Square, "Square / Box"),
+                            (PropKind::Circle, "Circle"),
+                            (PropKind::Triangle, "Triangle"),
+                            (PropKind::Bed, "Bed"),
+                            (PropKind::Light, "Light"),
+                            (PropKind::Custom, "Custom Prop"),
+                        ] {
+                            if ui
+                                .button(RichText::new(item_label).size(12.0))
+                                .on_hover_text(format!(
+                                    "Add {} shape with editable label",
+                                    kind.label()
+                                ))
+                                .clicked()
+                            {
+                                shape_add = Some(kind);
+                                ui.close();
+                            }
+                        }
+                    },
+                );
+                if let Some(kind) = shape_add {
+                    let plan = project.shots.ensure_floor_plan(scene_id);
+                    let (w, h) = kind.default_size();
+                    let id = Uuid::new_v4();
+                    let offset = (plan.props.len() as f32 % 4.0) * 0.35;
+                    plan.props.push(PlanProp {
+                        id,
+                        kind,
+                        label: kind.label().to_string(),
+                        x: state.pan.x + offset,
+                        y: state.pan.y - 1.0 + offset * 0.5,
+                        w,
+                        h,
+                        angle_deg: 0.0,
+                    });
+                    state.selected = Some(PlanSelection::Prop(id));
+                    changed = true;
+                }
 
-                    if tool_chip(ui, "Fit", false, "Fit floor plan to viewport").clicked() {
-                        fit_requested = true;
+                let draw_view_controls = |ui: &mut Ui,
+                                          project: &mut Project,
+                                          state: &mut FloorPlanUiState,
+                                          fit_requested: &mut bool,
+                                          changed: &mut bool,
+                                          rtl: bool| {
+                    if rtl {
+                        if tool_chip(ui, "Fit", false, "Fit floor plan to viewport").clicked() {
+                            *fit_requested = true;
+                        }
+                        if tool_chip(
+                            ui,
+                            "Auto-Layout",
+                            false,
+                            "Add any missing scene cast & shot cameras",
+                        )
+                        .clicked()
+                        {
+                            project
+                                .shots
+                                .auto_populate_floor_plan(scene, &project.blocks);
+                            *fit_requested = true;
+                            *changed = true;
+                        }
+                        if tool_chip(
+                            ui,
+                            "180° Line",
+                            state.show_axis_line,
+                            "Toggle 180-degree Line of Action axis",
+                        )
+                        .clicked()
+                        {
+                            state.show_axis_line = !state.show_axis_line;
+                        }
+                    } else {
+                        if tool_chip(
+                            ui,
+                            "180° Line",
+                            state.show_axis_line,
+                            "Toggle 180-degree Line of Action axis",
+                        )
+                        .clicked()
+                        {
+                            state.show_axis_line = !state.show_axis_line;
+                        }
+                        if tool_chip(
+                            ui,
+                            "Auto-Layout",
+                            false,
+                            "Add any missing scene cast & shot cameras",
+                        )
+                        .clicked()
+                        {
+                            project
+                                .shots
+                                .auto_populate_floor_plan(scene, &project.blocks);
+                            *fit_requested = true;
+                            *changed = true;
+                        }
+                        if tool_chip(ui, "Fit", false, "Fit floor plan to viewport").clicked() {
+                            *fit_requested = true;
+                        }
                     }
-                    if tool_chip(
-                        ui,
-                        "Auto-Layout",
-                        false,
-                        "Add any missing scene cast & shot cameras",
-                    )
-                    .clicked()
-                    {
-                        project
-                            .shots
-                            .auto_populate_floor_plan(scene, &project.blocks);
-                        fit_requested = true;
-                        changed = true;
-                    }
-                    if tool_chip(
-                        ui,
-                        "180° Line",
-                        state.show_axis_line,
-                        "Toggle 180-degree Line of Action axis",
-                    )
-                    .clicked()
-                    {
-                        state.show_axis_line = !state.show_axis_line;
-                    }
-                });
+                };
+
+                let remaining_on_row = ui.max_rect().right() - ui.cursor().left();
+                if remaining_on_row >= 225.0 {
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ui.spacing_mut().item_spacing.x = 5.0;
+                        draw_view_controls(
+                            ui,
+                            project,
+                            state,
+                            &mut fit_requested,
+                            &mut changed,
+                            true,
+                        );
+                    });
+                } else {
+                    draw_view_controls(ui, project, state, &mut fit_requested, &mut changed, false);
+                }
             });
         })
         .response;
@@ -319,10 +435,49 @@ pub fn show(
         Stroke::new(1.0_f32, kit().sep),
     );
 
-    // Reserve bottom bar height when something is selected
+    // Derive chronological scene timeline from shot spans + estimated reading pace
+    let timeline = project.shots.scene_timeline(scene, &project.blocks);
+    let has_timeline = !timeline.is_empty();
+    if !has_timeline {
+        state.timeline_playing = false;
+        state.timeline_sec = 0.0;
+        state.active_beat_ranges.clear();
+        state.active_camera_id = None;
+    } else {
+        state.timeline_sec = state.timeline_sec.clamp(0.0, timeline.total_secs);
+        if state.timeline_playing {
+            let dt = ui.input(|i| i.unstable_dt).clamp(0.0, 0.1);
+            state.timeline_sec += dt;
+            if state.timeline_sec >= timeline.total_secs {
+                state.timeline_sec = timeline.total_secs;
+                state.timeline_playing = false;
+            }
+            ui.ctx().request_repaint();
+        }
+    }
+
+    let active_beat_info = if state.timeline_active && has_timeline {
+        timeline.beat_at(state.timeline_sec)
+    } else {
+        None
+    };
+    let active_cam_id = active_beat_info.and_then(|(_, b, _)| b.shot_id);
+    let active_beat_frac = active_beat_info.map(|(_, _, f)| f);
+    let scene_progress = if state.timeline_active && timeline.total_secs > 1e-3 {
+        Some((state.timeline_sec / timeline.total_secs).clamp(0.0, 1.0))
+    } else {
+        None
+    };
+    state.active_camera_id = active_cam_id;
+    state.active_beat_ranges = active_beat_info
+        .map(|(_, b, _)| b.ranges.clone())
+        .unwrap_or_default();
+
+    // Reserve bottom bar height for Timeline scrubber + optional selected-item strip
     let has_selection = state.selected.is_some();
+    let timeline_bar_h = if has_timeline { 38.0 } else { 0.0 };
     let bottom_bar_h = if has_selection { 40.0 } else { 0.0 };
-    let canvas_h = (ui.available_height() - bottom_bar_h).max(200.0);
+    let canvas_h = (ui.available_height() - timeline_bar_h - bottom_bar_h).max(180.0);
     let canvas_size = Vec2::new(ui.available_width().max(240.0), canvas_h);
 
     // Auto-fit once on narrow split viewports when zoom is still untouched at default
@@ -613,30 +768,289 @@ pub fn show(
         // Layer 2: Actors
         for actor in &plan.actors {
             let sel = state.selected == Some(PlanSelection::Actor(actor.id));
-            paint_actor(&p, center, state.pan, state.zoom, actor, sel);
+            paint_actor(
+                &p,
+                center,
+                state.pan,
+                state.zoom,
+                actor,
+                sel,
+                scene_progress,
+            );
         }
 
-        // Layer 3: Cameras + physical FOV cones (selected camera painted last on top)
+        // Layer 3: Cameras + physical FOV cones (active / selected camera painted last on top)
         let mut cam_order: Vec<usize> = (0..plan.cameras.len()).collect();
         cam_order.sort_by_key(|&i| {
             let sid = plan.cameras[i].shot_id;
-            usize::from(
-                state.selected == Some(PlanSelection::Camera(sid)) || *selected_shot == Some(sid),
-            )
+            let is_active = state.timeline_active && active_cam_id == Some(sid);
+            let is_sel =
+                state.selected == Some(PlanSelection::Camera(sid)) || *selected_shot == Some(sid);
+            (usize::from(is_active), usize::from(is_sel))
         });
         for ci in cam_order {
             let cam = &plan.cameras[ci];
             let Some(shot) = project.shots.get(cam.shot_id) else {
                 continue;
             };
-            let sel = state.selected == Some(PlanSelection::Camera(cam.shot_id))
-                || *selected_shot == Some(cam.shot_id);
-            paint_camera(&p, center, state.pan, state.zoom, cam, shot, sel);
+            let dimmed = state.timeline_active && active_cam_id != Some(cam.shot_id);
+            let sel = !dimmed
+                && (state.selected == Some(PlanSelection::Camera(cam.shot_id))
+                    || *selected_shot == Some(cam.shot_id)
+                    || (state.timeline_active && active_cam_id == Some(cam.shot_id)));
+            let track_prog = if state.timeline_active && active_cam_id == Some(cam.shot_id) {
+                active_beat_frac
+            } else {
+                None
+            };
+            paint_camera(
+                &p, center, state.pan, state.zoom, cam, shot, sel, dimmed, track_prog,
+            );
         }
     }
 
     // Architectural scale indicator in bottom-left corner of canvas
     paint_scale_bar(&p, canvas_rect, state.zoom, snap_ctrl);
+
+    // 2.5. Interactive Scene Timeline Bar (scrub through beats & spotlight only the active camera)
+    if has_timeline {
+        let tl_resp = egui::Frame::new()
+            .fill(kit().window)
+            .inner_margin(Margin::symmetric(12, 6))
+            .stroke(Stroke::NONE)
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    ui.set_height(24.0);
+                    ui.spacing_mut().item_spacing.x = 6.0;
+
+                    if tool_chip(
+                        ui,
+                        if state.timeline_active {
+                            "Timeline"
+                        } else {
+                            "All Cams"
+                        },
+                        state.timeline_active,
+                        "Toggle Timeline Spotlight mode (shows only the active camera and grays out others)",
+                    )
+                    .clicked()
+                    {
+                        state.timeline_active = !state.timeline_active;
+                        if !state.timeline_active {
+                            state.timeline_playing = false;
+                        } else if let Some((_, b, _)) = timeline.beat_at(state.timeline_sec) {
+                            if let Some(sid) = b.shot_id {
+                                *selected_shot = Some(sid);
+                                state.selected = Some(PlanSelection::Camera(sid));
+                            }
+                        }
+                    }
+
+                    let prev_btn = ui
+                        .add(
+                            egui::Button::new(RichText::new("<").size(11.5).strong().color(kit().text))
+                                .fill(kit().button)
+                                .stroke(Stroke::new(1.0_f32, kit().stroke))
+                                .corner_radius(CornerRadius::same(5))
+                                .min_size(Vec2::new(22.0, 22.0)),
+                        )
+                        .on_hover_text("Previous shot cut");
+                    prev_btn.widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Previous cut")
+                    });
+                    if prev_btn.clicked() {
+                        state.timeline_active = true;
+                        state.timeline_playing = false;
+                        state.timeline_sec = timeline.prev_cut_time(state.timeline_sec);
+                        if let Some((_, b, _)) = timeline.beat_at(state.timeline_sec) {
+                            if let Some(sid) = b.shot_id {
+                                *selected_shot = Some(sid);
+                                state.selected = Some(PlanSelection::Camera(sid));
+                            }
+                        }
+                    }
+
+                    let play_label = if state.timeline_playing { "||" } else { "Play" };
+                    let play_btn = tool_chip(
+                        ui,
+                        play_label,
+                        state.timeline_playing,
+                        if state.timeline_playing {
+                            "Pause timeline playback"
+                        } else {
+                            "Play scene timeline"
+                        },
+                    );
+                    if play_btn.clicked() {
+                        state.timeline_active = true;
+                        if state.timeline_playing {
+                            state.timeline_playing = false;
+                        } else {
+                            if state.timeline_sec >= timeline.total_secs - 0.05 {
+                                state.timeline_sec = 0.0;
+                            }
+                            state.timeline_playing = true;
+                        }
+                    }
+
+                    let next_btn = ui
+                        .add(
+                            egui::Button::new(RichText::new(">").size(11.5).strong().color(kit().text))
+                                .fill(kit().button)
+                                .stroke(Stroke::new(1.0_f32, kit().stroke))
+                                .corner_radius(CornerRadius::same(5))
+                                .min_size(Vec2::new(22.0, 22.0)),
+                        )
+                        .on_hover_text("Next shot cut");
+                    next_btn.widget_info(|| {
+                        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Next cut")
+                    });
+                    if next_btn.clicked() {
+                        state.timeline_active = true;
+                        state.timeline_playing = false;
+                        state.timeline_sec = timeline.next_cut_time(state.timeline_sec);
+                        if let Some((_, b, _)) = timeline.beat_at(state.timeline_sec) {
+                            if let Some(sid) = b.shot_id {
+                                *selected_shot = Some(sid);
+                                state.selected = Some(PlanSelection::Camera(sid));
+                            }
+                        }
+                    }
+
+                    // Reserve right-side space for timecode
+                    let time_str = format!(
+                        "{} / {}",
+                        fmt_mmss(state.timeline_sec),
+                        fmt_mmss(timeline.total_secs)
+                    );
+                    let track_w = (ui.available_width() - 86.0).max(80.0);
+                    let (track_rect, track_resp) =
+                        ui.allocate_exact_size(Vec2::new(track_w, 20.0), Sense::click_and_drag());
+                    let track_resp = track_resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+
+                    // Scrub on click or drag
+                    if (track_resp.clicked() || track_resp.dragged())
+                        && ui.input(|i| i.pointer.interact_pos()).is_some()
+                    {
+                        if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
+                            let frac = ((pos.x - track_rect.left()) / track_rect.width().max(1.0))
+                                .clamp(0.0, 1.0);
+                            state.timeline_active = true;
+                            state.timeline_playing = false;
+                            state.timeline_sec = frac * timeline.total_secs;
+                            if let Some((_, b, _)) = timeline.beat_at(state.timeline_sec) {
+                                if let Some(sid) = b.shot_id {
+                                    *selected_shot = Some(sid);
+                                    state.selected = Some(PlanSelection::Camera(sid));
+                                }
+                            }
+                            ui.ctx().request_repaint();
+                        }
+                    }
+
+                    // Paint color-coded beat segments inside track
+                    let bar_rect = Rect::from_center_size(
+                        track_rect.center(),
+                        Vec2::new(track_rect.width(), 12.0),
+                    );
+                    let tp = ui.painter();
+                    tp.rect_filled(bar_rect, CornerRadius::same(4), kit().base);
+                    let total = timeline.total_secs.max(0.01);
+                    for beat in &timeline.beats {
+                        let x0 = bar_rect.left() + (beat.start_sec / total) * bar_rect.width();
+                        let x1 = bar_rect.left() + (beat.end_sec / total) * bar_rect.width();
+                        if x1 - x0 < 0.8 {
+                            continue;
+                        }
+                        let seg = Rect::from_min_max(
+                            Pos2::new(x0, bar_rect.top()),
+                            Pos2::new((x1 - 1.0).max(x0 + 1.0), bar_rect.bottom()),
+                        );
+                        let seg_col = beat
+                            .shot_id
+                            .and_then(|sid| project.shots.get(sid))
+                            .map(|s| {
+                                let c = shot_color32(s.color);
+                                if state.timeline_active {
+                                    c
+                                } else {
+                                    c.gamma_multiply(0.55)
+                                }
+                            })
+                            .unwrap_or_else(|| kit().stroke.gamma_multiply(0.5));
+                        tp.rect_filled(seg, CornerRadius::same(2), seg_col);
+                    }
+                    tp.rect_stroke(
+                        bar_rect,
+                        CornerRadius::same(4),
+                        Stroke::new(1.0_f32, kit().stroke),
+                        StrokeKind::Inside,
+                    );
+
+                    // Playhead needle + handle
+                    let px = bar_rect.left()
+                        + (state.timeline_sec / total).clamp(0.0, 1.0) * bar_rect.width();
+                    let needle_col = if state.timeline_active {
+                        kit().heading_text
+                    } else {
+                        kit().disabled_text
+                    };
+                    tp.line_segment(
+                        [
+                            Pos2::new(px, track_rect.top() + 1.0),
+                            Pos2::new(px, track_rect.bottom() - 1.0),
+                        ],
+                        Stroke::new(2.0_f32, needle_col),
+                    );
+                    tp.circle_filled(Pos2::new(px, bar_rect.center().y), 4.5, needle_col);
+
+                    // Hover tooltip showing shot code at hovered timestamp
+                    if track_resp.hovered() {
+                        if let Some(hp) = ui.input(|i| i.pointer.hover_pos()) {
+                            let hf = ((hp.x - bar_rect.left()) / bar_rect.width().max(1.0))
+                                .clamp(0.0, 1.0);
+                            let ht = hf * timeline.total_secs;
+                            if let Some((_, beat, _)) = timeline.beat_at(ht) {
+                                let tip = beat
+                                    .shot_id
+                                    .and_then(|sid| project.shots.get(sid))
+                                    .map(|s| {
+                                        format!(
+                                            "{} ({}) · {}",
+                                            s.code,
+                                            s.size.short(),
+                                            fmt_mmss(ht)
+                                        )
+                                    })
+                                    .unwrap_or_else(|| format!("Uncovered · {}", fmt_mmss(ht)));
+                                track_resp.on_hover_text(tip);
+                            }
+                        }
+                    }
+
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ui.label(
+                            RichText::new(time_str)
+                                .font(FontId::monospace(10.5))
+                                .color(if state.timeline_active {
+                                    kit().heading_text
+                                } else {
+                                    kit().disabled_text
+                                }),
+                        );
+                    });
+                });
+            })
+            .response;
+        ui.painter().line_segment(
+            [
+                Pos2::new(tl_resp.rect.left(), tl_resp.rect.top()),
+                Pos2::new(tl_resp.rect.right(), tl_resp.rect.top()),
+            ],
+            Stroke::new(1.0_f32, kit().sep),
+        );
+    }
 
     // 3. Bottom contextual property strip for the selected canvas item
     if has_selection {
@@ -1399,7 +1813,70 @@ fn paint_prop(
                 ));
             }
         }
-        PropKind::Table | PropKind::Custom => {
+        PropKind::Circle => {
+            let fill = if kit_is_light() {
+                Color32::from_rgba_unmultiplied(120, 128, 145, 36)
+            } else {
+                Color32::from_rgba_unmultiplied(150, 160, 180, 32)
+            };
+            let segs = 28usize;
+            let pts: Vec<Pos2> = (0..segs)
+                .map(|k| {
+                    let a = std::f32::consts::TAU * (k as f32 / segs as f32);
+                    to_pt(hw * a.cos(), hh * a.sin())
+                })
+                .collect();
+            p.add(Shape::convex_polygon(
+                pts,
+                fill,
+                Stroke::new(stroke_w, stroke_col),
+            ));
+        }
+        PropKind::Triangle => {
+            let fill = if kit_is_light() {
+                Color32::from_rgba_unmultiplied(120, 128, 145, 36)
+            } else {
+                Color32::from_rgba_unmultiplied(150, 160, 180, 32)
+            };
+            p.add(Shape::convex_polygon(
+                vec![to_pt(0.0, -hh), to_pt(hw, hh), to_pt(-hw, hh)],
+                fill,
+                Stroke::new(stroke_w, stroke_col),
+            ));
+        }
+        PropKind::Light => {
+            let fill = Color32::from_rgba_unmultiplied(245, 200, 66, 70);
+            let lamp_stroke = if selected {
+                kit().accent
+            } else {
+                Color32::from_rgb(235, 178, 32)
+            };
+            let r = hw.min(hh).max(0.18);
+            let segs = 20usize;
+            let pts: Vec<Pos2> = (0..segs)
+                .map(|k| {
+                    let a = std::f32::consts::TAU * (k as f32 / segs as f32);
+                    to_pt(r * a.cos(), r * a.sin())
+                })
+                .collect();
+            p.add(Shape::convex_polygon(
+                pts,
+                fill,
+                Stroke::new(stroke_w, lamp_stroke),
+            ));
+            // 3 directional light beam rays pointing along +X
+            for ang in [-28.0_f32, 0.0, 28.0] {
+                let ar = ang.to_radians();
+                p.line_segment(
+                    [
+                        to_pt(r * ar.cos(), r * ar.sin()),
+                        to_pt((r + 0.42) * ar.cos(), (r + 0.42) * ar.sin()),
+                    ],
+                    Stroke::new(1.5_f32, lamp_stroke),
+                );
+            }
+        }
+        PropKind::Table | PropKind::Square | PropKind::Custom => {
             let fill = if kit_is_light() {
                 Color32::from_rgba_unmultiplied(120, 128, 145, 36)
             } else {
@@ -1455,6 +1932,7 @@ fn paint_actor(
     zoom: f32,
     actor: &PlanActor,
     selected: bool,
+    scene_progress: Option<f32>,
 ) {
     let ap = world_to_screen(center, pan, zoom, actor.x, actor.y);
     let rad = actor.angle_deg.to_radians();
@@ -1482,6 +1960,11 @@ fn paint_actor(
             p.circle_stroke(mp, 8.5, Stroke::new(1.5_f32, accent_col));
             if selected {
                 p.circle_filled(mp, 4.0, accent_col);
+            }
+            if let Some(frac) = scene_progress {
+                let live_p = Pos2::new(ap.x + dir.x * frac, ap.y + dir.y * frac);
+                p.circle_filled(live_p, 5.0, accent_col);
+                p.circle_stroke(live_p, 5.0, Stroke::new(1.4_f32, kit().page));
             }
         }
     }
@@ -1572,6 +2055,7 @@ fn paint_actor(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn paint_camera(
     p: &egui::Painter,
     center: Pos2,
@@ -1580,14 +2064,25 @@ fn paint_camera(
     cam: &scriptcraft_core::shots::PlanCamera,
     shot: &scriptcraft_core::shots::Shot,
     selected: bool,
+    dimmed: bool,
+    track_progress: Option<f32>,
 ) {
     let cp = world_to_screen(center, pan, zoom, cam.x, cam.y);
     let rad = cam.angle_deg.to_radians();
-    let col = shot_color32(shot.color);
+    let (r, g, b) = if dimmed {
+        if kit_is_light() {
+            (158u8, 164u8, 176u8)
+        } else {
+            (116u8, 122u8, 134u8)
+        }
+    } else {
+        shot.color.rgb()
+    };
+    let col = Color32::from_rgb(r, g, b);
     let fov_deg = cam.fov_deg.unwrap_or_else(|| lens_to_fov_deg(&shot.lens));
     let half_fov = (fov_deg * 0.5).to_radians();
 
-    // 1. Live focal-length FOV cone (with editable beam length)
+    // 1. Live focal-length FOV cone (with editable beam length; suppressed to subtle outline when dimmed)
     let cone_dist_m = cam.effective_cone_length();
     let steps = 10usize;
     let mut wedge = Vec::with_capacity(steps + 2);
@@ -1602,31 +2097,43 @@ fn paint_camera(
             cam.y + a.sin() * cone_dist_m,
         ));
     }
-    let cone_alpha = match (kit_is_light(), selected) {
-        (true, true) => 56,
-        (true, false) => 28,
-        (false, true) => 54,
-        (false, false) => 24,
-    };
-    let (r, g, b) = shot.color.rgb();
-    let cone_fill = Color32::from_rgba_unmultiplied(r, g, b, cone_alpha);
-    // Fan triangles from apex so even wide >90° cones stay strictly convex
-    for k in 1..wedge.len() - 1 {
-        p.add(Shape::convex_polygon(
-            vec![cp, wedge[k], wedge[k + 1]],
-            cone_fill,
-            Stroke::NONE,
-        ));
+    if !dimmed {
+        let cone_alpha = match (kit_is_light(), selected) {
+            (true, true) => 56,
+            (true, false) => 28,
+            (false, true) => 54,
+            (false, false) => 24,
+        };
+        let cone_fill = Color32::from_rgba_unmultiplied(r, g, b, cone_alpha);
+        // Fan triangles from apex so even wide >90° cones stay strictly convex
+        for k in 1..wedge.len() - 1 {
+            p.add(Shape::convex_polygon(
+                vec![cp, wedge[k], wedge[k + 1]],
+                cone_fill,
+                Stroke::NONE,
+            ));
+        }
     }
     // Crisp FOV boundary rays
     let ray_stroke = Stroke::new(
         if selected { 1.5_f32 } else { 1.0_f32 },
-        Color32::from_rgba_unmultiplied(r, g, b, if selected { 210 } else { 125 }),
+        Color32::from_rgba_unmultiplied(
+            r,
+            g,
+            b,
+            if dimmed {
+                44
+            } else if selected {
+                210
+            } else {
+                125
+            },
+        ),
     );
     p.line_segment([cp, wedge[1]], ray_stroke);
     p.line_segment([cp, *wedge.last().unwrap()], ray_stroke);
     // Dashed center optical axis when selected
-    if selected {
+    if selected && !dimmed {
         let axis_end = world_to_screen(
             center,
             pan,
@@ -1650,6 +2157,11 @@ fn paint_camera(
         let dir = tp - cp;
         if dir.length() > 10.0 {
             let perp = Vec2::new(-dir.y, dir.x).normalized() * 4.0;
+            let rail_col = if dimmed {
+                col.gamma_multiply(0.45)
+            } else {
+                col.gamma_multiply(0.8)
+            };
             // Classic twin dolly rails
             draw_dashed_line(
                 p,
@@ -1657,7 +2169,7 @@ fn paint_camera(
                 tp + perp,
                 6.0,
                 4.0,
-                Stroke::new(1.3_f32, col.gamma_multiply(0.8)),
+                Stroke::new(1.3_f32, rail_col),
             );
             draw_dashed_line(
                 p,
@@ -1665,13 +2177,18 @@ fn paint_camera(
                 tp - perp,
                 6.0,
                 4.0,
-                Stroke::new(1.3_f32, col.gamma_multiply(0.8)),
+                Stroke::new(1.3_f32, rail_col),
             );
-            draw_arrow_head(p, tp, dir, 7.5, col);
+            draw_arrow_head(p, tp, dir, 7.5, rail_col);
             // Destination ghost camera ring
-            p.circle_stroke(tp, 8.0, Stroke::new(1.5_f32, col));
-            if selected {
+            p.circle_stroke(tp, 8.0, Stroke::new(1.5_f32, rail_col));
+            if selected && !dimmed {
                 p.circle_filled(tp, 4.0, col);
+            }
+            if let Some(frac) = track_progress {
+                let live_p = Pos2::new(cp.x + dir.x * frac, cp.y + dir.y * frac);
+                p.circle_filled(live_p, 6.0, col);
+                p.circle_stroke(live_p, 6.0, Stroke::new(1.6_f32, kit().heading_text));
             }
         }
     }
@@ -1693,17 +2210,22 @@ fn paint_camera(
         cp + fwd * (bh + 7.5) + right * 9.0,
         cp + fwd * bh + right * 5.0,
     ];
-    if selected {
+    if selected && !dimmed {
         p.circle_stroke(cp, 17.5, Stroke::new(2.0_f32, kit().heading_text));
     }
+    let body_fill = if dimmed {
+        Color32::from_rgba_unmultiplied(r, g, b, 130)
+    } else {
+        col
+    };
     p.add(Shape::convex_polygon(
         hood,
-        col,
+        body_fill,
         Stroke::new(1.2_f32, kit().page),
     ));
     p.add(Shape::convex_polygon(
         body,
-        col,
+        body_fill,
         Stroke::new(1.4_f32, kit().page),
     ));
 
@@ -1715,7 +2237,15 @@ fn paint_camera(
     } else {
         shot.code.clone()
     };
-    let g = p.layout_no_wrap(badge_code, FontId::monospace(9.5), ink_on_accent(col));
+    let g = p.layout_no_wrap(
+        badge_code,
+        FontId::monospace(9.5),
+        if dimmed {
+            kit().page
+        } else {
+            ink_on_accent(col)
+        },
+    );
     p.galley(
         Pos2::new(cp.x - g.size().x * 0.5, cp.y - g.size().y * 0.5),
         g,
@@ -1729,12 +2259,16 @@ fn paint_camera(
             Align2::CENTER_TOP,
             shot.lens.trim(),
             FontId::monospace(9.5),
-            col,
+            if dimmed {
+                Color32::from_rgba_unmultiplied(col.r(), col.g(), col.b(), 150)
+            } else {
+                col
+            },
         );
     }
 
     // 4. Interactive Aim + Beam Length Handle dot at tip of optical axis when selected
-    if selected {
+    if selected && !dimmed {
         let aim = world_to_screen(
             center,
             pan,
@@ -1745,6 +2279,13 @@ fn paint_camera(
         p.circle_filled(aim, 5.5, col);
         p.circle_stroke(aim, 5.5, Stroke::new(1.8_f32, kit().heading_text));
     }
+}
+
+fn fmt_mmss(secs: f32) -> String {
+    let total = secs.max(0.0).round() as u32;
+    let m = total / 60;
+    let s = total % 60;
+    format!("{m}:{s:02}")
 }
 
 fn paint_scale_bar(p: &egui::Painter, rect: Rect, zoom: f32, snap_active: bool) {

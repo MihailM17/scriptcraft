@@ -15,8 +15,12 @@ use egui::{
     Align, Align2, Color32, CornerRadius, FontId, Id, Layout, Margin, Pos2, Rect, RichText,
     ScrollArea, Sense, Stroke, StrokeKind, TextEdit, Ui, Vec2,
 };
-use scriptcraft_core::shots::{block_index_map, ShotColor, ShotMovement, ShotRange, ShotSize};
+use scriptcraft_core::revision::RevisionColor;
+use scriptcraft_core::shots::{
+    block_index_map, ShotAlert, ShotColor, ShotMovement, ShotRange, ShotSize,
+};
 use scriptcraft_core::{ElementType, Project, Scene, ScriptBlock};
+use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::app::{bold_mono, MONO};
@@ -77,6 +81,11 @@ pub struct ShotsUiState {
     pub floor_plan: crate::floor_plan_view::FloorPlanUiState,
     /// Zoom factor for the script view inside the Shots tab (`1.0` = 100%).
     pub script_zoom: f32,
+    /// Previous frame's script zoom & scroll offset for rock-solid zoom anchoring.
+    last_script_zoom: Option<f32>,
+    last_script_offset: Vec2,
+    /// Cached GPU textures for attached shot storyboard/reference frames.
+    ref_textures: HashMap<Uuid, (u64, egui::TextureHandle)>,
     dragging_selection: bool,
 }
 
@@ -90,6 +99,9 @@ impl Default for ShotsUiState {
             view_mode: ShotsViewMode::default(),
             floor_plan: crate::floor_plan_view::FloorPlanUiState::default(),
             script_zoom: 1.0,
+            last_script_zoom: None,
+            last_script_offset: Vec2::ZERO,
+            ref_textures: HashMap::new(),
             dragging_selection: false,
         }
     }
@@ -102,6 +114,9 @@ impl ShotsUiState {
         self.sel_anchor = None;
         self.sel_focus = None;
         self.script_zoom = 1.0;
+        self.last_script_zoom = None;
+        self.last_script_offset = Vec2::ZERO;
+        self.ref_textures.clear();
         self.dragging_selection = false;
         self.floor_plan.selected = None;
         self.floor_plan.reset_view();
@@ -194,6 +209,7 @@ impl ShotsUiState {
 pub enum ShotsAction {
     None,
     Changed,
+    ExportBreakdownPdf,
     ExportColoredScriptPdf,
     ExportShotListPdf,
     ExportShotListCsv,
@@ -217,15 +233,18 @@ fn shot_tint32(color: ShotColor, strong: bool, light_paper: bool) -> Color32 {
 }
 
 /// Render the full 3-pane Shots workspace inside `ctx`.
+#[allow(clippy::too_many_arguments)]
 pub fn show(
     ctx: &egui::Context,
     project: &mut Project,
     scene_labels: &[String],
+    revision_marks: &[Option<RevisionColor>],
     state: &mut ShotsUiState,
     bold_character_cues: bool,
     paper_mono: bool,
 ) -> ShotsAction {
     let mut action = ShotsAction::None;
+    let shot_alerts = project.shots.shot_alerts(&project.blocks, revision_marks);
 
     let scenes = project.scenes();
     if !scenes.is_empty() && state.selected_scene >= scenes.len() {
@@ -448,12 +467,12 @@ pub fn show(
 
                 // Right-aligned export actions
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    ui.spacing_mut().item_spacing.x = 6.0;
+                    ui.spacing_mut().item_spacing.x = 5.0;
 
                     let has_shots = !project.shots.is_empty();
-                    let colored_btn = egui::Button::new(
-                        RichText::new("Colored Script PDF…")
-                            .size(12.0)
+                    let breakdown_btn = egui::Button::new(
+                        RichText::new("Breakdown PDF…")
+                            .size(11.5)
                             .color(if has_shots {
                                 ink_on_accent(kit().accent)
                             } else {
@@ -470,6 +489,29 @@ pub fn show(
                     .corner_radius(CornerRadius::same(6))
                     .min_size(Vec2::new(0.0, 26.0));
                     if ui
+                        .add_enabled(has_shots, breakdown_btn)
+                        .on_hover_text(
+                            "Export full Director's Breakdown PDF (vector floor plans, shot cards, storyboards & colored script)",
+                        )
+                        .clicked()
+                    {
+                        action = ShotsAction::ExportBreakdownPdf;
+                    }
+
+                    let colored_btn = egui::Button::new(
+                        RichText::new("Colored Script…")
+                            .size(11.5)
+                            .color(if has_shots {
+                                kit().text
+                            } else {
+                                kit().disabled_text
+                            }),
+                    )
+                    .fill(kit().button)
+                    .stroke(Stroke::new(1.0_f32, kit().stroke))
+                    .corner_radius(CornerRadius::same(6))
+                    .min_size(Vec2::new(0.0, 26.0));
+                    if ui
                         .add_enabled(has_shots, colored_btn)
                         .on_hover_text("Export screenplay PDF with shot highlights and legend")
                         .clicked()
@@ -478,7 +520,7 @@ pub fn show(
                     }
 
                     let list_btn =
-                        egui::Button::new(RichText::new("Shot List PDF…").size(12.0).color(
+                        egui::Button::new(RichText::new("Shot List…").size(11.5).color(
                             if has_shots {
                                 kit().text
                             } else {
@@ -498,7 +540,7 @@ pub fn show(
                     }
 
                     let csv_btn =
-                        egui::Button::new(RichText::new("CSV…").size(12.0).color(if has_shots {
+                        egui::Button::new(RichText::new("CSV…").size(11.5).color(if has_shots {
                             kit().text
                         } else {
                             kit().disabled_text
@@ -574,6 +616,8 @@ pub fn show(
                         if row_resp.clicked() && state.selected_scene != si {
                             state.selected_scene = si;
                             state.clear_selection();
+                            state.last_script_zoom = None;
+                            state.last_script_offset = Vec2::ZERO;
                             state.floor_plan.selected = None;
                             state.floor_plan.reset_view();
                             let first_shot = project
@@ -627,6 +671,7 @@ pub fn show(
                 project,
                 active_scene.as_ref(),
                 &active_scene_label,
+                &shot_alerts,
                 state,
             );
             if inspector_changed && action == ShotsAction::None {
@@ -869,6 +914,7 @@ fn show_right_pane(
     project: &mut Project,
     active_scene: Option<&Scene>,
     scene_label: &str,
+    shot_alerts: &HashMap<Uuid, ShotAlert>,
     state: &mut ShotsUiState,
 ) -> bool {
     let mut changed = false;
@@ -1099,6 +1145,47 @@ fn show_right_pane(
                                         .color(kit().disabled_text),
                                 );
                             }
+                            if let Some(alert) = shot_alerts.get(&shot_id) {
+                                ui.add_space(3.0);
+                                ui.horizontal(|ui| {
+                                    ui.spacing_mut().item_spacing.x = 4.0;
+                                    if let Some(rev) = alert.revision {
+                                        let (rr, rg, rb) = rev.rgb();
+                                        let rc = Color32::from_rgb(rr, rg, rb);
+                                        egui::Frame::new()
+                                            .fill(rc.gamma_multiply(0.22))
+                                            .stroke(Stroke::new(1.0_f32, rc))
+                                            .corner_radius(CornerRadius::same(4))
+                                            .inner_margin(Margin::symmetric(5, 1))
+                                            .show(ui, |ui| {
+                                                ui.label(
+                                                    RichText::new(format!(
+                                                        "{} rev",
+                                                        rev.label()
+                                                    ))
+                                                    .size(10.0)
+                                                    .strong()
+                                                    .color(kit().heading_text),
+                                                );
+                                            });
+                                    }
+                                    if alert.deleted_spans {
+                                        egui::Frame::new()
+                                            .fill(kit().spell_error.gamma_multiply(0.18))
+                                            .stroke(Stroke::new(1.0_f32, kit().spell_error))
+                                            .corner_radius(CornerRadius::same(4))
+                                            .inner_margin(Margin::symmetric(5, 1))
+                                            .show(ui, |ui| {
+                                                ui.label(
+                                                    RichText::new("Deleted text")
+                                                        .size(10.0)
+                                                        .strong()
+                                                        .color(kit().spell_error),
+                                                );
+                                            });
+                                    }
+                                });
+                            }
                         })
                         .response;
 
@@ -1179,6 +1266,39 @@ fn show_right_pane(
             let Some(shot) = project.shots.get_mut(sel_id) else {
                 return;
             };
+
+            if let Some(alert) = shot_alerts.get(&sel_id) {
+                let msg = match (alert.revision, alert.deleted_spans) {
+                    (Some(rev), true) => format!(
+                        "Covered text modified in {} revision and contains a deleted block.",
+                        rev.label()
+                    ),
+                    (Some(rev), false) => {
+                        format!("Covered script lines were modified in {} revision.", rev.label())
+                    }
+                    (None, true) => {
+                        "One or more script blocks covered by this shot were deleted.".to_string()
+                    }
+                    (None, false) => String::new(),
+                };
+                if !msg.is_empty() {
+                    let accent = alert
+                        .revision
+                        .map(|r| {
+                            let (rr, rg, rb) = r.rgb();
+                            Color32::from_rgb(rr, rg, rb)
+                        })
+                        .unwrap_or(kit().spell_error);
+                    egui::Frame::new()
+                        .fill(accent.gamma_multiply(0.14))
+                        .stroke(Stroke::new(1.0_f32, accent))
+                        .corner_radius(CornerRadius::same(6))
+                        .inner_margin(Margin::symmetric(8, 6))
+                        .show(ui, |ui| {
+                            ui.label(RichText::new(msg).size(11.0).color(kit().text));
+                        });
+                }
+            }
 
             // Row 1: Code + Lens
             ui.horizontal(|ui| {
@@ -1340,6 +1460,104 @@ fn show_right_pane(
             });
             if notes_resp.changed() {
                 changed = true;
+            }
+
+            // Row 4b: Storyboard / Reference Frame
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new("Reference Frame")
+                        .size(11.0)
+                        .color(kit().disabled_text),
+                );
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if shot.reference_image.is_some() {
+                        let rm_btn = egui::Button::new(
+                            RichText::new("Remove").size(10.5).color(kit().spell_error),
+                        )
+                        .fill(Color32::TRANSPARENT)
+                        .stroke(Stroke::NONE)
+                        .min_size(Vec2::new(0.0, 18.0));
+                        if ui.add(rm_btn).clicked() {
+                            shot.reference_image = None;
+                            state.ref_textures.remove(&sel_id);
+                            changed = true;
+                        }
+                        let rep_btn = egui::Button::new(
+                            RichText::new("Replace…")
+                                .size(10.5)
+                                .color(kit().accent_text),
+                        )
+                        .fill(kit().accent_soft)
+                        .stroke(Stroke::NONE)
+                        .corner_radius(CornerRadius::same(4))
+                        .min_size(Vec2::new(0.0, 18.0));
+                        if ui.add(rep_btn).clicked() {
+                            if let Some(path) = rfd::FileDialog::new()
+                                .add_filter("Images", &["png", "jpg", "jpeg"])
+                                .pick_file()
+                            {
+                                if let Ok(raw) = std::fs::read(&path) {
+                                    if let Some(encoded) = downscale_and_encode_ref_image(&raw) {
+                                        shot.set_reference_image_bytes(Some(&encoded));
+                                        state.ref_textures.remove(&sel_id);
+                                        changed = true;
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        let add_btn = egui::Button::new(
+                            RichText::new("+ Attach Frame…")
+                                .size(10.5)
+                                .color(kit().accent_text),
+                        )
+                        .fill(kit().accent_soft)
+                        .stroke(Stroke::NONE)
+                        .corner_radius(CornerRadius::same(4))
+                        .min_size(Vec2::new(0.0, 18.0));
+                        if ui
+                            .add(add_btn)
+                            .on_hover_text(
+                                "Attach a storyboard sketch or reference photo (included in Breakdown PDF)",
+                            )
+                            .clicked()
+                        {
+                            if let Some(path) = rfd::FileDialog::new()
+                                .add_filter("Images", &["png", "jpg", "jpeg"])
+                                .pick_file()
+                            {
+                                if let Ok(raw) = std::fs::read(&path) {
+                                    if let Some(encoded) = downscale_and_encode_ref_image(&raw) {
+                                        shot.set_reference_image_bytes(Some(&encoded));
+                                        state.ref_textures.remove(&sel_id);
+                                        changed = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            });
+            if let Some(ref_bytes) = shot.reference_image_bytes() {
+                if let Some(tex) =
+                    ensure_ref_texture(ui.ctx(), &mut state.ref_textures, sel_id, &ref_bytes)
+                {
+                    let tex_sz = tex.size_vec2();
+                    let max_w = ui.available_width().max(120.0);
+                    let max_h = 148.0_f32;
+                    let scale = (max_w / tex_sz.x.max(1.0))
+                        .min(max_h / tex_sz.y.max(1.0))
+                        .min(1.0);
+                    let draw_sz = tex_sz * scale;
+                    egui::Frame::new()
+                        .fill(kit().base)
+                        .stroke(Stroke::new(1.0_f32, kit().stroke))
+                        .corner_radius(CornerRadius::same(6))
+                        .inner_margin(Margin::same(4))
+                        .show(ui, |ui| {
+                            ui.image((tex.id(), draw_sz));
+                        });
+                }
             }
 
             // Row 5: Covered Text Spans
@@ -1779,306 +1997,343 @@ fn show_center_pane(
     // Handle trackpad pinch / Cmd+scroll zooming over the script viewport
     let script_stage_rect = ui.available_rect_before_wrap();
     let viewport_w = script_stage_rect.width();
+    let mut pinch_anchor: Option<Pos2> = None;
     if ui.rect_contains_pointer(script_stage_rect) {
         let pinch = ui.input(|i| i.zoom_delta());
         if (pinch - 1.0).abs() > 1e-3 {
+            pinch_anchor = ui.input(|i| i.pointer.hover_pos());
             state.script_zoom = (state.script_zoom * pinch).clamp(SCRIPT_ZOOM_MIN, SCRIPT_ZOOM_MAX);
             ui.ctx().request_repaint();
+        }
+    }
+
+    let zoom = state.script_zoom.clamp(SCRIPT_ZOOM_MIN, SCRIPT_ZOOM_MAX);
+    let is_split = state.view_mode == ShotsViewMode::Split;
+    let base_sheet_w = match state.view_mode {
+        ShotsViewMode::CoverageRails => 820.0_f32,
+        _ => 740.0_f32,
+    };
+    let pad = if is_split { 20.0 } else { 40.0 };
+    let unzoomed_sheet_w = (viewport_w - pad).min(base_sheet_w).max(200.0);
+    let sheet_w = unzoomed_sheet_w * zoom;
+    let side_pad = ((viewport_w - sheet_w) * 0.5).max(12.0);
+
+    // Camera-style zoom anchoring (matching the Script tab): keep the exact
+    // document point under the pointer (for pinch) or viewport center (for
+    // toolbar +/- buttons) locked to the same screen pixel so pages never jump.
+    let mut scroll_to: Option<Vec2> = None;
+    if let Some(prev_zoom) = state.last_script_zoom {
+        if (zoom - prev_zoom).abs() > 1e-4 {
+            let anchor = pinch_anchor
+                .filter(|p| script_stage_rect.contains(*p))
+                .unwrap_or_else(|| script_stage_rect.center());
+            let local = anchor - script_stage_rect.min;
+            let ratio = zoom / prev_zoom;
+            let prev_sheet_w = unzoomed_sheet_w * prev_zoom;
+            let prev_side_pad = ((viewport_w - prev_sheet_w) * 0.5).max(12.0);
+            let u_x = (local.x + state.last_script_offset.x - prev_side_pad) / prev_zoom;
+            let new_x = if sheet_w + 24.0 <= viewport_w {
+                0.0
+            } else {
+                (side_pad + u_x * zoom - local.x).max(0.0)
+            };
+            let new_y = ((state.last_script_offset.y + local.y) * ratio - local.y).max(0.0);
+            scroll_to = Some(Vec2::new(new_x, new_y));
         }
     }
 
     // 2. Centered Screenplay Paper Stage (uniform paper zoom like the Script tab:
     // disable drag_to_scroll so dragging selects text cleanly instead of pushing
     // the page, and allow horizontal scrolling when zoomed past the viewport width).
-    ScrollArea::both()
+    let mut scroll_area = ScrollArea::both()
         .id_salt(("shots_script_scroll", state.selected_scene))
         .scroll_source(egui::scroll_area::ScrollSource {
             drag: false,
             ..Default::default()
         })
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            let zoom = state.script_zoom.clamp(SCRIPT_ZOOM_MIN, SCRIPT_ZOOM_MAX);
-            ui.add_space(18.0 * zoom);
-            let is_split = state.view_mode == ShotsViewMode::Split;
-            let base_sheet_w = match state.view_mode {
-                ShotsViewMode::CoverageRails => 820.0_f32,
-                _ => 740.0_f32,
-            };
-            let pad = if is_split { 20.0 } else { 40.0 };
-            let unzoomed_sheet_w = (viewport_w - pad).min(base_sheet_w).max(200.0);
-            let sheet_w = unzoomed_sheet_w * zoom;
-            let side_pad = ((viewport_w - sheet_w) * 0.5).max(8.0);
-            let base_inner_x = if is_split { 14.0_f32 } else { 28.0_f32 };
-            let base_inner_y = if is_split { 16.0_f32 } else { 22.0_f32 };
-            let inner_x = (base_inner_x * zoom).round().clamp(4.0, 120.0) as i8;
-            let inner_y = (base_inner_y * zoom).round().clamp(4.0, 120.0) as i8;
-            let unzoomed_inner_w = (unzoomed_sheet_w - base_inner_x * 2.0).max(160.0);
-            let inner_w = unzoomed_inner_w * zoom;
+        .auto_shrink([false, false]);
+    if let Some(off) = scroll_to {
+        scroll_area = scroll_area
+            .vertical_scroll_offset(off.y)
+            .horizontal_scroll_offset(off.x);
+    }
+    let scroll_out = scroll_area.show(ui, |ui| {
+        ui.spacing_mut().item_spacing.y = 0.0;
+        ui.add_space(18.0 * zoom);
+        let base_inner_x = if is_split { 14.0_f32 } else { 28.0_f32 };
+        let base_inner_y = if is_split { 16.0_f32 } else { 22.0_f32 };
+        let inner_x = (base_inner_x * zoom).round().clamp(4.0, 120.0) as i8;
+        let inner_y = (base_inner_y * zoom).round().clamp(4.0, 120.0) as i8;
+        let unzoomed_inner_w = (unzoomed_sheet_w - base_inner_x * 2.0).max(160.0);
+        let inner_w = unzoomed_inner_w * zoom;
 
-            let paper_bg = if paper_mono {
-                Color32::WHITE
-            } else {
-                kit().page
-            };
-            let paper_edge = if paper_mono {
-                Color32::from_rgb(208, 212, 220)
-            } else {
-                kit().page_edge
-            };
-            let paper_accent = if paper_mono {
-                Color32::from_rgb(36, 98, 200)
-            } else {
-                kit().accent_text
-            };
-            let paper_muted = if paper_mono {
-                Color32::from_rgb(96, 102, 114)
-            } else {
-                kit().disabled_text
-            };
+        let paper_bg = if paper_mono {
+            Color32::WHITE
+        } else {
+            kit().page
+        };
+        let paper_edge = if paper_mono {
+            Color32::from_rgb(208, 212, 220)
+        } else {
+            kit().page_edge
+        };
+        let paper_accent = if paper_mono {
+            Color32::from_rgb(36, 98, 200)
+        } else {
+            kit().accent_text
+        };
+        let paper_muted = if paper_mono {
+            Color32::from_rgb(96, 102, 114)
+        } else {
+            kit().disabled_text
+        };
 
-            ui.horizontal(|ui| {
-                ui.add_space(side_pad);
-                ui.vertical(|ui| {
-                    ui.set_width(sheet_w);
+        ui.horizontal(|ui| {
+            ui.add_space(side_pad);
+            ui.vertical(|ui| {
+                ui.set_width(sheet_w);
 
-                    // Paper card
-                    egui::Frame::new()
-                        .fill(paper_bg)
-                        .stroke(Stroke::new(1.0_f32, paper_edge))
-                        .corner_radius(CornerRadius::same(8))
-                        .inner_margin(Margin::symmetric(inner_x, inner_y))
-                        .show(ui, |ui| {
-                            ui.set_width(inner_w);
+                // Paper card
+                egui::Frame::new()
+                    .fill(paper_bg)
+                    .stroke(Stroke::new(1.0_f32, paper_edge))
+                    .corner_radius(CornerRadius::same(8))
+                    .inner_margin(Margin::symmetric(inner_x, inner_y))
+                    .show(ui, |ui| {
+                        ui.set_width(inner_w);
 
-                            // Scene title header inside the paper
-                            if let Some(sc) = active_scene {
-                                let (n_shots, cov_b, tot_b) = project.shots.scene_coverage_stats(
-                                    sc,
-                                    &project.blocks,
-                                    block_coverage,
+                        // Scene title header inside the paper
+                        if let Some(sc) = active_scene {
+                            let (n_shots, cov_b, tot_b) = project.shots.scene_coverage_stats(
+                                sc,
+                                &project.blocks,
+                                block_coverage,
+                            );
+                            let sc_pct = (cov_b * 100).checked_div(tot_b).unwrap_or(0);
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new(format!(
+                                        "SCENE {}",
+                                        scene_label.trim_end_matches('.')
+                                    ))
+                                    .font(FontId::monospace(11.0 * zoom))
+                                    .strong()
+                                    .color(paper_accent),
                                 );
-                                let sc_pct = (cov_b * 100).checked_div(tot_b).unwrap_or(0);
-                                ui.horizontal(|ui| {
+                                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                     ui.label(
                                         RichText::new(format!(
-                                            "SCENE {}",
-                                            scene_label.trim_end_matches('.')
+                                            "{n_shots} {} · {sc_pct}% covered",
+                                            if n_shots == 1 { "shot" } else { "shots" }
                                         ))
-                                        .font(FontId::monospace(11.0 * zoom))
-                                        .strong()
-                                        .color(paper_accent),
+                                        .size(11.0 * zoom)
+                                        .color(paper_muted),
                                     );
-                                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                        ui.label(
-                                            RichText::new(format!(
-                                                "{n_shots} {} · {sc_pct}% covered",
-                                                if n_shots == 1 { "shot" } else { "shots" }
-                                            ))
-                                            .size(11.0 * zoom)
-                                            .color(paper_muted),
-                                        );
-                                    });
                                 });
-                                ui.add_space(4.0 * zoom);
-                            }
-
-                            // Coverage Rails track legend at top of page
-                            let rail_shots: Vec<(usize, Uuid, String, Color32)> =
-                                if state.view_mode == ShotsViewMode::CoverageRails {
-                                    scene_shot_indices
-                                        .iter()
-                                        .take(8)
-                                        .filter_map(|&idx| {
-                                            project.shots.shots.get(idx).map(|s| {
-                                                (idx, s.id, s.code.clone(), shot_color32(s.color))
-                                            })
-                                        })
-                                        .collect()
-                                } else {
-                                    Vec::new()
-                                };
-                            let rail_col_w = 24.0_f32 * zoom;
-                            let rail_area_w = if state.view_mode == ShotsViewMode::CoverageRails
-                                && !rail_shots.is_empty()
-                            {
-                                (rail_shots.len() as f32 * rail_col_w) + 12.0 * zoom
-                            } else {
-                                0.0
-                            };
-
-                            if state.view_mode == ShotsViewMode::CoverageRails
-                                && !rail_shots.is_empty()
-                            {
-                                let total_w = inner_w;
-                                let (hdr_rect, _) = ui.allocate_exact_size(
-                                    Vec2::new(total_w, 22.0 * zoom),
-                                    Sense::hover(),
-                                );
-                                let rail_x0 = hdr_rect.right() - rail_area_w + 12.0 * zoom;
-                                for (col_i, &(_, sid, ref code, col)) in
-                                    rail_shots.iter().enumerate()
-                                {
-                                    let cx = rail_x0 + col_i as f32 * rail_col_w + rail_col_w * 0.5;
-                                    let pill_rect = Rect::from_center_size(
-                                        Pos2::new(cx, hdr_rect.center().y),
-                                        Vec2::new(rail_col_w - 3.0 * zoom, 17.0 * zoom),
-                                    );
-                                    let active = state.selected_shot == Some(sid);
-                                    let resp = ui
-                                        .interact(
-                                            pill_rect,
-                                            Id::new(("rail_hdr", sid)),
-                                            Sense::click(),
-                                        )
-                                        .on_hover_cursor(egui::CursorIcon::PointingHand)
-                                        .on_hover_text(code.clone());
-                                    ui.painter().rect_filled(
-                                        pill_rect,
-                                        CornerRadius::same(3),
-                                        if active {
-                                            col
-                                        } else {
-                                            col.gamma_multiply(0.24)
-                                        },
-                                    );
-                                    let g = ellipsized(
-                                        ui.painter(),
-                                        code,
-                                        FontId::monospace(9.5 * zoom),
-                                        if active { ink_on_accent(col) } else { col },
-                                        (rail_col_w - 6.0 * zoom).max(12.0 * zoom),
-                                    );
-                                    ui.painter().galley(
-                                        Pos2::new(
-                                            pill_rect.center().x - g.size().x * 0.5,
-                                            pill_rect.center().y - g.size().y * 0.5,
-                                        ),
-                                        g,
-                                        Color32::TRANSPARENT,
-                                    );
-                                    if resp.clicked() {
-                                        state.selected_shot = Some(sid);
-                                    }
-                                }
-                                ui.add_space(4.0 * zoom);
-                            }
-
-                            let shift_down = ui.input(|i| i.modifiers.shift);
-                            let total_w = inner_w;
-                            let base_tag_area_w = if state.view_mode.is_color_map_script() {
-                                if is_split {
-                                    58.0
-                                } else {
-                                    82.0
-                                }
-                            } else if !rail_shots.is_empty() {
-                                (rail_shots.len() as f32 * 24.0) + 12.0
-                            } else {
-                                0.0
-                            };
-                            let tag_area_w = base_tag_area_w * zoom;
-                            let unzoomed_text_area_w =
-                                (unzoomed_inner_w - base_tag_area_w - 6.0).max(120.0);
-                            let text_area_w = unzoomed_text_area_w * zoom;
-
-                            // Keep tight vertical spacing so Coverage Rails connect seamlessly
-                            ui.spacing_mut().item_spacing.y = 0.0;
-
-                            // Track previous visual row's primary shot for right-margin pill dedup
-                            let mut prev_visual_row_primary: Option<usize> = None;
-                            // Track active rail connections across blocks (shot_idx -> continues)
-                            let mut prev_block_end_shots: Vec<usize> = Vec::new();
-
-                            for (pos_in_scene, &bi) in scene_blocks.iter().enumerate() {
-                                let Some(block) = project.blocks.get(bi) else {
-                                    continue;
-                                };
-                                if !block.element_type.is_printable() {
-                                    continue;
-                                }
-
-                                let spans_here =
-                                    char_coverage.get(bi).map(Vec::as_slice).unwrap_or(&[]);
-
-                                // Shots starting at char 0 of the next printable block (for continuous rails)
-                                let next_block_start_shots: Vec<usize> = scene_blocks
-                                    .get(pos_in_scene + 1)
-                                    .and_then(|&nbi| char_coverage.get(nbi))
-                                    .map(|v| {
-                                        v.iter()
-                                            .filter(|&&(_, c0, _)| c0 == 0)
-                                            .map(|&(si, _, _)| si)
-                                            .collect()
-                                    })
-                                    .unwrap_or_default();
-
-                                let block_end_shots = render_script_block_row(
-                                    ui,
-                                    project,
-                                    bi,
-                                    block,
-                                    spans_here,
-                                    &prev_block_end_shots,
-                                    &next_block_start_shots,
-                                    &mut prev_visual_row_primary,
-                                    shift_down,
-                                    total_w,
-                                    text_area_w,
-                                    tag_area_w,
-                                    &rail_shots,
-                                    rail_col_w,
-                                    rail_area_w,
-                                    state,
-                                    bold_character_cues,
-                                    paper_mono,
-                                );
-                                prev_block_end_shots = block_end_shots;
-                            }
-                        });
-
-                    // Scene Prev / Next footer
-                    ui.add_space(14.0);
-                    ui.horizontal(|ui| {
-                        let has_prev = state.selected_scene > 0;
-                        let prev =
-                            egui::Button::new(RichText::new("< Previous Scene").size(12.0).color(
-                                if has_prev {
-                                    kit().text
-                                } else {
-                                    kit().disabled_text
-                                },
-                            ))
-                            .fill(kit().surface)
-                            .stroke(Stroke::new(1.0_f32, kit().stroke))
-                            .corner_radius(CornerRadius::same(6));
-                        if ui.add_enabled(has_prev, prev).clicked() {
-                            state.selected_scene -= 1;
-                            state.clear_selection();
+                            });
+                            ui.add_space(4.0 * zoom);
                         }
 
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            let has_next = state.selected_scene + 1 < scenes.len();
-                            let next = egui::Button::new(
-                                RichText::new("Next Scene >").size(12.0).color(if has_next {
-                                    kit().text
-                                } else {
-                                    kit().disabled_text
-                                }),
-                            )
-                            .fill(kit().surface)
-                            .stroke(Stroke::new(1.0_f32, kit().stroke))
-                            .corner_radius(CornerRadius::same(6));
-                            if ui.add_enabled(has_next, next).clicked() {
-                                state.selected_scene += 1;
-                                state.clear_selection();
+                        // Coverage Rails track legend at top of page
+                        let rail_shots: Vec<(usize, Uuid, String, Color32)> =
+                            if state.view_mode == ShotsViewMode::CoverageRails {
+                                scene_shot_indices
+                                    .iter()
+                                    .take(8)
+                                    .filter_map(|&idx| {
+                                        project.shots.shots.get(idx).map(|s| {
+                                            (idx, s.id, s.code.clone(), shot_color32(s.color))
+                                        })
+                                    })
+                                    .collect()
+                            } else {
+                                Vec::new()
+                            };
+                        let rail_col_w = 24.0_f32 * zoom;
+                        let rail_area_w = if state.view_mode == ShotsViewMode::CoverageRails
+                            && !rail_shots.is_empty()
+                        {
+                            (rail_shots.len() as f32 * rail_col_w) + 12.0 * zoom
+                        } else {
+                            0.0
+                        };
+
+                        if state.view_mode == ShotsViewMode::CoverageRails && !rail_shots.is_empty()
+                        {
+                            let total_w = inner_w;
+                            let (hdr_rect, _) = ui.allocate_exact_size(
+                                Vec2::new(total_w, 22.0 * zoom),
+                                Sense::hover(),
+                            );
+                            let rail_x0 = hdr_rect.right() - rail_area_w + 12.0 * zoom;
+                            for (col_i, &(_, sid, ref code, col)) in rail_shots.iter().enumerate() {
+                                let cx = rail_x0 + col_i as f32 * rail_col_w + rail_col_w * 0.5;
+                                let pill_rect = Rect::from_center_size(
+                                    Pos2::new(cx, hdr_rect.center().y),
+                                    Vec2::new(rail_col_w - 3.0 * zoom, 17.0 * zoom),
+                                );
+                                let active = state.selected_shot == Some(sid);
+                                let resp = ui
+                                    .interact(pill_rect, Id::new(("rail_hdr", sid)), Sense::click())
+                                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                    .on_hover_text(code.clone());
+                                ui.painter().rect_filled(
+                                    pill_rect,
+                                    CornerRadius::same(3),
+                                    if active {
+                                        col
+                                    } else {
+                                        col.gamma_multiply(0.24)
+                                    },
+                                );
+                                let g = ellipsized(
+                                    ui.painter(),
+                                    code,
+                                    FontId::monospace(9.5 * zoom),
+                                    if active { ink_on_accent(col) } else { col },
+                                    (rail_col_w - 6.0 * zoom).max(12.0 * zoom),
+                                );
+                                ui.painter().galley(
+                                    Pos2::new(
+                                        pill_rect.center().x - g.size().x * 0.5,
+                                        pill_rect.center().y - g.size().y * 0.5,
+                                    ),
+                                    g,
+                                    Color32::TRANSPARENT,
+                                );
+                                if resp.clicked() {
+                                    state.selected_shot = Some(sid);
+                                }
                             }
-                        });
+                            ui.add_space(4.0 * zoom);
+                        }
+
+                        let shift_down = ui.input(|i| i.modifiers.shift);
+                        let total_w = inner_w;
+                        let base_tag_area_w = if state.view_mode.is_color_map_script() {
+                            if is_split {
+                                58.0
+                            } else {
+                                82.0
+                            }
+                        } else if !rail_shots.is_empty() {
+                            (rail_shots.len() as f32 * 24.0) + 12.0
+                        } else {
+                            0.0
+                        };
+                        let tag_area_w = base_tag_area_w * zoom;
+                        let unzoomed_text_area_w =
+                            (unzoomed_inner_w - base_tag_area_w - 6.0).max(120.0);
+                        let text_area_w = unzoomed_text_area_w * zoom;
+
+                        // Keep tight vertical spacing so Coverage Rails connect seamlessly
+                        ui.spacing_mut().item_spacing.y = 0.0;
+
+                        // Track previous visual row's primary shot for right-margin pill dedup
+                        let mut prev_visual_row_primary: Option<usize> = None;
+                        // Track active rail connections across blocks (shot_idx -> continues)
+                        let mut prev_block_end_shots: Vec<usize> = Vec::new();
+
+                        for (pos_in_scene, &bi) in scene_blocks.iter().enumerate() {
+                            let Some(block) = project.blocks.get(bi) else {
+                                continue;
+                            };
+                            if !block.element_type.is_printable() {
+                                continue;
+                            }
+
+                            let spans_here =
+                                char_coverage.get(bi).map(Vec::as_slice).unwrap_or(&[]);
+
+                            // Shots starting at char 0 of the next printable block (for continuous rails)
+                            let next_block_start_shots: Vec<usize> = scene_blocks
+                                .get(pos_in_scene + 1)
+                                .and_then(|&nbi| char_coverage.get(nbi))
+                                .map(|v| {
+                                    v.iter()
+                                        .filter(|&&(_, c0, _)| c0 == 0)
+                                        .map(|&(si, _, _)| si)
+                                        .collect()
+                                })
+                                .unwrap_or_default();
+
+                            let block_end_shots = render_script_block_row(
+                                ui,
+                                project,
+                                bi,
+                                block,
+                                spans_here,
+                                &prev_block_end_shots,
+                                &next_block_start_shots,
+                                &mut prev_visual_row_primary,
+                                shift_down,
+                                total_w,
+                                text_area_w,
+                                tag_area_w,
+                                &rail_shots,
+                                rail_col_w,
+                                rail_area_w,
+                                state,
+                                bold_character_cues,
+                                paper_mono,
+                            );
+                            prev_block_end_shots = block_end_shots;
+                        }
                     });
-                    ui.add_space(28.0);
+
+                // Scene Prev / Next footer
+                ui.add_space(14.0);
+                ui.horizontal(|ui| {
+                    let has_prev = state.selected_scene > 0;
+                    let prev =
+                        egui::Button::new(RichText::new("< Previous Scene").size(12.0).color(
+                            if has_prev {
+                                kit().text
+                            } else {
+                                kit().disabled_text
+                            },
+                        ))
+                        .fill(kit().surface)
+                        .stroke(Stroke::new(1.0_f32, kit().stroke))
+                        .corner_radius(CornerRadius::same(6));
+                    if ui.add_enabled(has_prev, prev).clicked() {
+                        state.selected_scene -= 1;
+                        state.clear_selection();
+                        state.last_script_zoom = None;
+                        state.last_script_offset = Vec2::ZERO;
+                        state.floor_plan.selected = None;
+                        state.floor_plan.reset_view();
+                    }
+
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        let has_next = state.selected_scene + 1 < scenes.len();
+                        let next = egui::Button::new(
+                            RichText::new("Next Scene >").size(12.0).color(if has_next {
+                                kit().text
+                            } else {
+                                kit().disabled_text
+                            }),
+                        )
+                        .fill(kit().surface)
+                        .stroke(Stroke::new(1.0_f32, kit().stroke))
+                        .corner_radius(CornerRadius::same(6));
+                        if ui.add_enabled(has_next, next).clicked() {
+                            state.selected_scene += 1;
+                            state.clear_selection();
+                            state.last_script_zoom = None;
+                            state.last_script_offset = Vec2::ZERO;
+                            state.floor_plan.selected = None;
+                            state.floor_plan.reset_view();
+                        }
+                    });
                 });
+                ui.add_space(28.0 * zoom);
             });
+            ui.add_space(side_pad);
         });
+    });
+    state.last_script_offset = scroll_out.state.offset;
+    state.last_script_zoom = Some(zoom);
 
     action
 }
@@ -2426,6 +2681,29 @@ fn render_script_block_row(
             );
         }
 
+        // 2b. Live Timeline active beat spotlight (syncs Split view screenplay with active camera)
+        if state.floor_plan.timeline_active {
+            for &(rbi, rc0, rc1) in &state.floor_plan.active_beat_ranges {
+                if rbi == bi && rc0 < rc1 {
+                    let active_col = state
+                        .floor_plan
+                        .active_camera_id
+                        .and_then(|cid| project.shots.get(cid))
+                        .map(|s| shot_color32(s.color))
+                        .unwrap_or_else(|| kit().accent);
+                    paint_char_highlight(
+                        p,
+                        &galley,
+                        text_pos,
+                        rc0.min(char_len),
+                        rc1.min(char_len),
+                        active_col.gamma_multiply(if light_paper { 0.22 } else { 0.30 }),
+                        Some(Stroke::new(1.8_f32, active_col)),
+                    );
+                }
+            }
+        }
+
         // 3. Screenplay text
         p.galley(text_pos, galley.clone(), text_color);
 
@@ -2663,6 +2941,59 @@ fn pick_row_primary(
         }
     }
     row_shots.first().copied()
+}
+
+fn hash_bytes(bytes: &[u8]) -> u64 {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for &b in bytes {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    h
+}
+
+fn downscale_and_encode_ref_image(raw_bytes: &[u8]) -> Option<Vec<u8>> {
+    let img = image::load_from_memory(raw_bytes).ok()?;
+    let resized = if img.width() > 960 || img.height() > 960 {
+        img.resize(960, 960, image::imageops::FilterType::Triangle)
+    } else {
+        img
+    };
+    let rgb = resized.to_rgb8();
+    let mut out = Vec::new();
+    let mut enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 82);
+    enc.encode(
+        rgb.as_raw(),
+        rgb.width(),
+        rgb.height(),
+        image::ExtendedColorType::Rgb8,
+    )
+    .ok()?;
+    Some(out)
+}
+
+fn ensure_ref_texture(
+    ctx: &egui::Context,
+    cache: &mut HashMap<Uuid, (u64, egui::TextureHandle)>,
+    shot_id: Uuid,
+    bytes: &[u8],
+) -> Option<egui::TextureHandle> {
+    let h = hash_bytes(bytes);
+    if let Some((cached_h, tex)) = cache.get(&shot_id) {
+        if *cached_h == h {
+            return Some(tex.clone());
+        }
+    }
+    let rgba = image::load_from_memory(bytes).ok()?.to_rgba8();
+    let size = [rgba.width() as usize, rgba.height() as usize];
+    let color_img = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
+    let tex = ctx.load_texture(
+        format!("shot_ref_{shot_id}"),
+        color_img,
+        egui::TextureOptions::LINEAR,
+    );
+    cache.insert(shot_id, (h, tex.clone()));
+    Some(tex)
 }
 
 /// Calm empty-state view when no project is open.

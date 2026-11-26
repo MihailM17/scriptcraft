@@ -10,11 +10,11 @@ description = "Screenplay layout engine: wrapping, pagination and placed lines i
 scriptcraft-core = { path = "../scriptcraft-core", version = "0.1.0" }
 printpdf = "0.12"
 thiserror = "2"
+uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 criterion = "0.8.2"
 lopdf = "0.44"
-uuid = { version = "1", features = ["v4"] }
 
 [[bench]]
 name = "layout"

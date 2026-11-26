@@ -721,3 +721,260 @@ fn cyrillic_descriptive_shot_names_render_cleanly_without_collisions() {
         "full Cyrillic shot names must appear untruncated in left margin: {script_txt}"
     );
 }
+
+#[test]
+fn directors_breakdown_pdf_renders_floor_plan_shapes_and_storyboard_images() {
+    use scriptcraft_core::shots::{
+        PlanActor, PlanCamera, PlanProp, PropKind, ShotColor, ShotMovement, ShotRange, ShotSize,
+    };
+    use scriptcraft_core::{kitsp, ElementType, Project, ScriptBlock};
+    use scriptcraft_layout::pdf;
+    use std::collections::HashMap;
+
+    let mut p = Project {
+        title: "Midnight Diner".into(),
+        blocks: vec![
+            ScriptBlock::new(ElementType::SceneHeading, "INT. DINER - NIGHT".into()),
+            ScriptBlock::new(
+                ElementType::Action,
+                "Rain streaks the neon-lit glass. ELENA sits across from MARCO in a red vinyl booth, sliding a battered envelope across the table.".into(),
+            ),
+            ScriptBlock::new(ElementType::Character, "ELENA".into()),
+            ScriptBlock::new(
+                ElementType::Dialogue,
+                "You said nobody followed you here. Look across the street.".into(),
+            ),
+            ScriptBlock::new(ElementType::Character, "MARCO".into()),
+            ScriptBlock::new(
+                ElementType::Dialogue,
+                "That's just a cab waiting for a fare.".into(),
+            ),
+        ],
+        ..Default::default()
+    };
+    let s0 = p.blocks[0].id;
+    let b0 = p.blocks[0].id;
+    let b1 = p.blocks[1].id;
+    let b2 = p.blocks[2].id;
+    let b3 = p.blocks[3].id;
+    let b4 = p.blocks[4].id;
+    let b5 = p.blocks[5].id;
+
+    let id1 = p.shots.add_shot(
+        Some(s0),
+        "1",
+        ShotSize::Ws,
+        ShotMovement::Dolly,
+        "28mm".into(),
+        "Wide establishing master tracking gently along the booth aisle with neon window reflections.".into(),
+        ShotRange::blocks(b0, b1),
+    );
+    p.shots.get_mut(id1).unwrap().color = ShotColor::Cobalt;
+
+    let id2 = p.shots.add_shot(
+        Some(s0),
+        "1",
+        ShotSize::Cu,
+        ShotMovement::Static,
+        "85mm".into(),
+        "Tight single on Elena as she glances out the rain-streaked glass.".into(),
+        ShotRange::blocks(b2, b3),
+    );
+    p.shots.get_mut(id2).unwrap().color = ShotColor::Coral;
+
+    let id3 = p.shots.add_shot(
+        Some(s0),
+        "1",
+        ShotSize::Ots,
+        ShotMovement::Static,
+        "50mm".into(),
+        "Over-the-shoulder on Marco holding steady eye contact.".into(),
+        ShotRange::blocks(b4, b5),
+    );
+    p.shots.get_mut(id3).unwrap().color = ShotColor::Emerald;
+
+    // Populate a rich 2D Floor Plan with basic shapes (Circle, Triangle, Square, Light) + actors + cameras
+    p.shots
+        .scene_plans
+        .push(scriptcraft_core::shots::SceneFloorPlan::empty(s0));
+    let plan = p.shots.plan_for_scene_mut(s0).unwrap();
+    plan.props.push(PlanProp {
+        id: uuid::Uuid::new_v4(),
+        kind: PropKind::Wall,
+        label: "Front Window".into(),
+        x: 0.0,
+        y: -2.6,
+        w: 6.4,
+        h: 0.25,
+        angle_deg: 0.0,
+    });
+    plan.props.push(PlanProp {
+        id: uuid::Uuid::new_v4(),
+        kind: PropKind::Table,
+        label: "Booth Table".into(),
+        x: 0.0,
+        y: -0.4,
+        w: 1.4,
+        h: 0.85,
+        angle_deg: 0.0,
+    });
+    plan.props.push(PlanProp {
+        id: uuid::Uuid::new_v4(),
+        kind: PropKind::Circle,
+        label: "Pillar".into(),
+        x: -2.3,
+        y: 0.6,
+        w: 0.9,
+        h: 0.9,
+        angle_deg: 0.0,
+    });
+    plan.props.push(PlanProp {
+        id: uuid::Uuid::new_v4(),
+        kind: PropKind::Triangle,
+        label: "Neon Sign".into(),
+        x: 2.3,
+        y: -1.6,
+        w: 0.9,
+        h: 0.8,
+        angle_deg: -15.0,
+    });
+    plan.props.push(PlanProp {
+        id: uuid::Uuid::new_v4(),
+        kind: PropKind::Square,
+        label: "Jukebox".into(),
+        x: 2.5,
+        y: 0.9,
+        w: 1.0,
+        h: 0.8,
+        angle_deg: 0.0,
+    });
+    plan.props.push(PlanProp {
+        id: uuid::Uuid::new_v4(),
+        kind: PropKind::Light,
+        label: "Key 1K".into(),
+        x: -2.4,
+        y: -1.8,
+        w: 0.7,
+        h: 0.7,
+        angle_deg: 35.0,
+    });
+    plan.actors.push(PlanActor {
+        id: uuid::Uuid::new_v4(),
+        name: "ELENA".into(),
+        x: -1.0,
+        y: -0.4,
+        angle_deg: 0.0,
+        color: ShotColor::Coral,
+        move_to: Some((-0.8, 0.3)),
+    });
+    plan.actors.push(PlanActor {
+        id: uuid::Uuid::new_v4(),
+        name: "MARCO".into(),
+        x: 1.0,
+        y: -0.4,
+        angle_deg: 180.0,
+        color: ShotColor::Emerald,
+        move_to: None,
+    });
+    plan.cameras.push(PlanCamera {
+        shot_id: id1,
+        x: -1.8,
+        y: 2.2,
+        angle_deg: -65.0,
+        fov_deg: Some(65.0),
+        cone_length: Some(3.2),
+        track_to: Some((1.2, 2.2)),
+    });
+    plan.cameras.push(PlanCamera {
+        shot_id: id2,
+        x: 0.9,
+        y: 1.4,
+        angle_deg: -135.0,
+        fov_deg: Some(28.0),
+        cone_length: Some(2.6),
+        track_to: None,
+    });
+    plan.cameras.push(PlanCamera {
+        shot_id: id3,
+        x: -0.9,
+        y: 1.4,
+        angle_deg: -45.0,
+        fov_deg: Some(40.0),
+        cone_length: Some(2.6),
+        track_to: None,
+    });
+
+    // Synthetic 160x90 storyboard thumbnail image for Shot 1A
+    let (w, h) = (160usize, 90usize);
+    let mut rgb = Vec::with_capacity(w * h * 3);
+    for y in 0..h {
+        for x in 0..w {
+            let r = (24 + (x * 180 / w)) as u8;
+            let g = (48 + (y * 120 / h)) as u8;
+            let b = (110 + ((w - x) * 110 / w)) as u8;
+            rgb.extend_from_slice(&[r, g, b]);
+        }
+    }
+    let mut shot_images = HashMap::new();
+    shot_images.insert(
+        id1,
+        pdf::DecodedShotImage {
+            width: w,
+            height: h,
+            rgb,
+        },
+    );
+
+    let read = |name: &str| {
+        std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../scriptcraft-app/assets/fonts")
+                .join(name),
+        )
+        .expect("font")
+    };
+    let fonts = pdf::ExportFonts {
+        regular: &read("IBMPlexMono-Regular.ttf"),
+        bold: &read("IBMPlexMono-Bold.ttf"),
+        italic: Some(&read("CourierPrime-Italic.ttf")),
+        fallback_regular: &read("CourierPrime-Regular.ttf"),
+        fallback_bold: &read("CourierPrime-Bold.ttf"),
+        fallback_italic: Some(&read("LiberationMono-Italic.ttf")),
+    };
+    let meta = kitsp::Metadata {
+        title: "MIDNIGHT DINER".into(),
+        author: "Alex Mercer".into(),
+        ..Default::default()
+    };
+    let opts = pdf::ExportOptions {
+        title_page: true,
+        bold_character_cues: true,
+        color_by_shots: true,
+        include_shot_legend: false,
+        ..Default::default()
+    };
+
+    let bytes =
+        pdf::to_directors_breakdown_pdf_bytes(&p, &meta, &opts, &[], None, &fonts, &shot_images)
+            .expect("director's breakdown pdf");
+    assert!(bytes.starts_with(b"%PDF-"));
+
+    if let Ok(dump_path) = std::env::var("DUMP_BREAKDOWN_PDF") {
+        if let Some(parent) = std::path::Path::new(&dump_path).parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        std::fs::write(&dump_path, &bytes).expect("dump breakdown pdf");
+    }
+
+    let doc = lopdf::Document::load_mem(&bytes).expect("parse breakdown pdf");
+    assert!(
+        doc.get_pages().len() >= 3,
+        "expected title + breakdown sheet + colored script pages, got {}",
+        doc.get_pages().len()
+    );
+    let breakdown_txt = doc.extract_text(&[2]).unwrap_or_default();
+    assert!(
+        breakdown_txt.contains("DIRECTOR'S BREAKDOWN") && breakdown_txt.contains("1A"),
+        "breakdown sheet must show header and shot cards: {breakdown_txt}"
+    );
+}

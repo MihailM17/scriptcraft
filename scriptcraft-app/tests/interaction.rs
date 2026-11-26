@@ -4105,3 +4105,94 @@ fn shots_script_zoom_dark_colors_and_export_dialog_color_by_shots() {
         "nested legend option must appear when Color script by shots is enabled"
     );
 }
+
+/// Phase 3: Basic prop shapes (`+ Shapes` -> Circle/Triangle), Scene Timeline
+/// spotlight scrubber (`Timeline`, `Next cut`, `Previous cut`), Director's
+/// Breakdown PDF export, and live Script-edit shot span offset synchronization.
+#[test]
+fn phase3_timeline_basic_shapes_breakdown_pdf_and_live_span_sync() {
+    let mut h = harness(SideTab::Script);
+    h.run();
+
+    h.get_by_label("Shots").click();
+    h.run();
+
+    // Create two shots in Scene 1 (1A on block 1 chars 5..25, 1B on block 2)
+    h.state_mut()
+        .set_shots_char_selection_for_test((1, 5), (1, 25));
+    h.run();
+    h.get_by_label("+ New Shot (1A)").click();
+    h.run();
+
+    h.state_mut()
+        .set_shots_char_selection_for_test((2, 0), (2, 12));
+    h.run();
+    h.get_by_label("+ New Shot (1B)").click();
+    h.run();
+    assert_eq!(h.state().shots_count_for_test(), 2);
+
+    // Switch to Floor Plan and add basic shapes via "+ Shapes" menu
+    h.get_by_label("Floor Plan").click();
+    h.run_steps(2);
+    h.get_by_label("+ Shapes").click();
+    h.run();
+    h.get_by_label("Circle").click();
+    h.run();
+    h.get_by_label("+ Shapes").click();
+    h.run();
+    h.get_by_label("Triangle").click();
+    h.run();
+
+    {
+        let p = h.state().project_for_test().unwrap();
+        let sc0 = p.scenes()[0].id;
+        let plan = p.shots.plan_for_scene(sc0).expect("scene plan");
+        assert!(
+            plan.props
+                .iter()
+                .any(|pr| pr.kind == scriptcraft_core::shots::PropKind::Circle),
+            "Circle shape must be added"
+        );
+        assert!(
+            plan.props
+                .iter()
+                .any(|pr| pr.kind == scriptcraft_core::shots::PropKind::Triangle),
+            "Triangle shape must be added"
+        );
+    }
+
+    // Activate Timeline spotlight mode and step cuts
+    h.get_by_label("All Cams").click();
+    h.run();
+    assert!(
+        h.query_by_label("Timeline").is_some(),
+        "button label must switch to Timeline when spotlight is active"
+    );
+    h.get_by_label("Next cut").click();
+    h.run();
+    h.get_by_label("Previous cut").click();
+    h.run();
+
+    // Director's Breakdown PDF exports valid PDF bytes
+    let breakdown = h
+        .state_mut()
+        .breakdown_pdf_for_test()
+        .expect("director's breakdown PDF");
+    assert!(breakdown.starts_with(b"%PDF-"));
+
+    // Editing text in Script shifts shot 1A's character span automatically
+    h.state_mut().apply_editor_commands_for_test(vec![
+        scriptcraft_core::edit::EditCommand::InsertText {
+            at: scriptcraft_core::edit::Pos {
+                bi: 1,
+                para: 0,
+                ch: 0,
+            },
+            text: "PREFIX ".into(),
+        },
+    ]);
+    h.run();
+    let span = &h.state().project_for_test().unwrap().shots.shots[0].spans[0];
+    assert_eq!(span.start_char, Some(12), "start_char must shift by +7");
+    assert_eq!(span.end_char, Some(32), "end_char must shift by +7");
+}

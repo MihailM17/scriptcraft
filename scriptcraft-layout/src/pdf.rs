@@ -5,8 +5,10 @@ use crate::place::FINAL_DRAFT_A4_GEOMETRY;
 use crate::place::{page_spec, ROW_MM};
 use crate::wrap::wrap_lines;
 use printpdf::{
-    Color, Greyscale, Line, LinePoint, Mm, Op, ParsedFont, PdfDocument, PdfFontHandle, PdfPage,
-    PdfSaveOptions, Point, Pt, Rect as PdfRect, Rgb, TextItem, TextMatrix,
+    Color, Greyscale, Line, LinePoint, Mm, Op, PaintMode, ParsedFont, PdfDocument, PdfFontHandle,
+    PdfPage, PdfSaveOptions, Point, Polygon, PolygonRing, Pt, RawImage, RawImageData,
+    RawImageFormat, Rect as PdfRect, Rgb, TextItem, TextMatrix, WindingOrder, XObjectId,
+    XObjectTransform,
 };
 #[cfg(test)]
 use scriptcraft_core::editing::FINAL_DRAFT_A4;
@@ -1888,13 +1890,14 @@ fn build_shot_sheet_pages(
 
     // Non-overlapping column X coordinates (mm) with generous gutters and safe margins
     let x_swatch = margin;
-    let x_code = margin + 5.2;
-    let code_chars = (31.5 / char_w).floor().max(12.0) as usize;
-    let x_size = margin + 40.2;
-    let x_move = margin + 54.5;
-    let x_lens = margin + 78.0;
-    let lens_chars = (16.0 / char_w).floor().max(7.0) as usize;
-    let x_desc = margin + 96.0;
+    let x_code = margin + 5.0;
+    let code_chars = (30.0 / char_w).floor().max(12.0) as usize;
+    let x_size = margin + 37.5;
+    let x_move = margin + 50.5;
+    let x_lens = margin + 72.0;
+    let lens_chars = (13.5 / char_w).floor().max(6.0) as usize;
+    let x_est = margin + 86.5;
+    let x_desc = margin + 98.0;
     let desc_chars = ((page_w - margin - x_desc) / char_w).floor().max(24.0) as usize;
     let excerpt_char_w = CHAR_MM * (7.8 / FONT_PT);
     let excerpt_chars = ((page_w - margin - x_desc) / excerpt_char_w)
@@ -1908,6 +1911,7 @@ fn build_shot_sheet_pages(
             (x_size, "SIZE"),
             (x_move, "MOVE"),
             (x_lens, "LENS"),
+            (x_est, "EST"),
             (x_desc, "DESCRIPTION"),
         ] {
             draw_summary_text(ops, bold, fallback_bold, 7.6, x, *y, label);
@@ -2108,6 +2112,18 @@ fn build_shot_sheet_pages(
             *y,
             shot.movement.label(),
         );
+        let dur_s = p.shots.shot_duration_secs(shot, &p.blocks).round().max(1.0) as usize;
+        ops.push(Op::SetFillColor { col: muted.clone() });
+        draw_summary_text(
+            ops,
+            regular,
+            fallback_regular,
+            body_pt,
+            x_est,
+            *y,
+            &format!("~{dur_s}s"),
+        );
+        ops.push(Op::SetFillColor { col: black.clone() });
 
         let main_rows = code_lines
             .len()
@@ -2255,6 +2271,1448 @@ fn build_shot_sheet_pages(
         let fx = right_aligned_x(&label, 8.5, page_w - margin);
         page_ops.push(Op::SetFillColor { col: muted.clone() });
         draw_summary_text(page_ops, regular, fallback_regular, 8.5, fx, 12.0, &label);
+    }
+
+    pages
+}
+
+/// Decoded RGB8 storyboard / reference frame image ready for embedding into a PDF.
+#[derive(Clone, Debug)]
+pub struct DecodedShotImage {
+    pub width: usize,
+    pub height: usize,
+    /// Tightly packed `width * height * 3` RGB8 bytes.
+    pub rgb: Vec<u8>,
+}
+
+/// Export the complete **Director's Breakdown PDF** (Phase 3):
+/// 1. Title Page (when `opts.title_page` is enabled).
+/// 2. Per-scene visual breakdown sheets containing the razor-sharp **vector 2D
+///    overhead floor plan** and color-coded **shot cards** (with optional
+///    embedded storyboard/reference frame images, lens/movement specs, duration,
+///    setup notes, and covered text).
+/// 3. The full **Colored Script** pages with left-margin shot labels.
+#[allow(clippy::too_many_arguments)]
+pub fn to_directors_breakdown_pdf_bytes(
+    p: &Project,
+    meta: &Metadata,
+    opts: &ExportOptions,
+    marks: &[Option<RevisionColor>],
+    latest: Option<&RevisionSet>,
+    fonts: &ExportFonts<'_>,
+    shot_images: &HashMap<uuid::Uuid, DecodedShotImage>,
+) -> Result<Vec<u8>, PdfError> {
+    if p.blocks.is_empty() {
+        return Err(PdfError::Empty);
+    }
+    let title = if p.title.is_empty() {
+        "Untitled".to_string()
+    } else {
+        p.title.clone()
+    };
+    let mut doc = PdfDocument::new(&format!("{title} - Director's Breakdown"));
+    let mut font_warnings = Vec::new();
+    let mut parse = |bytes: &[u8]| ParsedFont::from_bytes(bytes, 0, &mut font_warnings);
+    let regular_font = parse(fonts.regular).ok_or(PdfError::Font)?;
+    let bold_font = parse(fonts.bold).ok_or(PdfError::Font)?;
+    let italic_font = fonts.italic.and_then(&mut parse);
+    let fallback_regular_font = parse(fonts.fallback_regular).ok_or(PdfError::Font)?;
+    let fallback_bold_font = parse(fonts.fallback_bold).ok_or(PdfError::Font)?;
+    let fallback_italic_font = fonts.fallback_italic.and_then(&mut parse);
+    let regular = Face {
+        id: doc.add_font(&regular_font),
+        font: regular_font,
+    };
+    let bold = Face {
+        id: doc.add_font(&bold_font),
+        font: bold_font,
+    };
+    let italic = italic_font.map(|f| Face {
+        id: doc.add_font(&f),
+        font: f,
+    });
+    let fallback_regular = Face {
+        id: doc.add_font(&fallback_regular_font),
+        font: fallback_regular_font,
+    };
+    let fallback_bold = Face {
+        id: doc.add_font(&fallback_bold_font),
+        font: fallback_bold_font,
+    };
+    let fallback_italic = fallback_italic_font.map(|f| Face {
+        id: doc.add_font(&f),
+        font: f,
+    });
+
+    // Register attached storyboard/reference images as PDF Image XObjects.
+    let mut xobjects: HashMap<uuid::Uuid, (XObjectId, usize, usize)> = HashMap::new();
+    for (&shot_id, img) in shot_images {
+        if img.width == 0 || img.height == 0 || img.rgb.len() != img.width * img.height * 3 {
+            continue;
+        }
+        let raw = RawImage {
+            pixels: RawImageData::U8(img.rgb.clone()),
+            width: img.width,
+            height: img.height,
+            data_format: RawImageFormat::RGB8,
+            tag: Vec::new(),
+        };
+        let xid = doc.add_image(&raw);
+        xobjects.insert(shot_id, (xid, img.width, img.height));
+    }
+
+    let spec = page_spec(opts.page_size);
+    let page_w = spec.width_mm;
+    let page_h = spec.height_mm;
+
+    let mut script_opts = opts.clone();
+    script_opts.color_by_shots = true;
+    script_opts.include_shot_legend = false;
+    let mut script_pages: Vec<Vec<PrintLine>> = Vec::new();
+    if script_opts.title_page {
+        script_pages.push(layout_title_page_for(meta, latest, script_opts.page_size));
+    }
+    script_pages.extend(layout_pages_inner(
+        p,
+        meta,
+        &script_opts,
+        marks,
+        latest,
+        true,
+    ));
+
+    let mut doc_pages: Vec<PdfPage> = Vec::new();
+    let has_title = script_opts.title_page && !script_pages.is_empty();
+    let watermark = script_opts
+        .watermark
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+
+    // 1. Title Page (if enabled)
+    if has_title {
+        let ops = render_script_page_ops(
+            &script_pages[0],
+            spec,
+            watermark,
+            &regular,
+            &bold,
+            italic.as_ref(),
+            &fallback_regular,
+            &fallback_bold,
+            fallback_italic.as_ref(),
+        );
+        doc_pages.push(PdfPage::new(Mm(page_w), Mm(page_h), ops));
+    }
+
+    // 2. Per-scene Visual Breakdown sheets (Vector Floor Plan + Shot Cards + Storyboards)
+    let breakdown_pages = build_directors_breakdown_pages(
+        p,
+        meta,
+        &title,
+        page_w,
+        page_h,
+        &regular,
+        &bold,
+        &fallback_regular,
+        &fallback_bold,
+        &xobjects,
+    );
+    for ops in breakdown_pages {
+        doc_pages.push(PdfPage::new(Mm(page_w), Mm(page_h), ops));
+    }
+
+    // 3. Full Colored Script pages
+    let script_start = usize::from(has_title);
+    for lines in script_pages.iter().skip(script_start) {
+        let ops = render_script_page_ops(
+            lines,
+            spec,
+            watermark,
+            &regular,
+            &bold,
+            italic.as_ref(),
+            &fallback_regular,
+            &fallback_bold,
+            fallback_italic.as_ref(),
+        );
+        doc_pages.push(PdfPage::new(Mm(page_w), Mm(page_h), ops));
+    }
+
+    doc.with_pages(doc_pages);
+    let mut warnings = Vec::new();
+    let bytes = doc.save(&PdfSaveOptions::default(), &mut warnings);
+    Ok(bytes)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_script_page_ops(
+    lines: &[PrintLine],
+    spec: crate::place::PageSpec,
+    watermark: Option<&str>,
+    regular: &Face,
+    bold: &Face,
+    italic: Option<&Face>,
+    fallback_regular: &Face,
+    fallback_bold: &Face,
+    fallback_italic: Option<&Face>,
+) -> Vec<Op> {
+    let page_w = spec.width_mm;
+    let page_h = spec.height_mm;
+    let margin_l = spec.margin_l_mm;
+    let margin_t = spec.margin_t_mm;
+    let text_right = spec.text_right_mm();
+    let page_num_baseline = margin_t - 0.4 * PITCH_MM - DESCENT_MM;
+    let italic_face = italic.unwrap_or(regular);
+    let fallback_italic_face = fallback_italic.unwrap_or(fallback_regular);
+    let black = Color::Greyscale(Greyscale::new(0.0, None));
+    let show = push_text;
+
+    let mut ops: Vec<Op> = vec![Op::SetOutlineThickness { pt: Pt(0.72) }];
+    if let Some(wm) = watermark {
+        let size = 40.0;
+        let w = wm.chars().count() as f32 * CHAR_MM * (size / FONT_PT);
+        ops.push(Op::SetFillColor {
+            col: Color::Greyscale(Greyscale::new(0.82, None)),
+        });
+        let mut cx = ((page_w - w) / 2.0).max(0.0);
+        for (use_fb, run) in split_runs(wm, &regular.font, &fallback_regular.font) {
+            let id = if use_fb {
+                &fallback_regular.id
+            } else {
+                &regular.id
+            };
+            show(&mut ops, id, size, cx, page_h / 2.0, run);
+            cx += run.chars().count() as f32 * CHAR_MM * (size / FONT_PT);
+        }
+    }
+    let mut y = page_h - margin_t - BASELINE_OFF;
+    for (line_idx, line) in lines.iter().enumerate() {
+        if line.share_row {
+            y += PITCH_MM;
+        }
+        ops.push(Op::SetFillColor { col: black.clone() });
+        if let Some(band) = line.margin {
+            let yy = match band {
+                MarginBand::Header => page_h - page_num_baseline,
+                MarginBand::Footer => FOOTER_BASELINE_MM,
+            };
+            let (face, fb_face) = if line.bold {
+                (bold, fallback_bold)
+            } else {
+                (regular, fallback_regular)
+            };
+            let mut cx = line.x_mm;
+            for (use_fb, run) in split_runs(&line.text, &face.font, &fb_face.font) {
+                let id = if use_fb { &fb_face.id } else { &face.id };
+                show(&mut ops, id, FONT_PT, cx, yy, run);
+                cx += run.chars().count() as f32 * CHAR_MM;
+            }
+            continue;
+        }
+        if line.is_page_number {
+            let w = line.text.chars().count() as f32 * CHAR_MM;
+            let mut cx = text_right - w;
+            let (face, fb_face) = if line.bold {
+                (bold, fallback_bold)
+            } else {
+                (regular, fallback_regular)
+            };
+            for (use_fb, run) in split_runs(&line.text, &face.font, &fb_face.font) {
+                let id = if use_fb { &fb_face.id } else { &face.id };
+                show(&mut ops, id, FONT_PT, cx, page_h - page_num_baseline, run);
+                cx += run.chars().count() as f32 * CHAR_MM;
+            }
+            continue;
+        }
+        let yy = line.y_from_bottom_mm.unwrap_or(y - line.dy_mm);
+        if !line.shot_highlights.is_empty() || line.shot_tint.is_some() {
+            let base_x = if line.right_aligned {
+                line.x_mm - line.text.chars().count() as f32 * CHAR_MM
+            } else {
+                line.x_mm
+            };
+            if !line.shot_highlights.is_empty() {
+                for &(c0, c1, (r, g, b)) in &line.shot_highlights {
+                    let tr = 0.74 + 0.26 * (r as f32 / 255.0);
+                    let tg = 0.74 + 0.26 * (g as f32 / 255.0);
+                    let tb = 0.74 + 0.26 * (b as f32 / 255.0);
+                    ops.push(Op::SetFillColor {
+                        col: Color::Rgb(Rgb::new(tr, tg, tb, None)),
+                    });
+                    let w_mm = ((c1 - c0) as f32 * CHAR_MM) + 1.0;
+                    let mut strip = PdfRect::from_wh(Pt(w_mm * MM_TO_PT), Pt(PITCH_MM * MM_TO_PT));
+                    strip.x = Pt((base_x + c0 as f32 * CHAR_MM - 0.5) * MM_TO_PT);
+                    strip.y = Pt((yy - DESCENT_MM * 0.85) * MM_TO_PT);
+                    ops.push(Op::DrawPolygon {
+                        polygon: strip.to_polygon(),
+                    });
+                }
+            } else if let Some((r, g, b)) = line.shot_tint {
+                let tr = 0.76 + 0.24 * (r as f32 / 255.0);
+                let tg = 0.76 + 0.24 * (g as f32 / 255.0);
+                let tb = 0.76 + 0.24 * (b as f32 / 255.0);
+                ops.push(Op::SetFillColor {
+                    col: Color::Rgb(Rgb::new(tr, tg, tb, None)),
+                });
+                let mut strip = PdfRect::from_wh(
+                    Pt((text_right - margin_l + 4.0) * MM_TO_PT),
+                    Pt(PITCH_MM * MM_TO_PT),
+                );
+                strip.x = Pt((margin_l - 2.0) * MM_TO_PT);
+                strip.y = Pt((yy - DESCENT_MM * 0.85) * MM_TO_PT);
+                ops.push(Op::DrawPolygon {
+                    polygon: strip.to_polygon(),
+                });
+            }
+            let bar_x = margin_l - 3.0;
+            if let Some((r, g, b)) = line.shot_tint {
+                ops.push(Op::SetFillColor {
+                    col: Color::Rgb(Rgb::new(
+                        r as f32 / 255.0,
+                        g as f32 / 255.0,
+                        b as f32 / 255.0,
+                        None,
+                    )),
+                });
+                let mut bar = PdfRect::from_wh(Pt(1.5 * MM_TO_PT), Pt(PITCH_MM * MM_TO_PT));
+                bar.x = Pt(bar_x * MM_TO_PT);
+                bar.y = Pt((yy - DESCENT_MM * 0.85) * MM_TO_PT);
+                ops.push(Op::DrawPolygon {
+                    polygon: bar.to_polygon(),
+                });
+            }
+            if let Some((ref tag, (sr, sg, sb))) = line.shot_tag {
+                let tag_pt = 7.2_f32;
+                let tag_char_w = CHAR_MM * (tag_pt / FONT_PT);
+                let tag_left_min = 5.5_f32;
+                let tag_right = if line.share_row {
+                    lines
+                        .get(line_idx.saturating_sub(1))
+                        .map(|prev| (prev.x_mm - 2.0).max(16.0))
+                        .unwrap_or(bar_x - 1.6)
+                } else {
+                    bar_x - 1.6
+                };
+                let avail_mm = (tag_right - tag_left_min).max(10.0);
+                let max_chars = (avail_mm / tag_char_w).floor().max(6.0) as usize;
+                let next_has_tag = lines
+                    .get(line_idx + 1)
+                    .is_some_and(|nl| nl.shot_tag.is_some());
+                let max_lines = if next_has_tag { 1usize } else { 2usize };
+                let mut wrapped = wrap_title_line(tag, max_chars);
+                if wrapped.len() > max_lines {
+                    wrapped.truncate(max_lines);
+                    if let Some(last) = wrapped.last_mut() {
+                        let take_n = max_chars.saturating_sub(1);
+                        let mut s: String = last.chars().take(take_n).collect();
+                        s.push('…');
+                        *last = s;
+                    }
+                }
+                ops.push(Op::SetFillColor {
+                    col: Color::Rgb(Rgb::new(
+                        (sr as f32 / 255.0) * 0.68,
+                        (sg as f32 / 255.0) * 0.68,
+                        (sb as f32 / 255.0) * 0.68,
+                        None,
+                    )),
+                });
+                for (ri, part) in wrapped.iter().enumerate() {
+                    let w_mm = part.chars().count() as f32 * tag_char_w;
+                    let tx = (tag_right - w_mm).max(tag_left_min);
+                    let ty = yy + 0.35 - (ri as f32) * 3.4;
+                    draw_summary_text(&mut ops, bold, fallback_bold, tag_pt, tx, ty, part);
+                }
+            }
+            ops.push(Op::SetFillColor { col: black.clone() });
+        }
+        if let Some(revision) = line.revision {
+            let (r, g, b) = revision.rgb();
+            ops.push(Op::SetFillColor {
+                col: Color::Rgb(Rgb::new(
+                    r as f32 / 255.0,
+                    g as f32 / 255.0,
+                    b as f32 / 255.0,
+                    None,
+                )),
+            });
+            let mut bar =
+                PdfRect::from_wh(Pt(REVISION_BAR_W_MM * MM_TO_PT), Pt(PITCH_MM * MM_TO_PT));
+            bar.x = Pt(REVISION_BAR_X_MM * MM_TO_PT);
+            bar.y = Pt((yy + BASELINE_OFF) * MM_TO_PT);
+            ops.push(Op::DrawPolygon {
+                polygon: bar.to_polygon(),
+            });
+            ops.push(Op::SetFillColor { col: black.clone() });
+        }
+        if !line.text.is_empty() {
+            let w = line.text.chars().count() as f32 * CHAR_MM;
+            let x = if line.right_aligned {
+                (text_right - w).max(margin_l)
+            } else {
+                line.x_mm
+            };
+            if line.runs.is_empty() {
+                let (face, fb_face) = if line.bold {
+                    (bold, fallback_bold)
+                } else {
+                    (regular, fallback_regular)
+                };
+                let mut cx = x;
+                for (use_fb, run) in split_runs(&line.text, &face.font, &fb_face.font) {
+                    let id = if use_fb { &fb_face.id } else { &face.id };
+                    show(&mut ops, id, FONT_PT, cx, yy, run);
+                    cx += run.chars().count() as f32 * CHAR_MM;
+                }
+                if line.underline {
+                    ops.push(Op::DrawLine {
+                        line: Line {
+                            points: vec![
+                                LinePoint {
+                                    p: Point::new(Mm(x), Mm(yy - 1.2)),
+                                    bezier: false,
+                                },
+                                LinePoint {
+                                    p: Point::new(Mm(x + w), Mm(yy - 1.2)),
+                                    bezier: false,
+                                },
+                            ],
+                            is_closed: false,
+                        },
+                    });
+                }
+            } else {
+                let mut cx = x;
+                for styled in &line.runs {
+                    let rw = styled.text.chars().count() as f32 * CHAR_MM;
+                    let run_start_x = cx;
+                    let (face, fb_face) = if styled.italic {
+                        (italic_face, fallback_italic_face)
+                    } else if styled.bold {
+                        (bold, fallback_bold)
+                    } else {
+                        (regular, fallback_regular)
+                    };
+                    let faux_bold_italic = styled.bold && styled.italic;
+                    for (use_fb, seg) in split_runs(&styled.text, &face.font, &fb_face.font) {
+                        let id = if use_fb { &fb_face.id } else { &face.id };
+                        show(&mut ops, id, FONT_PT, cx, yy, seg);
+                        if faux_bold_italic {
+                            show(&mut ops, id, FONT_PT, cx + 0.09, yy, seg);
+                        }
+                        cx += seg.chars().count() as f32 * CHAR_MM;
+                    }
+                    if styled.underline || line.underline {
+                        ops.push(Op::DrawLine {
+                            line: Line {
+                                points: vec![
+                                    LinePoint {
+                                        p: Point::new(Mm(run_start_x), Mm(yy - 1.2)),
+                                        bezier: false,
+                                    },
+                                    LinePoint {
+                                        p: Point::new(Mm(run_start_x + rw), Mm(yy - 1.2)),
+                                        bezier: false,
+                                    },
+                                ],
+                                is_closed: false,
+                            },
+                        });
+                    }
+                }
+            }
+        }
+        y -= PITCH_MM;
+    }
+    ops
+}
+
+fn push_pdf_polygon(ops: &mut Vec<Op>, pts: &[(f32, f32)], mode: PaintMode) {
+    if pts.len() < 3 {
+        return;
+    }
+    let points: Vec<LinePoint> = pts
+        .iter()
+        .map(|&(x, y)| LinePoint {
+            p: Point::new(Mm(x), Mm(y)),
+            bezier: false,
+        })
+        .collect();
+    ops.push(Op::DrawPolygon {
+        polygon: Polygon {
+            rings: vec![PolygonRing { points }],
+            mode,
+            winding_order: WindingOrder::NonZero,
+        },
+    });
+}
+
+fn push_pdf_polyline(ops: &mut Vec<Op>, pts: &[(f32, f32)], closed: bool) {
+    if pts.len() < 2 {
+        return;
+    }
+    let points: Vec<LinePoint> = pts
+        .iter()
+        .map(|&(x, y)| LinePoint {
+            p: Point::new(Mm(x), Mm(y)),
+            bezier: false,
+        })
+        .collect();
+    ops.push(Op::DrawLine {
+        line: Line {
+            points,
+            is_closed: closed,
+        },
+    });
+}
+
+fn push_pdf_dashed_line(
+    ops: &mut Vec<Op>,
+    a: (f32, f32),
+    b: (f32, f32),
+    dash_mm: f32,
+    gap_mm: f32,
+) {
+    let dx = b.0 - a.0;
+    let dy = b.1 - a.1;
+    let len = dx.hypot(dy);
+    if len < 0.2 {
+        return;
+    }
+    let ux = dx / len;
+    let uy = dy / len;
+    let step = dash_mm + gap_mm;
+    let mut t = 0.0_f32;
+    while t < len {
+        let t1 = (t + dash_mm).min(len);
+        push_pdf_polyline(
+            ops,
+            &[(a.0 + ux * t, a.1 + uy * t), (a.0 + ux * t1, a.1 + uy * t1)],
+            false,
+        );
+        t += step;
+    }
+}
+
+fn pdf_rot2(x: f32, y: f32, rad: f32) -> (f32, f32) {
+    let (s, c) = rad.sin_cos();
+    (x * c - y * s, x * s + y * c)
+}
+
+/// Draw a razor-sharp vector 2D overhead floor plan into `(box_x, box_y, box_w, box_h)` mm
+/// (where `box_y` is the bottom edge in PDF coordinates).
+#[allow(clippy::too_many_arguments)]
+fn draw_floor_plan_vector(
+    ops: &mut Vec<Op>,
+    p: &Project,
+    plan: &scriptcraft_core::shots::SceneFloorPlan,
+    box_x: f32,
+    box_y: f32,
+    box_w: f32,
+    box_h: f32,
+    regular: &Face,
+    bold: &Face,
+    fallback_regular: &Face,
+    fallback_bold: &Face,
+) {
+    use scriptcraft_core::shots::{lens_to_fov_deg, PropKind};
+
+    // Frame background + border
+    ops.push(Op::SetFillColor {
+        col: Color::Greyscale(Greyscale::new(0.985, None)),
+    });
+    ops.push(Op::SetOutlineColor {
+        col: Color::Greyscale(Greyscale::new(0.76, None)),
+    });
+    ops.push(Op::SetOutlineThickness { pt: Pt(0.6) });
+    push_pdf_polygon(
+        ops,
+        &[
+            (box_x, box_y),
+            (box_x + box_w, box_y),
+            (box_x + box_w, box_y + box_h),
+            (box_x, box_y + box_h),
+        ],
+        PaintMode::FillStroke,
+    );
+
+    // Compute world bounding box of all items (including camera cones & move targets)
+    let mut min_x = f32::INFINITY;
+    let mut max_x = f32::NEG_INFINITY;
+    let mut min_y = f32::INFINITY;
+    let mut max_y = f32::NEG_INFINITY;
+    let mut expand = |x: f32, y: f32, pad: f32| {
+        min_x = min_x.min(x - pad);
+        max_x = max_x.max(x + pad);
+        min_y = min_y.min(y - pad);
+        max_y = max_y.max(y + pad);
+    };
+    for prop in &plan.props {
+        let rad = prop.angle_deg.to_radians();
+        let hw = prop.w * 0.5;
+        let hh = prop.h * 0.5;
+        for (lx, ly) in [(-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)] {
+            let (rx, ry) = pdf_rot2(lx, ly, rad);
+            expand(prop.x + rx, prop.y + ry, 0.45);
+        }
+    }
+    for actor in &plan.actors {
+        expand(actor.x, actor.y, 0.9);
+        if let Some((mx, my)) = actor.move_to {
+            expand(mx, my, 0.6);
+        }
+    }
+    for cam in &plan.cameras {
+        let cone = cam.effective_cone_length();
+        let rad = cam.angle_deg.to_radians();
+        expand(cam.x, cam.y, 0.9);
+        expand(
+            cam.x + rad.cos() * cone * 0.65,
+            cam.y + rad.sin() * cone * 0.65,
+            0.7,
+        );
+        if let Some((tx, ty)) = cam.track_to {
+            expand(tx, ty, 0.7);
+        }
+    }
+    if !min_x.is_finite() {
+        min_x = -4.0;
+        max_x = 4.0;
+        min_y = -2.5;
+        max_y = 2.5;
+    }
+
+    let span_x = (max_x - min_x).max(4.0);
+    let span_y = (max_y - min_y).max(3.0);
+    let pad_mm = 6.0_f32;
+    let scale = ((box_w - 2.0 * pad_mm) / span_x)
+        .min((box_h - 2.0 * pad_mm) / span_y)
+        .clamp(3.0, 22.0);
+    let plan_cx = (min_x + max_x) * 0.5;
+    let plan_cy = (min_y + max_y) * 0.5;
+    let box_cx = box_x + box_w * 0.5;
+    let box_cy = box_y + box_h * 0.5;
+
+    // World (+Y down on screen) -> PDF (+Y up)
+    let to_mm = |wx: f32, wy: f32| -> (f32, f32) {
+        (
+            box_cx + (wx - plan_cx) * scale,
+            box_cy - (wy - plan_cy) * scale,
+        )
+    };
+    let clamp_pt = |pt: (f32, f32)| -> (f32, f32) {
+        (
+            pt.0.clamp(box_x + 0.8, box_x + box_w - 0.8),
+            pt.1.clamp(box_y + 0.8, box_y + box_h - 0.8),
+        )
+    };
+
+    // Subtle 1m blueprint grid inside frame
+    ops.push(Op::SetOutlineColor {
+        col: Color::Greyscale(Greyscale::new(0.91, None)),
+    });
+    ops.push(Op::SetOutlineThickness { pt: Pt(0.3) });
+    let half_w_m = (box_w * 0.5) / scale;
+    let half_h_m = (box_h * 0.5) / scale;
+    let mut gx = (plan_cx - half_w_m).ceil();
+    while gx <= plan_cx + half_w_m {
+        let sx = box_cx + (gx - plan_cx) * scale;
+        if sx > box_x + 1.0 && sx < box_x + box_w - 1.0 {
+            push_pdf_polyline(ops, &[(sx, box_y + 0.8), (sx, box_y + box_h - 0.8)], false);
+        }
+        gx += 1.0;
+    }
+    let mut gy = (plan_cy - half_h_m).ceil();
+    while gy <= plan_cy + half_h_m {
+        let sy = box_cy - (gy - plan_cy) * scale;
+        if sy > box_y + 1.0 && sy < box_y + box_h - 1.0 {
+            push_pdf_polyline(ops, &[(box_x + 0.8, sy), (box_x + box_w - 0.8, sy)], false);
+        }
+        gy += 1.0;
+    }
+
+    // Layer 0: Camera FOV cones (painted FIRST under props/actors so cones
+    // never obscure actors, tables, or labels in PDF).
+    for cam in &plan.cameras {
+        let Some(shot) = p.shots.get(cam.shot_id) else {
+            continue;
+        };
+        let cp = clamp_pt(to_mm(cam.x, cam.y));
+        let rad = cam.angle_deg.to_radians();
+        let (r, g, b) = shot.color.rgb();
+        let col = Color::Rgb(Rgb::new(
+            r as f32 / 255.0,
+            g as f32 / 255.0,
+            b as f32 / 255.0,
+            None,
+        ));
+        let tint = Color::Rgb(Rgb::new(
+            0.86 + 0.14 * (r as f32 / 255.0),
+            0.86 + 0.14 * (g as f32 / 255.0),
+            0.86 + 0.14 * (b as f32 / 255.0),
+            None,
+        ));
+        let fov_deg = cam.fov_deg.unwrap_or_else(|| lens_to_fov_deg(&shot.lens));
+        let half_fov = (fov_deg * 0.5).to_radians();
+        let cone_m = cam.effective_cone_length();
+
+        let steps = 8usize;
+        let mut wedge = Vec::with_capacity(steps + 2);
+        wedge.push(cp);
+        for k in 0..=steps {
+            let a = rad - half_fov + (2.0 * half_fov) * (k as f32 / steps as f32);
+            wedge.push(clamp_pt(to_mm(
+                cam.x + a.cos() * cone_m,
+                cam.y + a.sin() * cone_m,
+            )));
+        }
+        ops.push(Op::SetFillColor { col: tint });
+        for k in 1..wedge.len() - 1 {
+            push_pdf_polygon(ops, &[cp, wedge[k], wedge[k + 1]], PaintMode::Fill);
+        }
+        ops.push(Op::SetOutlineColor { col });
+        ops.push(Op::SetOutlineThickness { pt: Pt(0.6) });
+        push_pdf_polyline(ops, &[cp, wedge[1]], false);
+        push_pdf_polyline(ops, &[cp, *wedge.last().unwrap()], false);
+    }
+
+    // 180-degree Line of Action between first two actors
+    if plan.actors.len() >= 2 {
+        let a = to_mm(plan.actors[0].x, plan.actors[0].y);
+        let b = to_mm(plan.actors[1].x, plan.actors[1].y);
+        let dx = b.0 - a.0;
+        let dy = b.1 - a.1;
+        let len = dx.hypot(dy);
+        if len > 2.0 {
+            let ux = dx / len;
+            let uy = dy / len;
+            let p0 = clamp_pt((a.0 - ux * 24.0, a.1 - uy * 24.0));
+            let p1 = clamp_pt((b.0 + ux * 24.0, b.1 + uy * 24.0));
+            ops.push(Op::SetOutlineColor {
+                col: Color::Rgb(Rgb::new(0.86, 0.32, 0.32, None)),
+            });
+            ops.push(Op::SetOutlineThickness { pt: Pt(0.5) });
+            push_pdf_dashed_line(ops, p0, p1, 2.2, 1.8);
+        }
+    }
+
+    // Layer 1: Props
+    for prop in &plan.props {
+        let rad = prop.angle_deg.to_radians();
+        let hw = prop.w * 0.5;
+        let hh = prop.h * 0.5;
+        let pt = |lx: f32, ly: f32| -> (f32, f32) {
+            let (rx, ry) = pdf_rot2(lx, ly, rad);
+            clamp_pt(to_mm(prop.x + rx, prop.y + ry))
+        };
+        let corners = [pt(-hw, -hh), pt(hw, -hh), pt(hw, hh), pt(-hw, hh)];
+        ops.push(Op::SetOutlineColor {
+            col: Color::Greyscale(Greyscale::new(0.32, None)),
+        });
+        ops.push(Op::SetOutlineThickness { pt: Pt(0.75) });
+        match prop.kind {
+            PropKind::Wall => {
+                ops.push(Op::SetFillColor {
+                    col: Color::Greyscale(Greyscale::new(0.32, None)),
+                });
+                push_pdf_polygon(ops, &corners, PaintMode::FillStroke);
+            }
+            PropKind::Window => {
+                ops.push(Op::SetFillColor {
+                    col: Color::Rgb(Rgb::new(0.84, 0.93, 0.99, None)),
+                });
+                push_pdf_polygon(ops, &corners, PaintMode::FillStroke);
+                ops.push(Op::SetOutlineColor {
+                    col: Color::Rgb(Rgb::new(0.28, 0.62, 0.90, None)),
+                });
+                push_pdf_polyline(ops, &[pt(-hw, 0.0), pt(hw, 0.0)], false);
+            }
+            PropKind::Door => {
+                push_pdf_polyline(ops, &[pt(-hw, -hh), pt(-hw, hh)], false);
+                push_pdf_polyline(ops, &[pt(hw, -hh), pt(hw, hh)], false);
+                let hinge = pt(-hw, 0.0);
+                let swing_rad = rad - 65.0_f32.to_radians();
+                let leaf_end = clamp_pt(to_mm(
+                    prop.x - hw * rad.cos() + prop.w * swing_rad.cos(),
+                    prop.y - hw * rad.sin() + prop.w * swing_rad.sin(),
+                ));
+                ops.push(Op::SetOutlineThickness { pt: Pt(1.1) });
+                push_pdf_polyline(ops, &[hinge, leaf_end], false);
+                ops.push(Op::SetOutlineThickness { pt: Pt(0.45) });
+                let mut arc = Vec::with_capacity(11);
+                for k in 0..=10 {
+                    let a = rad - (65.0_f32 * k as f32 / 10.0).to_radians();
+                    arc.push(clamp_pt(to_mm(
+                        prop.x - hw * rad.cos() + prop.w * a.cos(),
+                        prop.y - hw * rad.sin() + prop.w * a.sin(),
+                    )));
+                }
+                push_pdf_polyline(ops, &arc, false);
+            }
+            PropKind::Circle => {
+                ops.push(Op::SetFillColor {
+                    col: Color::Greyscale(Greyscale::new(0.92, None)),
+                });
+                let pts: Vec<(f32, f32)> = (0..24)
+                    .map(|k| {
+                        let a = std::f32::consts::TAU * (k as f32 / 24.0);
+                        pt(hw * a.cos(), hh * a.sin())
+                    })
+                    .collect();
+                push_pdf_polygon(ops, &pts, PaintMode::FillStroke);
+            }
+            PropKind::Triangle => {
+                ops.push(Op::SetFillColor {
+                    col: Color::Greyscale(Greyscale::new(0.92, None)),
+                });
+                push_pdf_polygon(
+                    ops,
+                    &[pt(0.0, -hh), pt(hw, hh), pt(-hw, hh)],
+                    PaintMode::FillStroke,
+                );
+            }
+            PropKind::Light => {
+                ops.push(Op::SetFillColor {
+                    col: Color::Rgb(Rgb::new(0.99, 0.90, 0.52, None)),
+                });
+                ops.push(Op::SetOutlineColor {
+                    col: Color::Rgb(Rgb::new(0.76, 0.52, 0.08, None)),
+                });
+                let r = hw.min(hh).max(0.18);
+                let pts: Vec<(f32, f32)> = (0..16)
+                    .map(|k| {
+                        let a = std::f32::consts::TAU * (k as f32 / 16.0);
+                        pt(r * a.cos(), r * a.sin())
+                    })
+                    .collect();
+                push_pdf_polygon(ops, &pts, PaintMode::FillStroke);
+                for ang in [-28.0_f32, 0.0, 28.0] {
+                    let ar = ang.to_radians();
+                    push_pdf_polyline(
+                        ops,
+                        &[
+                            pt(r * ar.cos(), r * ar.sin()),
+                            pt((r + 0.35) * ar.cos(), (r + 0.35) * ar.sin()),
+                        ],
+                        false,
+                    );
+                }
+            }
+            PropKind::Car => {
+                ops.push(Op::SetFillColor {
+                    col: Color::Greyscale(Greyscale::new(0.91, None)),
+                });
+                push_pdf_polygon(ops, &corners, PaintMode::FillStroke);
+                ops.push(Op::SetFillColor {
+                    col: Color::Rgb(Rgb::new(0.84, 0.93, 0.99, None)),
+                });
+                push_pdf_polygon(
+                    ops,
+                    &[
+                        pt(hw * 0.35, -hh * 0.76),
+                        pt(hw * 0.58, -hh * 0.66),
+                        pt(hw * 0.58, hh * 0.66),
+                        pt(hw * 0.35, hh * 0.76),
+                    ],
+                    PaintMode::FillStroke,
+                );
+            }
+            PropKind::Chair => {
+                ops.push(Op::SetFillColor {
+                    col: Color::Greyscale(Greyscale::new(0.94, None)),
+                });
+                push_pdf_polygon(ops, &corners, PaintMode::FillStroke);
+                ops.push(Op::SetOutlineThickness { pt: Pt(1.5) });
+                push_pdf_polyline(ops, &[pt(-hw, -hh), pt(-hw, hh)], false);
+            }
+            PropKind::Bed => {
+                ops.push(Op::SetFillColor {
+                    col: Color::Greyscale(Greyscale::new(0.95, None)),
+                });
+                push_pdf_polygon(ops, &corners, PaintMode::FillStroke);
+                for py in [-hh * 0.45, hh * 0.45] {
+                    push_pdf_polygon(
+                        ops,
+                        &[
+                            pt(-hw * 0.85, py - hh * 0.30),
+                            pt(-hw * 0.45, py - hh * 0.30),
+                            pt(-hw * 0.45, py + hh * 0.30),
+                            pt(-hw * 0.85, py + hh * 0.30),
+                        ],
+                        PaintMode::FillStroke,
+                    );
+                }
+            }
+            PropKind::Table | PropKind::Square | PropKind::Custom => {
+                ops.push(Op::SetFillColor {
+                    col: Color::Greyscale(Greyscale::new(0.93, None)),
+                });
+                push_pdf_polygon(ops, &corners, PaintMode::FillStroke);
+            }
+        }
+        if !prop.label.trim().is_empty() {
+            let lbl = prop.label.trim();
+            let c = to_mm(prop.x, prop.y);
+            let pt_sz = 6.5_f32;
+            let lw = lbl.chars().count() as f32 * CHAR_MM * (pt_sz / FONT_PT);
+            let (label_col, label_y) = if prop.kind == PropKind::Wall {
+                (
+                    Color::Greyscale(Greyscale::new(0.24, None)),
+                    c.1 + (prop.h * 0.5 * scale) + 1.4,
+                )
+            } else {
+                (Color::Greyscale(Greyscale::new(0.22, None)), c.1 - 0.8)
+            };
+            ops.push(Op::SetFillColor { col: label_col });
+            draw_summary_text(
+                ops,
+                regular,
+                fallback_regular,
+                pt_sz,
+                (c.0 - lw * 0.5).clamp(box_x + 1.5, box_x + box_w - lw - 1.5),
+                label_y.clamp(box_y + 1.5, box_y + box_h - 3.0),
+                lbl,
+            );
+        }
+    }
+
+    // Layer 2: Actors
+    for actor in &plan.actors {
+        let ap = clamp_pt(to_mm(actor.x, actor.y));
+        let rad = actor.angle_deg.to_radians();
+        let (r, g, b) = actor.color.rgb();
+        let acol = Color::Rgb(Rgb::new(
+            r as f32 / 255.0,
+            g as f32 / 255.0,
+            b as f32 / 255.0,
+            None,
+        ));
+        if let Some((mx, my)) = actor.move_to {
+            let mp = clamp_pt(to_mm(mx, my));
+            ops.push(Op::SetOutlineColor { col: acol.clone() });
+            ops.push(Op::SetOutlineThickness { pt: Pt(0.8) });
+            push_pdf_dashed_line(ops, ap, mp, 1.8, 1.4);
+        }
+        // Shoulders + head
+        let fwd = (rad.cos(), -rad.sin()); // PDF +Y is up
+        let right = (-fwd.1, fwd.0);
+        let sh_half = (0.26 * scale).clamp(2.2, 4.4);
+        let sh_thick = (0.11 * scale).clamp(1.0, 2.0);
+        ops.push(Op::SetFillColor {
+            col: Color::Greyscale(Greyscale::new(0.97, None)),
+        });
+        ops.push(Op::SetOutlineColor { col: acol.clone() });
+        ops.push(Op::SetOutlineThickness { pt: Pt(0.85) });
+        push_pdf_polygon(
+            ops,
+            &[
+                (
+                    ap.0 - right.0 * sh_half - fwd.0 * sh_thick * 0.7,
+                    ap.1 - right.1 * sh_half - fwd.1 * sh_thick * 0.7,
+                ),
+                (
+                    ap.0 + right.0 * sh_half - fwd.0 * sh_thick * 0.7,
+                    ap.1 + right.1 * sh_half - fwd.1 * sh_thick * 0.7,
+                ),
+                (
+                    ap.0 + right.0 * sh_half * 0.85 + fwd.0 * sh_thick * 0.7,
+                    ap.1 + right.1 * sh_half * 0.85 + fwd.1 * sh_thick * 0.7,
+                ),
+                (
+                    ap.0 - right.0 * sh_half * 0.85 + fwd.0 * sh_thick * 0.7,
+                    ap.1 - right.1 * sh_half * 0.85 + fwd.1 * sh_thick * 0.7,
+                ),
+            ],
+            PaintMode::FillStroke,
+        );
+        // Gaze nose triangle
+        let nose_tip = (ap.0 + fwd.0 * sh_thick * 1.8, ap.1 + fwd.1 * sh_thick * 1.8);
+        let nose_base = (ap.0 + fwd.0 * sh_thick * 0.7, ap.1 + fwd.1 * sh_thick * 0.7);
+        ops.push(Op::SetFillColor { col: acol.clone() });
+        push_pdf_polygon(
+            ops,
+            &[
+                nose_tip,
+                (
+                    nose_base.0 + right.0 * sh_thick * 0.65,
+                    nose_base.1 + right.1 * sh_thick * 0.65,
+                ),
+                (
+                    nose_base.0 - right.0 * sh_thick * 0.65,
+                    nose_base.1 - right.1 * sh_thick * 0.65,
+                ),
+            ],
+            PaintMode::Fill,
+        );
+        // Head circle
+        let hr = (0.12 * scale).clamp(1.2, 2.2);
+        let head_pts: Vec<(f32, f32)> = (0..12)
+            .map(|k| {
+                let a = std::f32::consts::TAU * (k as f32 / 12.0);
+                (ap.0 + hr * a.cos(), ap.1 + hr * a.sin())
+            })
+            .collect();
+        ops.push(Op::SetFillColor {
+            col: Color::Greyscale(Greyscale::new(0.22, None)),
+        });
+        push_pdf_polygon(ops, &head_pts, PaintMode::Fill);
+
+        // Name label below actor
+        let name = actor.name.trim();
+        if !name.is_empty() {
+            let pt_sz = 6.5_f32;
+            let lw = name.chars().count() as f32 * CHAR_MM * (pt_sz / FONT_PT);
+            ops.push(Op::SetFillColor {
+                col: Color::Greyscale(Greyscale::new(0.10, None)),
+            });
+            draw_summary_text(
+                ops,
+                bold,
+                fallback_bold,
+                pt_sz,
+                (ap.0 - lw * 0.5).clamp(box_x + 1.5, box_x + box_w - lw - 1.5),
+                (ap.1 - sh_half - 2.6).clamp(box_y + 1.5, box_y + box_h - 3.0),
+                name,
+            );
+        }
+    }
+
+    // Layer 3: Camera bodies, dolly tracks, and crisp labels (on top of props/actors)
+    for cam in &plan.cameras {
+        let Some(shot) = p.shots.get(cam.shot_id) else {
+            continue;
+        };
+        let cp = clamp_pt(to_mm(cam.x, cam.y));
+        let rad = cam.angle_deg.to_radians();
+        let (r, g, b) = shot.color.rgb();
+        let col = Color::Rgb(Rgb::new(
+            r as f32 / 255.0,
+            g as f32 / 255.0,
+            b as f32 / 255.0,
+            None,
+        ));
+
+        if let Some((tx, ty)) = cam.track_to {
+            let tp = clamp_pt(to_mm(tx, ty));
+            ops.push(Op::SetOutlineColor { col: col.clone() });
+            ops.push(Op::SetOutlineThickness { pt: Pt(0.7) });
+            push_pdf_dashed_line(ops, cp, tp, 2.0, 1.5);
+        }
+
+        // Camera body + matte box
+        let fwd = (rad.cos(), -rad.sin());
+        let right = (-fwd.1, fwd.0);
+        let bw = 2.6_f32;
+        let bh = 1.9_f32;
+        ops.push(Op::SetFillColor { col: col.clone() });
+        ops.push(Op::SetOutlineColor {
+            col: Color::Greyscale(Greyscale::new(1.0, None)),
+        });
+        ops.push(Op::SetOutlineThickness { pt: Pt(0.55) });
+        push_pdf_polygon(
+            ops,
+            &[
+                (
+                    cp.0 + fwd.0 * bh - right.0 * 1.2,
+                    cp.1 + fwd.1 * bh - right.1 * 1.2,
+                ),
+                (
+                    cp.0 + fwd.0 * (bh + 1.8) - right.0 * 2.1,
+                    cp.1 + fwd.1 * (bh + 1.8) - right.1 * 2.1,
+                ),
+                (
+                    cp.0 + fwd.0 * (bh + 1.8) + right.0 * 2.1,
+                    cp.1 + fwd.1 * (bh + 1.8) + right.1 * 2.1,
+                ),
+                (
+                    cp.0 + fwd.0 * bh + right.0 * 1.2,
+                    cp.1 + fwd.1 * bh + right.1 * 1.2,
+                ),
+            ],
+            PaintMode::FillStroke,
+        );
+        push_pdf_polygon(
+            ops,
+            &[
+                (
+                    cp.0 - fwd.0 * bh - right.0 * bw,
+                    cp.1 - fwd.1 * bh - right.1 * bw,
+                ),
+                (
+                    cp.0 + fwd.0 * bh - right.0 * bw,
+                    cp.1 + fwd.1 * bh - right.1 * bw,
+                ),
+                (
+                    cp.0 + fwd.0 * bh + right.0 * bw,
+                    cp.1 + fwd.1 * bh + right.1 * bw,
+                ),
+                (
+                    cp.0 - fwd.0 * bh + right.0 * bw,
+                    cp.1 - fwd.1 * bh + right.1 * bw,
+                ),
+            ],
+            PaintMode::FillStroke,
+        );
+
+        // Label below camera
+        let code_short: String = if shot.code.chars().count() > 12 {
+            let mut s: String = shot.code.chars().take(11).collect();
+            s.push('…');
+            s
+        } else {
+            shot.code.clone()
+        };
+        let label = if shot.lens.trim().is_empty() {
+            code_short
+        } else {
+            format!("{code_short} ({})", shot.lens.trim())
+        };
+        let pt_sz = 6.2_f32;
+        let lw = label.chars().count() as f32 * CHAR_MM * (pt_sz / FONT_PT);
+        ops.push(Op::SetFillColor {
+            col: Color::Rgb(Rgb::new(
+                (r as f32 / 255.0) * 0.72,
+                (g as f32 / 255.0) * 0.72,
+                (b as f32 / 255.0) * 0.72,
+                None,
+            )),
+        });
+        draw_summary_text(
+            ops,
+            bold,
+            fallback_bold,
+            pt_sz,
+            (cp.0 - lw * 0.5).clamp(box_x + 1.5, box_x + box_w - lw - 1.5),
+            (cp.1 - bh - 3.0).clamp(box_y + 1.5, box_y + box_h - 3.0),
+            &label,
+        );
+    }
+
+    // 1 m architectural scale bar in bottom-left corner
+    let sx0 = box_x + 4.0;
+    let sy0 = box_y + 3.2;
+    let bar_w = scale.clamp(5.0, 26.0);
+    ops.push(Op::SetOutlineColor {
+        col: Color::Greyscale(Greyscale::new(0.42, None)),
+    });
+    ops.push(Op::SetOutlineThickness { pt: Pt(0.6) });
+    push_pdf_polyline(ops, &[(sx0, sy0), (sx0 + bar_w, sy0)], false);
+    push_pdf_polyline(ops, &[(sx0, sy0 - 0.8), (sx0, sy0 + 0.8)], false);
+    push_pdf_polyline(
+        ops,
+        &[(sx0 + bar_w, sy0 - 0.8), (sx0 + bar_w, sy0 + 0.8)],
+        false,
+    );
+    ops.push(Op::SetFillColor {
+        col: Color::Greyscale(Greyscale::new(0.42, None)),
+    });
+    draw_summary_text(
+        ops,
+        regular,
+        fallback_regular,
+        6.5,
+        sx0 + bar_w * 0.5 - 2.2,
+        sy0 + 1.2,
+        "1 m",
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_directors_breakdown_pages(
+    p: &Project,
+    meta: &Metadata,
+    title: &str,
+    page_w: f32,
+    page_h: f32,
+    regular: &Face,
+    bold: &Face,
+    fallback_regular: &Face,
+    fallback_bold: &Face,
+    xobjects: &HashMap<uuid::Uuid, (XObjectId, usize, usize)>,
+) -> Vec<Vec<Op>> {
+    let margin = 14.0_f32;
+    let bottom = 20.0_f32;
+    let content_w = page_w - 2.0 * margin;
+    let black = Color::Greyscale(Greyscale::new(0.0, None));
+    let muted = Color::Greyscale(Greyscale::new(0.42, None));
+    let rule_col = Color::Greyscale(Greyscale::new(0.86, None));
+
+    let scenes = p.scenes();
+    let locked = locked_scene_labels(meta);
+    let prefix = meta.scene_number_prefix.trim();
+    let start_num: u32 = meta.scene_number_start.trim().parse().unwrap_or(1);
+    let scene_labels: Vec<String> = (0..scenes.len())
+        .map(|i| {
+            scene_label(&locked, prefix, start_num, i)
+                .trim_end_matches('.')
+                .to_string()
+        })
+        .collect();
+
+    let mut pages: Vec<Vec<Op>> = Vec::new();
+
+    for (si, scene) in scenes.iter().enumerate() {
+        let shot_indices = p.shots.shots_for_scene(scene, &p.blocks);
+        let plan = p.shots.plan_for_scene(scene.id).filter(|pl| !pl.is_empty());
+        if shot_indices.is_empty() && plan.is_none() {
+            continue;
+        }
+
+        let mut ops: Vec<Op> = vec![Op::SetOutlineThickness { pt: Pt(0.5) }];
+        let mut y = page_h - margin;
+
+        // Top running label
+        ops.push(Op::SetFillColor { col: muted.clone() });
+        draw_summary_text(
+            &mut ops,
+            bold,
+            fallback_bold,
+            8.0,
+            margin,
+            y,
+            &format!("DIRECTOR'S BREAKDOWN  |  {title}"),
+        );
+        y -= 6.0;
+
+        // Scene header banner
+        let banner_label = format!("SCENE {} - {}", scene_labels[si], scene.heading);
+        let max_banner = ((content_w - 4.0) / (CHAR_MM * (9.5 / FONT_PT)))
+            .floor()
+            .max(24.0) as usize;
+        let banner_lines = wrap_title_line(&banner_label, max_banner);
+        let banner_h = 2.4 + (banner_lines.len().max(1) as f32) * 4.5;
+        ops.push(Op::SetFillColor {
+            col: Color::Greyscale(Greyscale::new(0.93, None)),
+        });
+        let mut banner = PdfRect::from_wh(Pt(content_w * MM_TO_PT), Pt(banner_h * MM_TO_PT));
+        banner.x = Pt(margin * MM_TO_PT);
+        banner.y = Pt((y - banner_h + 4.5) * MM_TO_PT);
+        ops.push(Op::DrawPolygon {
+            polygon: banner.to_polygon(),
+        });
+        ops.push(Op::SetFillColor { col: black.clone() });
+        for (bi, bl) in banner_lines.iter().enumerate() {
+            if bi > 0 {
+                y -= 4.5;
+            }
+            draw_summary_text(&mut ops, bold, fallback_bold, 9.5, margin + 2.0, y, bl);
+        }
+        y -= 5.8;
+
+        let total_scene_s: f64 = shot_indices
+            .iter()
+            .filter_map(|&idx| p.shots.shots.get(idx))
+            .map(|s| p.shots.shot_duration_secs(s, &p.blocks))
+            .sum();
+        ops.push(Op::SetFillColor { col: muted.clone() });
+        draw_summary_text(
+            &mut ops,
+            regular,
+            fallback_regular,
+            8.5,
+            margin,
+            y,
+            &format!(
+                "{} {}  |  est. ~{}s",
+                shot_indices.len(),
+                if shot_indices.len() == 1 {
+                    "shot"
+                } else {
+                    "shots"
+                },
+                total_scene_s.round() as usize
+            ),
+        );
+        y -= 4.5;
+
+        // Vector 2D Overhead Floor Plan
+        if let Some(pl) = plan {
+            let plan_h = 88.0_f32;
+            let plan_y = y - plan_h;
+            draw_floor_plan_vector(
+                &mut ops,
+                p,
+                pl,
+                margin,
+                plan_y,
+                content_w,
+                plan_h,
+                regular,
+                bold,
+                fallback_regular,
+                fallback_bold,
+            );
+            y = plan_y - 6.5;
+        }
+
+        // Shot Breakdown Cards (with optional embedded storyboard frame thumbnails)
+        let body_pt = 8.2_f32;
+        let char_w = CHAR_MM * (body_pt / FONT_PT);
+        let thumb_w_mm = 38.0_f32;
+        let thumb_h_mm = 22.0_f32;
+
+        for idx in shot_indices {
+            let Some(shot) = p.shots.shots.get(idx) else {
+                continue;
+            };
+            let img_entry = xobjects.get(&shot.id).cloned();
+            let text_x = if img_entry.is_some() {
+                margin + thumb_w_mm + 4.5
+            } else {
+                margin + 5.5
+            };
+            let text_w = (page_w - margin - text_x).max(50.0);
+            let max_chars = (text_w / char_w).floor().max(24.0) as usize;
+            let dur_s = p.shots.shot_duration_secs(shot, &p.blocks).round().max(1.0) as usize;
+            let lens_str = if shot.lens.trim().is_empty() {
+                "-"
+            } else {
+                shot.lens.trim()
+            };
+            let header_line = format!(
+                "{}   |   {}  ·  {}  ·  {}  ·  ~{}s",
+                shot.code.trim(),
+                shot.size.short(),
+                lens_str,
+                shot.movement.label(),
+                dur_s
+            );
+            let hdr_wrapped = wrap_title_line(&header_line, max_chars);
+            let desc_wrapped = if !shot.description.trim().is_empty() {
+                wrap_title_line(shot.description.trim(), max_chars)
+            } else {
+                Vec::new()
+            };
+            let covered = p.shots.covered_excerpt(shot, &p.blocks);
+            let cov_wrapped = if !covered.is_empty() {
+                wrap_title_line(&covered, max_chars)
+            } else {
+                Vec::new()
+            };
+
+            let text_h = (hdr_wrapped.len() as f32) * 4.3
+                + (desc_wrapped.len() as f32) * 4.0
+                + (cov_wrapped.len() as f32) * 3.8
+                + 4.0;
+            let card_h = if img_entry.is_some() {
+                text_h.max(thumb_h_mm + 4.0)
+            } else {
+                text_h.max(10.0)
+            };
+
+            if y - card_h < bottom {
+                pages.push(ops);
+                ops = vec![Op::SetOutlineThickness { pt: Pt(0.5) }];
+                y = page_h - margin;
+                ops.push(Op::SetFillColor { col: muted.clone() });
+                draw_summary_text(
+                    &mut ops,
+                    bold,
+                    fallback_bold,
+                    8.5,
+                    margin,
+                    y,
+                    &format!("SCENE {} - {} (continued)", scene_labels[si], scene.heading),
+                );
+                y -= 7.0;
+            }
+
+            let card_top = y;
+            // Left color accent bar for this shot card
+            let (r, g, b) = shot.color.rgb();
+            ops.push(Op::SetFillColor {
+                col: Color::Rgb(Rgb::new(
+                    r as f32 / 255.0,
+                    g as f32 / 255.0,
+                    b as f32 / 255.0,
+                    None,
+                )),
+            });
+            let mut bar = PdfRect::from_wh(Pt(2.4 * MM_TO_PT), Pt((card_h - 2.0) * MM_TO_PT));
+            bar.x = Pt(margin * MM_TO_PT);
+            bar.y = Pt((card_top - card_h + 2.0) * MM_TO_PT);
+            ops.push(Op::DrawPolygon {
+                polygon: bar.to_polygon(),
+            });
+
+            // Optional storyboard / reference image thumbnail
+            if let Some((xid, iw, ih)) = img_entry {
+                let aspect = (iw as f32 / ih.max(1) as f32).clamp(0.4, 3.0);
+                let (dw, dh) = if thumb_w_mm / thumb_h_mm > aspect {
+                    (thumb_h_mm * aspect, thumb_h_mm)
+                } else {
+                    (thumb_w_mm, thumb_w_mm / aspect)
+                };
+                let ix = margin + 3.6 + (thumb_w_mm - dw) * 0.5;
+                let iy = card_top - dh - 1.0;
+                ops.push(Op::UseXobject {
+                    id: xid,
+                    transform: XObjectTransform {
+                        translate_x: Some(Pt(ix * MM_TO_PT)),
+                        translate_y: Some(Pt(iy * MM_TO_PT)),
+                        scale_x: Some(dw * MM_TO_PT),
+                        scale_y: Some(dh * MM_TO_PT),
+                        no_auto_scale: true,
+                        ..Default::default()
+                    },
+                });
+                ops.push(Op::SetOutlineColor {
+                    col: rule_col.clone(),
+                });
+                ops.push(Op::SetOutlineThickness { pt: Pt(0.4) });
+                push_pdf_polyline(
+                    &mut ops,
+                    &[(ix, iy), (ix + dw, iy), (ix + dw, iy + dh), (ix, iy + dh)],
+                    true,
+                );
+            }
+
+            // Text block (header + description + covered excerpt)
+            let mut ty = card_top - 3.2;
+            ops.push(Op::SetFillColor { col: black.clone() });
+            for hl in &hdr_wrapped {
+                draw_summary_text(&mut ops, bold, fallback_bold, body_pt, text_x, ty, hl);
+                ty -= 4.3;
+            }
+            for dl in &desc_wrapped {
+                draw_summary_text(&mut ops, regular, fallback_regular, body_pt, text_x, ty, dl);
+                ty -= 4.0;
+            }
+            if !cov_wrapped.is_empty() {
+                ops.push(Op::SetFillColor { col: muted.clone() });
+                for cl in &cov_wrapped {
+                    draw_summary_text(&mut ops, regular, fallback_regular, 7.6, text_x, ty, cl);
+                    ty -= 3.8;
+                }
+            }
+
+            // Subtle divider line below card
+            ops.push(Op::SetOutlineColor {
+                col: rule_col.clone(),
+            });
+            ops.push(Op::SetOutlineThickness { pt: Pt(0.35) });
+            push_pdf_polyline(
+                &mut ops,
+                &[
+                    (margin, card_top - card_h),
+                    (page_w - margin, card_top - card_h),
+                ],
+                false,
+            );
+            y = card_top - card_h - 3.0;
+        }
+
+        pages.push(ops);
+    }
+
+    // Stamp "Breakdown Page X of N" footer
+    let total = pages.len();
+    for (idx, page_ops) in pages.iter_mut().enumerate() {
+        let label = format!("Breakdown {} of {}", idx + 1, total);
+        let fx = right_aligned_x(&label, 8.2, page_w - margin);
+        page_ops.push(Op::SetFillColor { col: muted.clone() });
+        draw_summary_text(page_ops, regular, fallback_regular, 8.2, fx, 11.5, &label);
     }
 
     pages
