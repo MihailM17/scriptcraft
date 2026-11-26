@@ -36,18 +36,17 @@ Most screenwriting software treats the production phase as an afterthought or a 
 </div>
 
 <details>
-<summary><b>🚀 What's New in v0.8.15 (Click to expand)</b></summary>
+<summary><b>🚀 What's New in v0.9.0 — Shot Breakdown &amp; 2D Blocking Studio (Click to expand)</b></summary>
 <br>
 
-* **Full Studio UI Redesign:** Polished every native `egui` view—Start, Script toolbar & quiet Elements rail, responsive Corkboard cards, Statistics KPI strip, Export dialog, compact Menu popup, Research module, Compare Drafts header, Revisions Hub, Revision Summary, and About/Help windows.
-* **Inline Bold, Italic & Underline:** Apply inline formatting (`⌘B` / `⌘I` / `⌘U`, `Ctrl+B/I/U`, or the Script toolbar `B` / `I` / `U` pills) on selections or the word under the caret—painted on the exact monospace grid, exported to PDF with bundled italics, and round-tripped through `.kitsp`, `.fdx`, `.fadein`, and `.fountain`.
-* **Opt-In US Letter Support:** A4 (`58` lines/page) remains the default; switch to standard Hollywood US Letter (`8.5 × 11 in`, `55` lines/page) in **Settings → Appearance → Page size** or override per export in **Export Scenario → Template**.
-* **Revisions Hub & Wrapped Compare Diffs:** Redesigned `Research ▸ Versions` with an inline timeline, wrapped multi-line Compare diffs in Unified and Side-by-Side modes, and clickable Revision Summary rows that jump directly to the scene.
-* **Upgraded Find & Replace & macOS File Associations:** Added Match Case (`Aa`), Whole Word (`W`), and empty-string deletion to Find & Replace, plus macOS Finder `.kitsp` / `.fdx` / `.fadein` / `.fountain` double-click open support.
-* **Highlighted Button Contrast & Native macOS Dock Icon (v0.8.14):** Re-calibrated `accent_soft` premultiplied alpha across all six writer themes, added dynamic `ink_on_accent` contrast ink, and restored native `ScriptCraft.icns` rendering in the macOS Dock.
-* **35 Contrast-Tested Themes & Bundled Fonts:** Includes six writer themes (*Midnight Ink*, *Amber Projector*, *Noir Emerald*, *Velvet Curtain*, *Red Light*, *Paper and Rust*) and bundled Liberation Mono, IBM Plex Mono, and Courier Prime.
-* **Lossless Interchange:** Import and export `.kitsp`, `.fdx`, `.fadein`, `.fountain`, plus Markdown export.
-* **In-Place Updates & Crash Resilience:** SHA-256 verified auto-updates with post-exit restart and integrated `panic.log` diagnostics.
+* **Full Shot Breakdown Studio (`Color Map` &amp; `Coverage Rails`):** Drag across words, phrases, or multi-block passages to assign shots with automatic span merging, 20 studio colors (10 standard + 10 darker variants), **Move to** / **Unassign** reassignment, anchored script zoom (`65%`–`350%`), and live estimated shot durations.
+* **Interactive 2D Top-Down Blocking Floor Plan &amp; Split View:** Auto-populates scene cast and color-matched cameras with lens-derived FOV cones, dolly tracks, 180° Line of Action, true-to-scale actors, dynamic metric scale bar (`2 m`–`25 cm`), architectural props + **`+ Shapes`** modeling geometry (`Square`, `Circle`, `Triangle`, `Bed`, `Light`, `Custom Prop`), 4-edge resize handles, `Ctrl` grid/angle snapping, and deep cursor-anchored zoom up to `450 px/m`.
+* **Scene Beat Timeline &amp; Active Camera Spotlight:** Scrub or play through each scene's beats to illuminate only the active camera at any moment in time (graying out inactive cameras), with live Split-view script highlighting and animated dolly/actor progress dots.
+* **Moment-Specific Camera Cues (`Moment Notes`):** Attach movement/action notes (e.g. *"Pan right to follow hand"*) to exact phrases inside a shot—visible on the script, live in the Floor Plan Timeline HUD, and exported across all PDFs and CSV.
+* **Director's Breakdown PDF &amp; Storyboard Reference Frames:** Attach reference photos or storyboard sketches per shot and export a unified **Title Page → Vector Floor Plan &amp; Shot Cards → Colored Script** PDF, alongside overhauled **Colored Script PDF**, **Shot List PDF**, and **CSV** exports.
+* **Live Script-Edit Sync, Revision Alerts &amp; Bold Character Cues:** Editing the script automatically shifts shot and note character offsets, flags revision-modified or deleted spans in the Shots workspace, and adds an opt-in **Bold character cues** setting across editor, Shots, and PDF.
+* **Inline Bold, Italic &amp; Underline + Opt-In US Letter (v0.8.15):** Native `⌘B`/`⌘I`/`⌘U` formatting across editor, PDF, `.kitsp`, `.fdx`, `.fadein`, and `.fountain`, plus Hollywood US Letter alongside A4.
+* **35 Contrast-Tested Themes &amp; Bundled Fonts:** Includes six writer themes (*Midnight Ink*, *Amber Projector*, *Noir Emerald*, *Velvet Curtain*, *Red Light*, *Paper and Rust*) and bundled Liberation Mono, IBM Plex Mono, and Courier Prime.
 
 *See the full release history in [`docs/releases/`](docs/releases/).*
 
@@ -92,6 +91,17 @@ ScriptCraft treats the production workflow as the core product:
 * **ScriptCraft Originals:** Midnight, Light, Sepia, High Contrast, KIT Scenarist Light & Dark, and Writer Palettes (Midnight Ink, Amber Projector, Noir Emerald, Velvet Curtain, Red Light, Paper and Rust).
 * **Curated Studio Themes:** Tokyo Night, Catppuccin, Nord, Gruvbox, Rosé Pine, Everforest, Kanagawa, Dracula, and more.
 * **Monochrome Paper Mode:** Render white paper with dark ink while keeping your editor chrome dark.
+
+### 🎥 Shot Breakdown, 2D Floor Plans & Director's Breakdown PDFs
+* **Character-Level Coverage & Moment Cues:** Highlight any phrase or beat in **Color Map** or Hollywood **Coverage Rails**, attach moment-specific camera movement cues (`+ Note`), and organize setups across 20 studio colors.
+* **Interactive 2D Top-Down Blocking:** Auto-populated cast and lens-calibrated camera FOV cones, true-to-scale actors, architectural props + basic modeling shapes (`Square`, `Circle`, `Triangle`, `Bed`, `Light`), 180° Line of Action, dolly tracks, and **Split View** alongside the script.
+* **Scene Beat Timeline Spotlight:** Scrub or play through a scene to highlight only the currently active camera (graying out inactive setups) while live-syncing the active script passage.
+* **Director's Breakdown PDF & Storyboards:** Attach storyboard/reference frames per shot and export a complete package containing Title Page, vector 2D floor plans, shot cards with thumbnails and cues, and the full Colored Script.
+
+<div align="center">
+  <img src="scriptcraft-app/tests/snapshots/42_shots_floor_plan.png" alt="ScriptCraft 2D Blocking Floor Plan and Scene Timeline" width="100%" />
+  <p><em>The Shots Workspace: True-to-scale 2D blocking floor plan with lens-calibrated FOV cones, 180° axis, dolly tracks, and live beat timeline spotlight.</em></p>
+</div>
 
 ### 🗂️ Studio Tools: Cards, Research & Stats
 * **Index Cards:** Visual corkboard for organizing scenes, structure, and beats.
