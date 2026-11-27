@@ -106,6 +106,11 @@ impl FloorPlanUiState {
         self.zoom = DEFAULT_ZOOM;
     }
 
+    pub fn clear_drag(&mut self) {
+        self.drag = None;
+        self.last_pan_pos = None;
+    }
+
     pub fn reset_view(&mut self) {
         self.pan = Vec2::new(0.0, 0.4);
         self.zoom = DEFAULT_ZOOM;
@@ -550,6 +555,9 @@ pub fn show(
     if primary_pressed {
         if let Some(pos) = ptr_pos {
             if canvas_rect.contains(pos) {
+                if let Some(fid) = ui.memory(|m| m.focused()) {
+                    ui.memory_mut(|m| m.surrender_focus(fid));
+                }
                 let hit = hit_test_plan(
                     project,
                     scene_id,
@@ -1312,7 +1320,10 @@ pub fn show(
                                     }
 
                                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                        if danger_chip(ui, "Delete Actor").clicked() {
+                                        if danger_chip(ui, "Delete Actor")
+                                            .on_hover_text("Delete selected actor (Delete)")
+                                            .clicked()
+                                        {
                                             delete_selected = true;
                                         }
                                     });
@@ -1370,7 +1381,10 @@ pub fn show(
                                         changed = true;
                                     }
                                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                        if danger_chip(ui, "Delete Prop").clicked() {
+                                        if danger_chip(ui, "Delete Prop")
+                                            .on_hover_text("Delete selected prop (Delete)")
+                                            .clicked()
+                                        {
                                             delete_selected = true;
                                         }
                                     });
@@ -1390,17 +1404,33 @@ pub fn show(
             Stroke::new(1.0_f32, kit().sep),
         );
 
+        if !delete_selected
+            && matches!(
+                state.selected,
+                Some(PlanSelection::Prop(_) | PlanSelection::Actor(_))
+            )
+            && !ui.ctx().wants_keyboard_input()
+            && ui.input_mut(|i| {
+                i.consume_key(egui::Modifiers::NONE, egui::Key::Delete)
+                    || i.consume_key(egui::Modifiers::NONE, egui::Key::Backspace)
+            })
+        {
+            delete_selected = true;
+        }
+
         if delete_selected {
             if let Some(plan) = project.shots.plan_for_scene_mut(scene_id) {
                 match state.selected {
                     Some(PlanSelection::Actor(aid)) => {
                         plan.actors.retain(|a| a.id != aid);
                         state.selected = None;
+                        state.drag = None;
                         changed = true;
                     }
                     Some(PlanSelection::Prop(pid)) => {
                         plan.props.retain(|p| p.id != pid);
                         state.selected = None;
+                        state.drag = None;
                         changed = true;
                     }
                     _ => {}

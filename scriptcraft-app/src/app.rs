@@ -3071,6 +3071,17 @@ impl ScriptCraftApp {
     }
 
     fn do_undo(&mut self) {
+        if self.side_tab == SideTab::Shots {
+            if let Some(p) = self.project.as_mut() {
+                if self.shots_ui.undo(&mut p.shots) {
+                    self.dirty = true;
+                    self.status = "Undid shot change.".to_string();
+                } else {
+                    self.status = "Nothing to undo in Shots.".to_string();
+                }
+            }
+            return;
+        }
         self.apply_editor2_output(crate::script_view::ScriptViewOutput {
             undo: true,
             ..Default::default()
@@ -3078,6 +3089,17 @@ impl ScriptCraftApp {
     }
 
     fn do_redo(&mut self) {
+        if self.side_tab == SideTab::Shots {
+            if let Some(p) = self.project.as_mut() {
+                if self.shots_ui.redo(&mut p.shots) {
+                    self.dirty = true;
+                    self.status = "Redid shot change.".to_string();
+                } else {
+                    self.status = "Nothing to redo in Shots.".to_string();
+                }
+            }
+            return;
+        }
         self.apply_editor2_output(crate::script_view::ScriptViewOutput {
             redo: true,
             ..Default::default()
@@ -5957,9 +5979,6 @@ impl eframe::App for ScriptCraftApp {
                 {
                     self.show_find = false;
                 }
-                if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Z)) {
-                    self.do_undo();
-                }
                 let redo = ctx.input_mut(|i| {
                     i.consume_key(
                         egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
@@ -5968,6 +5987,8 @@ impl eframe::App for ScriptCraftApp {
                 });
                 if redo {
                     self.do_redo();
+                } else if ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Z)) {
+                    self.do_undo();
                 }
                 // With the native menu installed, its Script ▸ Dual Dialogue
                 // accelerator owns Cmd+D; consuming it here as well would

@@ -116,6 +116,94 @@ fn autocomplete_click_fills_suggestion() {
         format!("{full}{full}"),
         "clicking the suggestion should replace the typed prefix with the full cue"
     );
+    let expected_ch = full.chars().count();
+    assert_eq!(
+        h.state().editor2_selection(),
+        Some(((bi, 0, expected_ch), (bi, 0, expected_ch))),
+        "caret must land at the end of the completed character cue"
+    );
+}
+
+#[test]
+fn autocomplete_click_and_keyboard_place_caret_at_end_of_completed_character() {
+    let mut h = focused_harness();
+
+    let first_cue_bi = h
+        .state()
+        .find_first_cue_block()
+        .expect("A95 should contain at least one character cue");
+    let full = h.state().block_text(first_cue_bi).unwrap();
+    let expected_ch = full.chars().count();
+    let prefix: String = full.chars().take(2).collect();
+
+    // Case 1: Empty Character block -> type prefix -> click autocomplete -> press Enter.
+    h.state_mut().apply_editor_commands_for_test(vec![
+        scriptcraft_core::edit::EditCommand::InsertBlock {
+            at: first_cue_bi + 1,
+            block: scriptcraft_core::ScriptBlock::new(
+                scriptcraft_core::ElementType::Character,
+                String::new(),
+            ),
+        },
+    ]);
+    let new_bi = first_cue_bi + 1;
+    h.state_mut().focus_block_at(new_bi, 0);
+    h.run_steps(2);
+    h.input_mut().events.push(egui::Event::Text(prefix.clone()));
+    h.run();
+
+    h.get_by_label(&full).click();
+    h.run();
+    assert_eq!(h.state().block_text(new_bi).as_deref(), Some(full.as_str()));
+    assert_eq!(
+        h.state().editor2_selection(),
+        Some(((new_bi, 0, expected_ch), (new_bi, 0, expected_ch))),
+        "clicking autocomplete must move caret to the end of the completed character name"
+    );
+
+    // Pressing Enter immediately after clicking must keep the full name intact
+    // and advance into a Dialogue block below (not split the name at the old prefix).
+    let before_count = h.state().project_for_test().unwrap().blocks.len();
+    h.key_press(egui::Key::Enter);
+    h.run();
+    assert_eq!(h.state().block_text(new_bi).as_deref(), Some(full.as_str()));
+    assert_eq!(
+        h.state().project_for_test().unwrap().blocks.len(),
+        before_count + 1
+    );
+    assert_eq!(
+        h.state().project_for_test().unwrap().blocks[new_bi + 1].element_type,
+        scriptcraft_core::ElementType::Dialogue
+    );
+
+    // Case 2: Keyboard Enter commit on typed prefix must also place caret at end.
+    h.state_mut().apply_editor_commands_for_test(vec![
+        scriptcraft_core::edit::EditCommand::InsertBlock {
+            at: new_bi + 2,
+            block: scriptcraft_core::ScriptBlock::new(
+                scriptcraft_core::ElementType::Character,
+                String::new(),
+            ),
+        },
+    ]);
+    let kb_bi = new_bi + 2;
+    h.state_mut().focus_block_at(kb_bi, 0);
+    h.run_steps(2);
+    h.input_mut().events.push(egui::Event::Text(prefix));
+    h.run();
+    let rows = h.state().editor2_autocomplete_rows();
+    assert!(!rows.is_empty(), "typing cue prefix must open autocomplete");
+    let expected_pick = rows[0].0.clone();
+    let expected_pick_len = expected_pick.chars().count();
+    h.key_press(egui::Key::Enter);
+    h.run();
+    let kb_text = h.state().block_text(kb_bi).unwrap();
+    assert_eq!(kb_text, expected_pick);
+    assert_eq!(
+        h.state().editor2_selection(),
+        Some(((kb_bi, 0, expected_pick_len), (kb_bi, 0, expected_pick_len))),
+        "keyboard Enter autocomplete must move caret to the end of the completed cue"
+    );
 }
 
 /// The painted paper must keep A4 geometry at every zoom: height/width ratio
@@ -4237,5 +4325,137 @@ fn phase3_timeline_basic_shapes_breakdown_pdf_and_live_span_sync() {
         shot0.notes[0].range.start_char,
         Some(15),
         "moment note start_char must shift by +7"
+    );
+}
+
+#[test]
+fn shots_delete_key_removes_selected_prop_and_ctrl_z_undoes_and_redoes() {
+    let mut h = harness(SideTab::Shots);
+    h.run();
+
+    h.get_by_label("Floor Plan").click();
+    h.run();
+
+    let scene_id = h.state().project_for_test().unwrap().scenes()[0].id;
+    let initial_props = h
+        .state()
+        .project_for_test()
+        .unwrap()
+        .shots
+        .plan_for_scene(scene_id)
+        .map(|p| p.props.len())
+        .unwrap_or(0);
+
+    // Add a Table prop (auto-selected on the floor plan).
+    h.get_by_label("+ Table").click();
+    h.run();
+    let after_add = h
+        .state()
+        .project_for_test()
+        .unwrap()
+        .shots
+        .plan_for_scene(scene_id)
+        .unwrap()
+        .props
+        .len();
+    assert_eq!(after_add, initial_props + 1, "+ Table must add one prop");
+
+    // Delete key on the keyboard deletes the selected prop.
+    h.key_press(egui::Key::Delete);
+    h.run();
+    let after_del = h
+        .state()
+        .project_for_test()
+        .unwrap()
+        .shots
+        .plan_for_scene(scene_id)
+        .unwrap()
+        .props
+        .len();
+    assert_eq!(
+        after_del, initial_props,
+        "pressing Delete must remove the selected prop"
+    );
+
+    // Ctrl/Cmd+Z undoes the prop deletion and restores the prop.
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
+    h.run();
+    let after_undo_del = h
+        .state()
+        .project_for_test()
+        .unwrap()
+        .shots
+        .plan_for_scene(scene_id)
+        .unwrap()
+        .props
+        .len();
+    assert_eq!(
+        after_undo_del,
+        initial_props + 1,
+        "Ctrl/Cmd+Z must restore the deleted prop"
+    );
+
+    // Backspace (labeled Delete on macOS) also deletes the re-selected prop.
+    h.key_press(egui::Key::Backspace);
+    h.run();
+    assert_eq!(
+        h.state()
+            .project_for_test()
+            .unwrap()
+            .shots
+            .plan_for_scene(scene_id)
+            .unwrap()
+            .props
+            .len(),
+        initial_props,
+        "pressing Backspace must remove the selected prop"
+    );
+
+    // Undo deletion, then undo adding the prop too.
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
+    h.run();
+    assert_eq!(
+        h.state()
+            .project_for_test()
+            .unwrap()
+            .shots
+            .plan_for_scene(scene_id)
+            .unwrap()
+            .props
+            .len(),
+        initial_props + 1
+    );
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
+    h.run();
+    assert_eq!(
+        h.state()
+            .project_for_test()
+            .unwrap()
+            .shots
+            .plan_for_scene(scene_id)
+            .unwrap()
+            .props
+            .len(),
+        initial_props,
+        "second Ctrl/Cmd+Z must undo adding the prop"
+    );
+
+    // Ctrl/Cmd+Shift+Z redoes adding the prop.
+    h.key_press_modifiers(
+        egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+        egui::Key::Z,
+    );
+    h.run();
+    assert_eq!(
+        h.state()
+            .project_for_test()
+            .unwrap()
+            .shots
+            .plan_for_scene(scene_id)
+            .unwrap()
+            .props
+            .len(),
+        initial_props + 1,
+        "Ctrl/Cmd+Shift+Z must redo the undone shot change"
     );
 }

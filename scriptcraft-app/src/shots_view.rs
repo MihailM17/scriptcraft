@@ -17,7 +17,7 @@ use egui::{
 };
 use scriptcraft_core::revision::RevisionColor;
 use scriptcraft_core::shots::{
-    block_index_map, ShotAlert, ShotColor, ShotMovement, ShotRange, ShotSize,
+    block_index_map, ShotAlert, ShotColor, ShotList, ShotMovement, ShotRange, ShotSize,
 };
 use scriptcraft_core::{ElementType, Project, Scene, ScriptBlock};
 use std::collections::HashMap;
@@ -68,6 +68,14 @@ impl ShotsViewMode {
 
 pub const SCRIPT_ZOOM_MIN: f32 = 0.65;
 pub const SCRIPT_ZOOM_MAX: f32 = 3.5;
+const SHOTS_UNDO_LIMIT: usize = 100;
+
+#[derive(Clone)]
+struct ShotsSnapshot {
+    shots: ShotList,
+    selected_shot: Option<Uuid>,
+    floor_selected: Option<crate::floor_plan_view::PlanSelection>,
+}
 
 /// Persistent UI state for the Shots workspace.
 pub struct ShotsUiState {
@@ -90,6 +98,11 @@ pub struct ShotsUiState {
     adding_note_open: bool,
     note_draft: String,
     dragging_selection: bool,
+    /// Undo/redo history for all Shots & Floor Plan edits.
+    undo_stack: Vec<ShotsSnapshot>,
+    redo_stack: Vec<ShotsSnapshot>,
+    undo_drag_active: bool,
+    undo_text_focus: Option<Id>,
 }
 
 impl Default for ShotsUiState {
@@ -108,6 +121,10 @@ impl Default for ShotsUiState {
             adding_note_open: false,
             note_draft: String::new(),
             dragging_selection: false,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+            undo_drag_active: false,
+            undo_text_focus: None,
         }
     }
 }
@@ -127,6 +144,86 @@ impl ShotsUiState {
         self.dragging_selection = false;
         self.floor_plan.selected = None;
         self.floor_plan.reset_view();
+        self.undo_stack.clear();
+        self.redo_stack.clear();
+        self.undo_drag_active = false;
+        self.undo_text_focus = None;
+    }
+
+    pub fn undo(&mut self, shots: &mut ShotList) -> bool {
+        let Some(prev) = self.undo_stack.pop() else {
+            return false;
+        };
+        if self.redo_stack.len() >= SHOTS_UNDO_LIMIT {
+            self.redo_stack.remove(0);
+        }
+        self.redo_stack.push(ShotsSnapshot {
+            shots: shots.clone(),
+            selected_shot: self.selected_shot,
+            floor_selected: self.floor_plan.selected,
+        });
+        *shots = prev.shots;
+        self.selected_shot = prev.selected_shot;
+        self.floor_plan.selected = prev.floor_selected;
+        self.floor_plan.clear_drag();
+        self.undo_drag_active = false;
+        self.undo_text_focus = None;
+        true
+    }
+
+    pub fn redo(&mut self, shots: &mut ShotList) -> bool {
+        let Some(next) = self.redo_stack.pop() else {
+            return false;
+        };
+        if self.undo_stack.len() >= SHOTS_UNDO_LIMIT {
+            self.undo_stack.remove(0);
+        }
+        self.undo_stack.push(ShotsSnapshot {
+            shots: shots.clone(),
+            selected_shot: self.selected_shot,
+            floor_selected: self.floor_plan.selected,
+        });
+        *shots = next.shots;
+        self.selected_shot = next.selected_shot;
+        self.floor_plan.selected = next.floor_selected;
+        self.floor_plan.clear_drag();
+        self.undo_drag_active = false;
+        self.undo_text_focus = None;
+        true
+    }
+
+    fn record_undo(
+        &mut self,
+        before: ShotsSnapshot,
+        mutated: bool,
+        pointer_down: bool,
+        focused_text: Option<Id>,
+    ) {
+        if !pointer_down {
+            self.undo_drag_active = false;
+        }
+        if focused_text != self.undo_text_focus {
+            self.undo_text_focus = None;
+        }
+        if !mutated {
+            return;
+        }
+        if pointer_down {
+            if self.undo_drag_active {
+                return;
+            }
+            self.undo_drag_active = true;
+        } else if let Some(fid) = focused_text {
+            if self.undo_text_focus == Some(fid) {
+                return;
+            }
+            self.undo_text_focus = Some(fid);
+        }
+        if self.undo_stack.len() >= SHOTS_UNDO_LIMIT {
+            self.undo_stack.remove(0);
+        }
+        self.undo_stack.push(before);
+        self.redo_stack.clear();
     }
 
     pub fn zoom_in(&mut self) {
@@ -253,6 +350,11 @@ pub fn show(
     auto_contd: bool,
     paper_mono: bool,
 ) -> ShotsAction {
+    let before_snapshot = ShotsSnapshot {
+        shots: project.shots.clone(),
+        selected_shot: state.selected_shot,
+        floor_selected: state.floor_plan.selected,
+    };
     let mut action = ShotsAction::None;
     let shot_alerts = project.shots.shot_alerts(&project.blocks, revision_marks);
 
@@ -851,6 +953,15 @@ pub fn show(
                 }
             }
         });
+
+    let mutated = action == ShotsAction::Changed && project.shots != before_snapshot.shots;
+    let pointer_down = ctx.input(|i| i.pointer.primary_down());
+    let focused_text = if ctx.wants_keyboard_input() {
+        ctx.memory(|m| m.focused())
+    } else {
+        None
+    };
+    state.record_undo(before_snapshot, mutated, pointer_down, focused_text);
 
     if action == ShotsAction::Changed {
         ctx.request_repaint();

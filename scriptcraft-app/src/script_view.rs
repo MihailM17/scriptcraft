@@ -763,6 +763,7 @@ pub fn script_view(
                         });
                     if let Some(s) = picked {
                         apply_completion(blocks, auto.caret, &s, &mut out.commands, state);
+                        resp.request_focus();
                         rows.clear();
                     }
                 } else {
@@ -806,20 +807,16 @@ fn anchored_scroll_offset(
     )
 }
 
-/// Splice an autocomplete pick into the caret's line: the partial token (or
-/// the whole heading line) is replaced with the suggestion, uppercase for
-/// cue-like elements. Emitted as one `SetText` command.
-fn apply_completion(
+/// Compute the `SetText` command and resulting end-of-completion caret for an
+/// autocomplete pick. Measures the caret position against the *completed* text
+/// (after any `auto_upper` transform) so it lands at the end of the inserted
+/// suggestion rather than clamping to the shorter pre-completion prefix.
+fn compute_completion(
     blocks: &[ScriptBlock],
     caret: Pos,
     pick: &str,
-    cmds: &mut Vec<EditCommand>,
-    state: &mut EditState,
-) {
-    let Some(b) = blocks.get(caret.bi) else {
-        state.autocomplete = None;
-        return;
-    };
+) -> Option<(EditCommand, Pos)> {
+    let b = blocks.get(caret.bi)?;
     let abs = char_index(&b.text, caret);
     let whole_line = matches!(
         b.element_type,
@@ -830,7 +827,8 @@ fn apply_completion(
     } else {
         complete_at(&b.text, abs, pick)
     };
-    let completed = if auto_upper(b.element_type) {
+    let upper = auto_upper(b.element_type);
+    let completed = if upper {
         completed.to_uppercase()
     } else {
         completed
@@ -850,13 +848,37 @@ fn apply_completion(
         }
         t
     };
-    let after = pos_at_char(&b.text, caret.bi, from + pick.chars().count());
-    cmds.push(EditCommand::SetText {
-        bi: caret.bi,
-        text: completed,
-    });
-    state.selection = Some(Selection::caret(after));
-    state.scroll_caret = true;
+    let after_abs = if upper {
+        let prefix: String = chars[..from].iter().collect();
+        prefix.to_uppercase().chars().count() + pick.to_uppercase().chars().count()
+    } else {
+        from + pick.chars().count()
+    };
+    let after = pos_at_char(&completed, caret.bi, after_abs);
+    Some((
+        EditCommand::SetText {
+            bi: caret.bi,
+            text: completed,
+        },
+        after,
+    ))
+}
+
+/// Splice an autocomplete pick into the caret's line: the partial token (or
+/// the whole heading line) is replaced with the suggestion, uppercase for
+/// cue-like elements. Emitted as one `SetText` command.
+fn apply_completion(
+    blocks: &[ScriptBlock],
+    caret: Pos,
+    pick: &str,
+    cmds: &mut Vec<EditCommand>,
+    state: &mut EditState,
+) {
+    if let Some((cmd, after)) = compute_completion(blocks, caret, pick) {
+        cmds.push(cmd);
+        state.selection = Some(Selection::caret(after));
+        state.scroll_caret = true;
+    }
     state.autocomplete = None;
 }
 
@@ -968,9 +990,14 @@ fn handle_events(
                             .as_ref()
                             .and_then(|a| a.items.get(a.highlight).cloned().map(|s| (s, a.caret)));
                         if let Some((pick, caret)) = pick {
-                            let mut cmds = Vec::new();
-                            apply_completion(ed.blocks(), caret, &pick, &mut cmds, state);
-                            ed.cmds.extend(cmds);
+                            if let Some((cmd, after)) =
+                                compute_completion(ed.blocks(), caret, &pick)
+                            {
+                                ed.press(vec![cmd]);
+                                ed.sel = Some(Selection::caret(after));
+                                ed.scroll = true;
+                            }
+                            state.autocomplete = None;
                             continue;
                         }
                     }
