@@ -2598,10 +2598,7 @@ mod tests {
                     "Fifteen sixteen seventeen eighteen.".into(),
                 ),
                 ScriptBlock::new(ElementType::Character, "MARIA".into()),
-                ScriptBlock::new(
-                    ElementType::Dialogue,
-                    "Nineteen twenty twentyone.".into(),
-                ),
+                ScriptBlock::new(ElementType::Dialogue, "Nineteen twenty twentyone.".into()),
             ],
             ..Default::default()
         };

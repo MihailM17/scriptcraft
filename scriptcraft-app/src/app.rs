@@ -82,9 +82,7 @@ pub fn run() -> eframe::Result<()> {
         let app_icon =
             eframe::icon_data::from_png_bytes(include_bytes!("../assets/ScriptCraft-app.png"))
                 .unwrap_or_default();
-        viewport_builder
-            .with_decorations(false)
-            .with_icon(app_icon)
+        viewport_builder.with_decorations(false).with_icon(app_icon)
     };
 
     #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
@@ -263,11 +261,17 @@ fn draw_windows_caption_buttons(ui: &mut egui::Ui) -> bool {
     let cc = close_rect.center();
     let r = 4.2_f32;
     ui.painter().line_segment(
-        [egui::pos2(cc.x - r, cc.y - r), egui::pos2(cc.x + r, cc.y + r)],
+        [
+            egui::pos2(cc.x - r, cc.y - r),
+            egui::pos2(cc.x + r, cc.y + r),
+        ],
         egui::Stroke::new(1.15_f32, close_fg),
     );
     ui.painter().line_segment(
-        [egui::pos2(cc.x - r, cc.y + r), egui::pos2(cc.x + r, cc.y - r)],
+        [
+            egui::pos2(cc.x - r, cc.y + r),
+            egui::pos2(cc.x + r, cc.y - r),
+        ],
         egui::Stroke::new(1.15_f32, close_fg),
     );
     if close_resp.on_hover_text("Close").clicked() {
@@ -283,8 +287,10 @@ fn draw_windows_caption_buttons(ui: &mut egui::Ui) -> bool {
     let stroke = egui::Stroke::new(1.1_f32, c.text);
     if maximized {
         // Overlapping restore squares
-        let front = egui::Rect::from_center_size(egui::pos2(mc.x - 1.0, mc.y + 1.0), egui::vec2(7.0, 7.0));
-        ui.painter().rect_stroke(front, 0.5, stroke, egui::StrokeKind::Inside);
+        let front =
+            egui::Rect::from_center_size(egui::pos2(mc.x - 1.0, mc.y + 1.0), egui::vec2(7.0, 7.0));
+        ui.painter()
+            .rect_stroke(front, 0.5, stroke, egui::StrokeKind::Inside);
         let back_top = egui::pos2(mc.x - 2.0, mc.y - 4.5);
         let back_tr = egui::pos2(mc.x + 4.5, mc.y - 4.5);
         let back_br = egui::pos2(mc.x + 4.5, mc.y + 2.0);
@@ -292,7 +298,8 @@ fn draw_windows_caption_buttons(ui: &mut egui::Ui) -> bool {
         ui.painter().line_segment([back_tr, back_br], stroke);
     } else {
         let sq = egui::Rect::from_center_size(mc, egui::vec2(8.5, 8.5));
-        ui.painter().rect_stroke(sq, 0.5, stroke, egui::StrokeKind::Inside);
+        ui.painter()
+            .rect_stroke(sq, 0.5, stroke, egui::StrokeKind::Inside);
     }
     if max_resp
         .on_hover_text(if maximized { "Restore" } else { "Maximize" })
@@ -4249,8 +4256,8 @@ impl ScriptCraftApp {
     /// Toggle `(CONT'D)` on the active character cue (undoable with Cmd/Ctrl+Z).
     fn toggle_contd_on_selection(&mut self) {
         let Some((char_bi, had_contd, _)) = self.contd_target() else {
-            self.status = "Place the cursor on a character cue or dialogue to toggle (CONT'D)."
-                .to_string();
+            self.status =
+                "Place the cursor on a character cue or dialogue to toggle (CONT'D).".to_string();
             return;
         };
         let Some(p) = self.project.as_ref() else {
@@ -5862,7 +5869,10 @@ impl eframe::App for ScriptCraftApp {
             .into_iter()
             .find(|p| p.is_file())
         {
-            self.request_pending(PendingAction::Open(path.to_string_lossy().into_owned()), ctx);
+            self.request_pending(
+                PendingAction::Open(path.to_string_lossy().into_owned()),
+                ctx,
+            );
         }
         let dropped_path = ctx.input(|i| {
             i.raw
@@ -5872,7 +5882,10 @@ impl eframe::App for ScriptCraftApp {
                 .find(|p| p.is_file())
         });
         if let Some(path) = dropped_path {
-            self.request_pending(PendingAction::Open(path.to_string_lossy().into_owned()), ctx);
+            self.request_pending(
+                PendingAction::Open(path.to_string_lossy().into_owned()),
+                ctx,
+            );
         }
         // Native macOS menu bar events (no-ops in tests).
         self.poll_native_menu(ctx);
@@ -6118,7 +6131,13 @@ impl ScriptCraftApp {
                     .inner_margin(egui::Margin {
                         left: 12,
                         right: if win_custom { 4 } else { 12 },
-                        top: if mac_custom { 2 } else if win_custom { 4 } else { 7 },
+                        top: if mac_custom {
+                            2
+                        } else if win_custom {
+                            4
+                        } else {
+                            7
+                        },
                         bottom: if custom { 4 } else { 7 },
                     }),
             )
@@ -6434,8 +6453,7 @@ impl ScriptCraftApp {
                                     .color(kit().disabled_text),
                             );
                         }
-                        if (self.side_tab == SideTab::Cards && self.project.is_some())
-                            || win_custom
+                        if (self.side_tab == SideTab::Cards && self.project.is_some()) || win_custom
                         {
                             let n_scenes =
                                 self.project.as_ref().map(|p| p.scenes().len()).unwrap_or(0);
@@ -6446,8 +6464,7 @@ impl ScriptCraftApp {
                                         if draw_windows_caption_buttons(ui) {
                                             win_close_clicked = true;
                                         }
-                                        if self.side_tab == SideTab::Cards
-                                            && self.project.is_some()
+                                        if self.side_tab == SideTab::Cards && self.project.is_some()
                                         {
                                             toolbar_sep(ui);
                                         }

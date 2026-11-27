@@ -210,11 +210,7 @@ mod macos {
         );
     }
 
-    extern "C" fn hooked_set_delegate(
-        app: *mut AnyObject,
-        cmd: Sel,
-        delegate: *mut AnyObject,
-    ) {
+    extern "C" fn hooked_set_delegate(app: *mut AnyObject, cmd: Sel, delegate: *mut AnyObject) {
         unsafe {
             attach_open_handlers(delegate);
             let orig_ptr = ORIG_SET_DELEGATE.load(Ordering::Acquire);

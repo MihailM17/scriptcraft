@@ -2458,20 +2458,21 @@ fn show_center_pane(
                                     .color(paper_accent),
                                 );
                                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                    let stats_lbl = if sc_cuts.cut_count > 0 {
-                                        format!(
+                                    let stats_lbl =
+                                        if sc_cuts.cut_count > 0 {
+                                            format!(
                                             "{n_shots} {} · {} {} · avg {:.1}s · {sc_pct}% covered",
                                             if n_shots == 1 { "shot" } else { "shots" },
                                             sc_cuts.cut_count,
                                             if sc_cuts.cut_count == 1 { "cut" } else { "cuts" },
                                             sc_cuts.avg_cut_secs,
                                         )
-                                    } else {
-                                        format!(
-                                            "{n_shots} {} · {sc_pct}% covered",
-                                            if n_shots == 1 { "shot" } else { "shots" }
-                                        )
-                                    };
+                                        } else {
+                                            format!(
+                                                "{n_shots} {} · {sc_pct}% covered",
+                                                if n_shots == 1 { "shot" } else { "shots" }
+                                            )
+                                        };
                                     ui.label(
                                         RichText::new(stats_lbl)
                                             .size(11.0 * zoom)

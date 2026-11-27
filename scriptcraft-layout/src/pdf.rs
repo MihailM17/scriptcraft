@@ -2059,7 +2059,11 @@ fn build_shot_sheet_pages(
             p.shots.len(),
             if p.shots.len() == 1 { "shot" } else { "shots" },
             proj_cuts.cut_count,
-            if proj_cuts.cut_count == 1 { "cut" } else { "cuts" },
+            if proj_cuts.cut_count == 1 {
+                "cut"
+            } else {
+                "cuts"
+            },
             proj_cuts.avg_cut_secs,
             scenes.len(),
             if scenes.len() == 1 { "scene" } else { "scenes" },
@@ -2926,11 +2930,7 @@ fn push_pdf_rounded_rect(
 ) {
     let r = r.min(w * 0.5).min(h * 0.5).max(0.0);
     if r < 0.05 {
-        push_pdf_polygon(
-            ops,
-            &[(x, y), (x + w, y), (x + w, y + h), (x, y + h)],
-            mode,
-        );
+        push_pdf_polygon(ops, &[(x, y), (x + w, y), (x + w, y + h), (x, y + h)], mode);
         return;
     }
     let segs = 4usize;
@@ -3108,7 +3108,10 @@ fn clip_segment_to_rect(
             }
         }
     }
-    Some(((a.0 + t0 * dx, a.1 + t0 * dy), (a.0 + t1 * dx, a.1 + t1 * dy)))
+    Some((
+        (a.0 + t0 * dx, a.1 + t0 * dy),
+        (a.0 + t1 * dx, a.1 + t1 * dy),
+    ))
 }
 
 fn rect_overlap_area(a: (f32, f32, f32, f32), b: (f32, f32, f32, f32)) -> f32 {
@@ -3305,7 +3308,8 @@ fn draw_floor_plan_vector(
         let mut poly = Vec::with_capacity(cone.arc.len() + 1);
         poly.push(cone.cp);
         poly.extend_from_slice(&cone.arc);
-        let clipped = clip_polygon_to_rect(&poly, inner_min_x, inner_min_y, inner_max_x, inner_max_y);
+        let clipped =
+            clip_polygon_to_rect(&poly, inner_min_x, inner_min_y, inner_max_x, inner_max_y);
         if clipped.len() >= 3 {
             ops.push(Op::SetFillColor {
                 col: cone.tint.clone(),
@@ -3433,117 +3437,105 @@ fn draw_floor_plan_vector(
                 continue;
             }
             let rad = prop.angle_deg.to_radians();
-        let hw = prop.w * 0.5;
-        let hh = prop.h * 0.5;
-        let pt = |lx: f32, ly: f32| -> (f32, f32) {
-            let (rx, ry) = pdf_rot2(lx, ly, rad);
-            to_mm(prop.x + rx, prop.y + ry)
-        };
-        let corners = [pt(-hw, -hh), pt(hw, -hh), pt(hw, hh), pt(-hw, hh)];
-        let bx0 = corners.iter().map(|p| p.0).fold(f32::INFINITY, f32::min);
-        let bx1 = corners.iter().map(|p| p.0).fold(f32::NEG_INFINITY, f32::max);
-        let by0 = corners.iter().map(|p| p.1).fold(f32::INFINITY, f32::min);
-        let by1 = corners.iter().map(|p| p.1).fold(f32::NEG_INFINITY, f32::max);
-        let obs_weight = if prop.kind == PropKind::Wall { 6.5 } else { 4.2 };
-        obstacles.push((bx0, by0, bx1, by1, obs_weight));
+            let hw = prop.w * 0.5;
+            let hh = prop.h * 0.5;
+            let pt = |lx: f32, ly: f32| -> (f32, f32) {
+                let (rx, ry) = pdf_rot2(lx, ly, rad);
+                to_mm(prop.x + rx, prop.y + ry)
+            };
+            let corners = [pt(-hw, -hh), pt(hw, -hh), pt(hw, hh), pt(-hw, hh)];
+            let bx0 = corners.iter().map(|p| p.0).fold(f32::INFINITY, f32::min);
+            let bx1 = corners
+                .iter()
+                .map(|p| p.0)
+                .fold(f32::NEG_INFINITY, f32::max);
+            let by0 = corners.iter().map(|p| p.1).fold(f32::INFINITY, f32::min);
+            let by1 = corners
+                .iter()
+                .map(|p| p.1)
+                .fold(f32::NEG_INFINITY, f32::max);
+            let obs_weight = if prop.kind == PropKind::Wall {
+                6.5
+            } else {
+                4.2
+            };
+            obstacles.push((bx0, by0, bx1, by1, obs_weight));
 
-        ops.push(Op::SetOutlineColor {
-            col: Color::Greyscale(Greyscale::new(0.36, None)),
-        });
-        ops.push(Op::SetOutlineThickness { pt: Pt(0.65) });
-        match prop.kind {
-            PropKind::Wall => {
-                ops.push(Op::SetFillColor {
-                    col: Color::Greyscale(Greyscale::new(0.38, None)),
-                });
-                ops.push(Op::SetOutlineColor {
-                    col: Color::Greyscale(Greyscale::new(0.28, None)),
-                });
-                ops.push(Op::SetOutlineThickness { pt: Pt(0.45) });
-                let clipped = clip_polygon_to_rect(
-                    &corners,
-                    inner_min_x,
-                    inner_min_y,
-                    inner_max_x,
-                    inner_max_y,
-                );
-                if clipped.len() >= 3 {
-                    push_pdf_polygon(ops, &clipped, PaintMode::FillStroke);
-                }
-            }
-            PropKind::Window => {
-                ops.push(Op::SetFillColor {
-                    col: Color::Rgb(Rgb::new(0.84, 0.93, 0.99, None)),
-                });
-                let clipped = clip_polygon_to_rect(
-                    &corners,
-                    inner_min_x,
-                    inner_min_y,
-                    inner_max_x,
-                    inner_max_y,
-                );
-                if clipped.len() >= 3 {
-                    push_pdf_polygon(ops, &clipped, PaintMode::FillStroke);
-                }
-                ops.push(Op::SetOutlineColor {
-                    col: Color::Rgb(Rgb::new(0.28, 0.62, 0.90, None)),
-                });
-                if let Some((a, b)) = clip_segment_to_rect(
-                    pt(-hw, 0.0),
-                    pt(hw, 0.0),
-                    inner_min_x,
-                    inner_min_y,
-                    inner_max_x,
-                    inner_max_y,
-                ) {
-                    push_pdf_polyline(ops, &[a, b], false);
-                }
-            }
-            PropKind::Door => {
-                for (a, b) in [(pt(-hw, -hh), pt(-hw, hh)), (pt(hw, -hh), pt(hw, hh))] {
-                    if let Some((ca, cb)) = clip_segment_to_rect(
-                        a,
-                        b,
+            ops.push(Op::SetOutlineColor {
+                col: Color::Greyscale(Greyscale::new(0.36, None)),
+            });
+            ops.push(Op::SetOutlineThickness { pt: Pt(0.65) });
+            match prop.kind {
+                PropKind::Wall => {
+                    ops.push(Op::SetFillColor {
+                        col: Color::Greyscale(Greyscale::new(0.38, None)),
+                    });
+                    ops.push(Op::SetOutlineColor {
+                        col: Color::Greyscale(Greyscale::new(0.28, None)),
+                    });
+                    ops.push(Op::SetOutlineThickness { pt: Pt(0.45) });
+                    let clipped = clip_polygon_to_rect(
+                        &corners,
                         inner_min_x,
                         inner_min_y,
                         inner_max_x,
                         inner_max_y,
-                    ) {
-                        push_pdf_polyline(ops, &[ca, cb], false);
-                    }
-                }
-                let hinge = pt(-hw, 0.0);
-                let swing_rad = rad - 65.0_f32.to_radians();
-                let leaf_end = to_mm(
-                    prop.x - hw * rad.cos() + prop.w * swing_rad.cos(),
-                    prop.y - hw * rad.sin() + prop.w * swing_rad.sin(),
-                );
-                ops.push(Op::SetOutlineThickness { pt: Pt(1.0) });
-                if let Some((ca, cb)) = clip_segment_to_rect(
-                    hinge,
-                    leaf_end,
-                    inner_min_x,
-                    inner_min_y,
-                    inner_max_x,
-                    inner_max_y,
-                ) {
-                    push_pdf_polyline(ops, &[ca, cb], false);
-                }
-                ops.push(Op::SetOutlineThickness { pt: Pt(0.42) });
-                let segs = 20usize;
-                let mut prev = to_mm(
-                    prop.x - hw * rad.cos() + prop.w * rad.cos(),
-                    prop.y - hw * rad.sin() + prop.w * rad.sin(),
-                );
-                for k in 1..=segs {
-                    let a = rad - (65.0_f32 * k as f32 / segs as f32).to_radians();
-                    let cur = to_mm(
-                        prop.x - hw * rad.cos() + prop.w * a.cos(),
-                        prop.y - hw * rad.sin() + prop.w * a.sin(),
                     );
+                    if clipped.len() >= 3 {
+                        push_pdf_polygon(ops, &clipped, PaintMode::FillStroke);
+                    }
+                }
+                PropKind::Window => {
+                    ops.push(Op::SetFillColor {
+                        col: Color::Rgb(Rgb::new(0.84, 0.93, 0.99, None)),
+                    });
+                    let clipped = clip_polygon_to_rect(
+                        &corners,
+                        inner_min_x,
+                        inner_min_y,
+                        inner_max_x,
+                        inner_max_y,
+                    );
+                    if clipped.len() >= 3 {
+                        push_pdf_polygon(ops, &clipped, PaintMode::FillStroke);
+                    }
+                    ops.push(Op::SetOutlineColor {
+                        col: Color::Rgb(Rgb::new(0.28, 0.62, 0.90, None)),
+                    });
+                    if let Some((a, b)) = clip_segment_to_rect(
+                        pt(-hw, 0.0),
+                        pt(hw, 0.0),
+                        inner_min_x,
+                        inner_min_y,
+                        inner_max_x,
+                        inner_max_y,
+                    ) {
+                        push_pdf_polyline(ops, &[a, b], false);
+                    }
+                }
+                PropKind::Door => {
+                    for (a, b) in [(pt(-hw, -hh), pt(-hw, hh)), (pt(hw, -hh), pt(hw, hh))] {
+                        if let Some((ca, cb)) = clip_segment_to_rect(
+                            a,
+                            b,
+                            inner_min_x,
+                            inner_min_y,
+                            inner_max_x,
+                            inner_max_y,
+                        ) {
+                            push_pdf_polyline(ops, &[ca, cb], false);
+                        }
+                    }
+                    let hinge = pt(-hw, 0.0);
+                    let swing_rad = rad - 65.0_f32.to_radians();
+                    let leaf_end = to_mm(
+                        prop.x - hw * rad.cos() + prop.w * swing_rad.cos(),
+                        prop.y - hw * rad.sin() + prop.w * swing_rad.sin(),
+                    );
+                    ops.push(Op::SetOutlineThickness { pt: Pt(1.0) });
                     if let Some((ca, cb)) = clip_segment_to_rect(
-                        prev,
-                        cur,
+                        hinge,
+                        leaf_end,
                         inner_min_x,
                         inner_min_y,
                         inner_max_x,
@@ -3551,212 +3543,244 @@ fn draw_floor_plan_vector(
                     ) {
                         push_pdf_polyline(ops, &[ca, cb], false);
                     }
-                    prev = cur;
+                    ops.push(Op::SetOutlineThickness { pt: Pt(0.42) });
+                    let segs = 20usize;
+                    let mut prev = to_mm(
+                        prop.x - hw * rad.cos() + prop.w * rad.cos(),
+                        prop.y - hw * rad.sin() + prop.w * rad.sin(),
+                    );
+                    for k in 1..=segs {
+                        let a = rad - (65.0_f32 * k as f32 / segs as f32).to_radians();
+                        let cur = to_mm(
+                            prop.x - hw * rad.cos() + prop.w * a.cos(),
+                            prop.y - hw * rad.sin() + prop.w * a.sin(),
+                        );
+                        if let Some((ca, cb)) = clip_segment_to_rect(
+                            prev,
+                            cur,
+                            inner_min_x,
+                            inner_min_y,
+                            inner_max_x,
+                            inner_max_y,
+                        ) {
+                            push_pdf_polyline(ops, &[ca, cb], false);
+                        }
+                        prev = cur;
+                    }
                 }
-            }
-            PropKind::Circle => {
-                ops.push(Op::SetFillColor {
-                    col: Color::Greyscale(Greyscale::new(0.94, None)),
-                });
-                let segs = 48usize;
-                let pts: Vec<(f32, f32)> = (0..segs)
-                    .map(|k| {
-                        let a = std::f32::consts::TAU * (k as f32 / segs as f32);
-                        pt(hw * a.cos(), hh * a.sin())
-                    })
-                    .collect();
-                let clipped =
-                    clip_polygon_to_rect(&pts, inner_min_x, inner_min_y, inner_max_x, inner_max_y);
-                if clipped.len() >= 3 {
-                    push_pdf_polygon(ops, &clipped, PaintMode::FillStroke);
-                }
-            }
-            PropKind::Triangle => {
-                ops.push(Op::SetFillColor {
-                    col: Color::Greyscale(Greyscale::new(0.94, None)),
-                });
-                let clipped = clip_polygon_to_rect(
-                    &[pt(0.0, -hh), pt(hw, hh), pt(-hw, hh)],
-                    inner_min_x,
-                    inner_min_y,
-                    inner_max_x,
-                    inner_max_y,
-                );
-                if clipped.len() >= 3 {
-                    push_pdf_polygon(ops, &clipped, PaintMode::FillStroke);
-                }
-            }
-            PropKind::Light => {
-                ops.push(Op::SetFillColor {
-                    col: Color::Rgb(Rgb::new(0.99, 0.90, 0.52, None)),
-                });
-                ops.push(Op::SetOutlineColor {
-                    col: Color::Rgb(Rgb::new(0.76, 0.52, 0.08, None)),
-                });
-                let r = hw.min(hh).max(0.18);
-                let pts: Vec<(f32, f32)> = (0..24)
-                    .map(|k| {
-                        let a = std::f32::consts::TAU * (k as f32 / 24.0);
-                        pt(r * a.cos(), r * a.sin())
-                    })
-                    .collect();
-                let clipped =
-                    clip_polygon_to_rect(&pts, inner_min_x, inner_min_y, inner_max_x, inner_max_y);
-                if clipped.len() >= 3 {
-                    push_pdf_polygon(ops, &clipped, PaintMode::FillStroke);
-                }
-                for ang in [-28.0_f32, 0.0, 28.0] {
-                    let ar = ang.to_radians();
-                    if let Some((ca, cb)) = clip_segment_to_rect(
-                        pt(r * ar.cos(), r * ar.sin()),
-                        pt((r + 0.35) * ar.cos(), (r + 0.35) * ar.sin()),
+                PropKind::Circle => {
+                    ops.push(Op::SetFillColor {
+                        col: Color::Greyscale(Greyscale::new(0.94, None)),
+                    });
+                    let segs = 48usize;
+                    let pts: Vec<(f32, f32)> = (0..segs)
+                        .map(|k| {
+                            let a = std::f32::consts::TAU * (k as f32 / segs as f32);
+                            pt(hw * a.cos(), hh * a.sin())
+                        })
+                        .collect();
+                    let clipped = clip_polygon_to_rect(
+                        &pts,
                         inner_min_x,
                         inner_min_y,
                         inner_max_x,
                         inner_max_y,
-                    ) {
-                        push_pdf_polyline(ops, &[ca, cb], false);
+                    );
+                    if clipped.len() >= 3 {
+                        push_pdf_polygon(ops, &clipped, PaintMode::FillStroke);
                     }
                 }
-            }
-            PropKind::Car => {
-                ops.push(Op::SetFillColor {
-                    col: Color::Greyscale(Greyscale::new(0.92, None)),
-                });
-                let clipped = clip_polygon_to_rect(
-                    &corners,
-                    inner_min_x,
-                    inner_min_y,
-                    inner_max_x,
-                    inner_max_y,
-                );
-                if clipped.len() >= 3 {
-                    push_pdf_polygon(ops, &clipped, PaintMode::FillStroke);
+                PropKind::Triangle => {
+                    ops.push(Op::SetFillColor {
+                        col: Color::Greyscale(Greyscale::new(0.94, None)),
+                    });
+                    let clipped = clip_polygon_to_rect(
+                        &[pt(0.0, -hh), pt(hw, hh), pt(-hw, hh)],
+                        inner_min_x,
+                        inner_min_y,
+                        inner_max_x,
+                        inner_max_y,
+                    );
+                    if clipped.len() >= 3 {
+                        push_pdf_polygon(ops, &clipped, PaintMode::FillStroke);
+                    }
                 }
-                ops.push(Op::SetFillColor {
-                    col: Color::Rgb(Rgb::new(0.84, 0.93, 0.99, None)),
-                });
-                let ws = clip_polygon_to_rect(
-                    &[
-                        pt(hw * 0.35, -hh * 0.76),
-                        pt(hw * 0.58, -hh * 0.66),
-                        pt(hw * 0.58, hh * 0.66),
-                        pt(hw * 0.35, hh * 0.76),
-                    ],
-                    inner_min_x,
-                    inner_min_y,
-                    inner_max_x,
-                    inner_max_y,
-                );
-                if ws.len() >= 3 {
-                    push_pdf_polygon(ops, &ws, PaintMode::FillStroke);
+                PropKind::Light => {
+                    ops.push(Op::SetFillColor {
+                        col: Color::Rgb(Rgb::new(0.99, 0.90, 0.52, None)),
+                    });
+                    ops.push(Op::SetOutlineColor {
+                        col: Color::Rgb(Rgb::new(0.76, 0.52, 0.08, None)),
+                    });
+                    let r = hw.min(hh).max(0.18);
+                    let pts: Vec<(f32, f32)> = (0..24)
+                        .map(|k| {
+                            let a = std::f32::consts::TAU * (k as f32 / 24.0);
+                            pt(r * a.cos(), r * a.sin())
+                        })
+                        .collect();
+                    let clipped = clip_polygon_to_rect(
+                        &pts,
+                        inner_min_x,
+                        inner_min_y,
+                        inner_max_x,
+                        inner_max_y,
+                    );
+                    if clipped.len() >= 3 {
+                        push_pdf_polygon(ops, &clipped, PaintMode::FillStroke);
+                    }
+                    for ang in [-28.0_f32, 0.0, 28.0] {
+                        let ar = ang.to_radians();
+                        if let Some((ca, cb)) = clip_segment_to_rect(
+                            pt(r * ar.cos(), r * ar.sin()),
+                            pt((r + 0.35) * ar.cos(), (r + 0.35) * ar.sin()),
+                            inner_min_x,
+                            inner_min_y,
+                            inner_max_x,
+                            inner_max_y,
+                        ) {
+                            push_pdf_polyline(ops, &[ca, cb], false);
+                        }
+                    }
                 }
-            }
-            PropKind::Chair => {
-                ops.push(Op::SetFillColor {
-                    col: Color::Greyscale(Greyscale::new(0.95, None)),
-                });
-                let clipped = clip_polygon_to_rect(
-                    &corners,
-                    inner_min_x,
-                    inner_min_y,
-                    inner_max_x,
-                    inner_max_y,
-                );
-                if clipped.len() >= 3 {
-                    push_pdf_polygon(ops, &clipped, PaintMode::FillStroke);
-                }
-                ops.push(Op::SetOutlineThickness { pt: Pt(1.4) });
-                if let Some((ca, cb)) = clip_segment_to_rect(
-                    pt(-hw, -hh),
-                    pt(-hw, hh),
-                    inner_min_x,
-                    inner_min_y,
-                    inner_max_x,
-                    inner_max_y,
-                ) {
-                    push_pdf_polyline(ops, &[ca, cb], false);
-                }
-            }
-            PropKind::Bed => {
-                ops.push(Op::SetFillColor {
-                    col: Color::Greyscale(Greyscale::new(0.95, None)),
-                });
-                let clipped = clip_polygon_to_rect(
-                    &corners,
-                    inner_min_x,
-                    inner_min_y,
-                    inner_max_x,
-                    inner_max_y,
-                );
-                if clipped.len() >= 3 {
-                    push_pdf_polygon(ops, &clipped, PaintMode::FillStroke);
-                }
-                for py in [-hh * 0.45, hh * 0.45] {
-                    let pil = clip_polygon_to_rect(
+                PropKind::Car => {
+                    ops.push(Op::SetFillColor {
+                        col: Color::Greyscale(Greyscale::new(0.92, None)),
+                    });
+                    let clipped = clip_polygon_to_rect(
+                        &corners,
+                        inner_min_x,
+                        inner_min_y,
+                        inner_max_x,
+                        inner_max_y,
+                    );
+                    if clipped.len() >= 3 {
+                        push_pdf_polygon(ops, &clipped, PaintMode::FillStroke);
+                    }
+                    ops.push(Op::SetFillColor {
+                        col: Color::Rgb(Rgb::new(0.84, 0.93, 0.99, None)),
+                    });
+                    let ws = clip_polygon_to_rect(
                         &[
-                            pt(-hw * 0.85, py - hh * 0.30),
-                            pt(-hw * 0.45, py - hh * 0.30),
-                            pt(-hw * 0.45, py + hh * 0.30),
-                            pt(-hw * 0.85, py + hh * 0.30),
+                            pt(hw * 0.35, -hh * 0.76),
+                            pt(hw * 0.58, -hh * 0.66),
+                            pt(hw * 0.58, hh * 0.66),
+                            pt(hw * 0.35, hh * 0.76),
                         ],
                         inner_min_x,
                         inner_min_y,
                         inner_max_x,
                         inner_max_y,
                     );
-                    if pil.len() >= 3 {
-                        push_pdf_polygon(ops, &pil, PaintMode::FillStroke);
+                    if ws.len() >= 3 {
+                        push_pdf_polygon(ops, &ws, PaintMode::FillStroke);
+                    }
+                }
+                PropKind::Chair => {
+                    ops.push(Op::SetFillColor {
+                        col: Color::Greyscale(Greyscale::new(0.95, None)),
+                    });
+                    let clipped = clip_polygon_to_rect(
+                        &corners,
+                        inner_min_x,
+                        inner_min_y,
+                        inner_max_x,
+                        inner_max_y,
+                    );
+                    if clipped.len() >= 3 {
+                        push_pdf_polygon(ops, &clipped, PaintMode::FillStroke);
+                    }
+                    ops.push(Op::SetOutlineThickness { pt: Pt(1.4) });
+                    if let Some((ca, cb)) = clip_segment_to_rect(
+                        pt(-hw, -hh),
+                        pt(-hw, hh),
+                        inner_min_x,
+                        inner_min_y,
+                        inner_max_x,
+                        inner_max_y,
+                    ) {
+                        push_pdf_polyline(ops, &[ca, cb], false);
+                    }
+                }
+                PropKind::Bed => {
+                    ops.push(Op::SetFillColor {
+                        col: Color::Greyscale(Greyscale::new(0.95, None)),
+                    });
+                    let clipped = clip_polygon_to_rect(
+                        &corners,
+                        inner_min_x,
+                        inner_min_y,
+                        inner_max_x,
+                        inner_max_y,
+                    );
+                    if clipped.len() >= 3 {
+                        push_pdf_polygon(ops, &clipped, PaintMode::FillStroke);
+                    }
+                    for py in [-hh * 0.45, hh * 0.45] {
+                        let pil = clip_polygon_to_rect(
+                            &[
+                                pt(-hw * 0.85, py - hh * 0.30),
+                                pt(-hw * 0.45, py - hh * 0.30),
+                                pt(-hw * 0.45, py + hh * 0.30),
+                                pt(-hw * 0.85, py + hh * 0.30),
+                            ],
+                            inner_min_x,
+                            inner_min_y,
+                            inner_max_x,
+                            inner_max_y,
+                        );
+                        if pil.len() >= 3 {
+                            push_pdf_polygon(ops, &pil, PaintMode::FillStroke);
+                        }
+                    }
+                }
+                PropKind::Table | PropKind::Square | PropKind::Custom => {
+                    ops.push(Op::SetFillColor {
+                        col: Color::Greyscale(Greyscale::new(0.94, None)),
+                    });
+                    let clipped = clip_polygon_to_rect(
+                        &corners,
+                        inner_min_x,
+                        inner_min_y,
+                        inner_max_x,
+                        inner_max_y,
+                    );
+                    if clipped.len() >= 3 {
+                        push_pdf_polygon(ops, &clipped, PaintMode::FillStroke);
                     }
                 }
             }
-            PropKind::Table | PropKind::Square | PropKind::Custom => {
-                ops.push(Op::SetFillColor {
-                    col: Color::Greyscale(Greyscale::new(0.94, None)),
-                });
-                let clipped = clip_polygon_to_rect(
-                    &corners,
-                    inner_min_x,
-                    inner_min_y,
-                    inner_max_x,
-                    inner_max_y,
-                );
-                if clipped.len() >= 3 {
-                    push_pdf_polygon(ops, &clipped, PaintMode::FillStroke);
+            if !prop.label.trim().is_empty() {
+                let lbl = prop.label.trim();
+                let c = to_mm(prop.x, prop.y);
+                // Skip prop center label when a camera sits right over it
+                let obscured_by_cam = prop.kind != PropKind::Wall
+                    && cam_positions_mm
+                        .iter()
+                        .any(|&(cx, cy)| (cx - c.0).hypot(cy - c.1) < 5.0);
+                if !obscured_by_cam {
+                    let pt_sz = 5.8_f32;
+                    let lw = lbl.chars().count() as f32 * CHAR_MM * (pt_sz / FONT_PT);
+                    let (label_col, label_y) = if prop.kind == PropKind::Wall {
+                        (
+                            Color::Greyscale(Greyscale::new(0.42, None)),
+                            c.1 + (prop.h * 0.5 * scale) + 1.4,
+                        )
+                    } else {
+                        (Color::Greyscale(Greyscale::new(0.48, None)), c.1 - 0.7)
+                    };
+                    ops.push(Op::SetFillColor { col: label_col });
+                    draw_summary_text(
+                        ops,
+                        regular,
+                        fallback_regular,
+                        pt_sz,
+                        (c.0 - lw * 0.5).clamp(box_x + 1.5, box_x + box_w - lw - 1.5),
+                        label_y.clamp(box_y + 1.5, box_y + box_h - 3.0),
+                        lbl,
+                    );
                 }
             }
-        }
-        if !prop.label.trim().is_empty() {
-            let lbl = prop.label.trim();
-            let c = to_mm(prop.x, prop.y);
-            // Skip prop center label when a camera sits right over it
-            let obscured_by_cam = prop.kind != PropKind::Wall
-                && cam_positions_mm
-                    .iter()
-                    .any(|&(cx, cy)| (cx - c.0).hypot(cy - c.1) < 5.0);
-            if !obscured_by_cam {
-                let pt_sz = 5.8_f32;
-                let lw = lbl.chars().count() as f32 * CHAR_MM * (pt_sz / FONT_PT);
-                let (label_col, label_y) = if prop.kind == PropKind::Wall {
-                    (
-                        Color::Greyscale(Greyscale::new(0.42, None)),
-                        c.1 + (prop.h * 0.5 * scale) + 1.4,
-                    )
-                } else {
-                    (Color::Greyscale(Greyscale::new(0.48, None)), c.1 - 0.7)
-                };
-                ops.push(Op::SetFillColor { col: label_col });
-                draw_summary_text(
-                    ops,
-                    regular,
-                    fallback_regular,
-                    pt_sz,
-                    (c.0 - lw * 0.5).clamp(box_x + 1.5, box_x + box_w - lw - 1.5),
-                    label_y.clamp(box_y + 1.5, box_y + box_h - 3.0),
-                    lbl,
-                );
-            }
-        }
         }
     }
 
@@ -3860,8 +3884,14 @@ fn draw_floor_plan_vector(
             PaintMode::FillStroke,
         );
         // Gaze nose triangle
-        let nose_tip = (ap.0 + fwd.0 * sh_thick * 1.75, ap.1 + fwd.1 * sh_thick * 1.75);
-        let nose_base = (ap.0 + fwd.0 * sh_thick * 0.68, ap.1 + fwd.1 * sh_thick * 0.68);
+        let nose_tip = (
+            ap.0 + fwd.0 * sh_thick * 1.75,
+            ap.1 + fwd.1 * sh_thick * 1.75,
+        );
+        let nose_base = (
+            ap.0 + fwd.0 * sh_thick * 0.68,
+            ap.1 + fwd.1 * sh_thick * 0.68,
+        );
         ops.push(Op::SetFillColor { col: acol.clone() });
         push_pdf_polygon(
             ops,
@@ -4031,10 +4061,7 @@ fn draw_floor_plan_vector(
         );
 
         // Crisp centered camera index number inside body
-        let num = shot_numbers
-            .get(&cam.shot_id)
-            .copied()
-            .unwrap_or(ci + 1);
+        let num = shot_numbers.get(&cam.shot_id).copied().unwrap_or(ci + 1);
         let badge = num.to_string();
         let pt_sz = if badge.len() >= 2 { 4.8_f32 } else { 5.6_f32 };
         let bw_txt = badge.chars().count() as f32 * CHAR_MM * (pt_sz / FONT_PT);
@@ -4112,7 +4139,8 @@ fn draw_floor_plan_vector(
         let mut best_score = f32::INFINITY;
         for (ci, &(cx, cy)) in candidates.iter().enumerate() {
             let x0 = (cx - pw * 0.5).clamp(box_x + margin_in, box_x + box_w - margin_in - pw);
-            let y0 = (cy - pill_h * 0.5).clamp(box_y + margin_in, box_y + box_h - margin_in - pill_h);
+            let y0 =
+                (cy - pill_h * 0.5).clamp(box_y + margin_in, box_y + box_h - margin_in - pill_h);
             let r = (x0, y0, x0 + pw, y0 + pill_h);
             let mut score = (ci as f32) * 0.25;
             // Small penalty if clamping pushed the pill far from intended candidate
@@ -4171,7 +4199,15 @@ fn draw_floor_plan_vector(
     ops.push(Op::SetFillColor {
         col: Color::Greyscale(Greyscale::new(0.988, None)),
     });
-    push_pdf_rounded_rect(ops, sx0 - 1.5, sy0 - 1.3, badge_w, 5.1, 0.8, PaintMode::Fill);
+    push_pdf_rounded_rect(
+        ops,
+        sx0 - 1.5,
+        sy0 - 1.3,
+        badge_w,
+        5.1,
+        0.8,
+        PaintMode::Fill,
+    );
     ops.push(Op::SetOutlineColor {
         col: Color::Greyscale(Greyscale::new(0.40, None)),
     });
@@ -4355,7 +4391,10 @@ fn draw_camera_legend_panel(
             draw_summary_text(ops, bold, fallback_bold, title_pt, tx, by + 1.0, &line);
         } else {
             let title_line = if code_clean.chars().count() > max_chars {
-                let mut s: String = code_clean.chars().take(max_chars.saturating_sub(1)).collect();
+                let mut s: String = code_clean
+                    .chars()
+                    .take(max_chars.saturating_sub(1))
+                    .collect();
                 s.push('…');
                 s
             } else {

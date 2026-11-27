@@ -392,15 +392,19 @@ pub fn from_fdx_bytes(bytes: &[u8]) -> Result<(Project, Metadata), FdxError> {
     let owned: String;
     let xml: &str = if bytes.starts_with(&[0xFF, 0xFE]) {
         let units: Vec<u16> = bytes[2..]
-            .chunks_exact(2)
-            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|&c| u16::from_le_bytes(c))
             .collect();
         owned = String::from_utf16_lossy(&units);
         &owned
     } else if bytes.starts_with(&[0xFE, 0xFF]) {
         let units: Vec<u16> = bytes[2..]
-            .chunks_exact(2)
-            .map(|c| u16::from_be_bytes([c[0], c[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|&c| u16::from_be_bytes(c))
             .collect();
         owned = String::from_utf16_lossy(&units);
         &owned
