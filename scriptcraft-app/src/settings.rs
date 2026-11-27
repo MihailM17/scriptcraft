@@ -60,7 +60,7 @@ const SETTINGS_INDEX: &[SettingEntry] = &[
     },
     SettingEntry {
         page: SettingsPage::General,
-        title: "About ScriptCraft",
+        title: "About Kino Scenarist",
         keywords: "version build number about release",
     },
     SettingEntry {
@@ -294,6 +294,9 @@ pub struct AppSettings {
     /// Automatically bold speaking character cues (`ElementType::Character`)
     /// without affecting character names mentioned in Action.
     pub bold_character_cues: bool,
+    /// Automatically append `(CONT'D)` on Enter when the same character speaks
+    /// again after an action line in the same scene.
+    pub auto_contd: bool,
     pub capitalize_first_word: bool,
     pub correct_double_capitals: bool,
     pub replace_three_dots: bool,
@@ -323,6 +326,7 @@ impl Default for AppSettings {
             show_scene_numbers: true,
             highlight_current_line: false,
             bold_character_cues: false,
+            auto_contd: false,
             capitalize_first_word: false,
             correct_double_capitals: false,
             replace_three_dots: false,
@@ -343,6 +347,7 @@ impl AppSettings {
             show_scene_numbers: self.show_scene_numbers,
             highlight_current_line: self.highlight_current_line,
             bold_character_cues: self.bold_character_cues,
+            auto_contd: self.auto_contd,
             capitalize_first_word: self.capitalize_first_word,
             correct_double_capitals: self.correct_double_capitals,
             replace_three_dots: self.replace_three_dots,
@@ -380,6 +385,7 @@ impl AppSettings {
                     "show_scene_numbers" => s.show_scene_numbers = v != "0",
                     "highlight_current_line" => s.highlight_current_line = v == "1",
                     "bold_character_cues" => s.bold_character_cues = v == "1",
+                    "auto_contd" => s.auto_contd = v == "1",
                     "capitalize_first_word" => s.capitalize_first_word = v == "1",
                     "correct_double_capitals" => s.correct_double_capitals = v == "1",
                     "replace_three_dots" => s.replace_three_dots = v == "1",
@@ -416,7 +422,7 @@ impl AppSettings {
         let _ = std::fs::create_dir_all(crate::app::config_dir());
         let text = format!(
             "autosave={}\nautosave_minutes={}\nbackups={}\nbackups_dir={}\ntheme={}\n\
-             script_face={}\npage_size={}\npaper_mono={}\nshow_scene_numbers={}\nhighlight_current_line={}\nbold_character_cues={}\ncapitalize_first_word={}\n\
+             script_face={}\npage_size={}\npaper_mono={}\nshow_scene_numbers={}\nhighlight_current_line={}\nbold_character_cues={}\nauto_contd={}\ncapitalize_first_word={}\n\
              correct_double_capitals={}\nreplace_three_dots={}\nsmart_quotes={}\nnavigator_preview={}\n\
              navigator_show_numbers={}\nspellcheck={}\nspell_language={}\nspell_ignore_caps={}\n",
             self.autosave as u8,
@@ -430,6 +436,7 @@ impl AppSettings {
             self.show_scene_numbers as u8,
             self.highlight_current_line as u8,
             self.bold_character_cues as u8,
+            self.auto_contd as u8,
             self.capitalize_first_word as u8,
             self.correct_double_capitals as u8,
             self.replace_three_dots as u8,
@@ -687,7 +694,7 @@ fn settings_general(
         ui.add_space(16.0);
         ui.label(
             egui::RichText::new(
-                "Asks GitHub for the latest release. ScriptCraft also checks when it opens, \
+                "Asks GitHub for the latest release. Kino Scenarist also checks when it opens, \
                  and offers a newer version in a prompt.",
             )
             .size(11.0)
@@ -699,7 +706,9 @@ fn settings_general(
     kit_section(ui, "About");
     ui.horizontal(|ui| {
         ui.add_space(16.0);
-        ui.label(egui::RichText::new(format!("ScriptCraft {}", crate::update::CURRENT)).strong());
+        ui.label(
+            egui::RichText::new(format!("Kino Scenarist {}", crate::update::CURRENT)).strong(),
+        );
     });
     ui.add_space(4.0);
     ui.horizontal_wrapped(|ui| {
@@ -943,6 +952,19 @@ fn settings_writing(ui: &mut Ui, settings: &mut AppSettings) -> (bool, bool, boo
             )
             .on_hover_text(
                 "Automatically bold character cues above dialogue in the editor and PDF, without bolding mentions in Action.",
+            )
+            .changed();
+    });
+    ui.add_space(8.0);
+    ui.horizontal(|ui| {
+        ui.add_space(16.0);
+        changed |= ui
+            .checkbox(
+                &mut settings.auto_contd,
+                "Auto-add (CONT'D) when same character speaks after action",
+            )
+            .on_hover_text(
+                "Appends (CONT'D) when pressing Enter on a character cue that continues the previous speaker after action in the same scene.",
             )
             .changed();
     });

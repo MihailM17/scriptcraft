@@ -50,9 +50,138 @@ pub fn tab_prev(t: ElementType) -> ElementType {
     }
 }
 
-/// Character cue without the `(ПРОД.)` continuation extension.
+/// Standard screenplay character cue extensions offered when typing `(` on a
+/// character cue.
+pub const CHARACTER_EXTENSIONS: &[&str] = &[
+    "(CONT'D)",
+    "(V.O.)",
+    "(O.S.)",
+    "(O.C.)",
+    "(PRE-LAP)",
+    "(FILTERED)",
+];
+
+fn strip_contd_suffix(cue: &str) -> Option<&str> {
+    let trimmed = cue.trim_end();
+    let up = trimmed.to_uppercase();
+    for suffix in [" (CONT'D)", " (CONT\u{2019}D)", " (ПРОД.)"] {
+        if up.ends_with(suffix) {
+            let cut = trimmed.len().saturating_sub(suffix.len());
+            if trimmed.is_char_boundary(cut) {
+                return Some(trimmed[..cut].trim_end());
+            }
+        }
+    }
+    None
+}
+
+/// Character cue without a trailing `(CONT'D)` or `(ПРОД.)` continuation
+/// extension.
 pub fn base_character_name(cue: &str) -> &str {
-    cue.strip_suffix(" (ПРОД.)").unwrap_or(cue)
+    strip_contd_suffix(cue).unwrap_or(cue)
+}
+
+/// Whether `cue` already carries a `(CONT'D)` / `(ПРОД.)` continuation tag.
+pub fn has_contd(cue: &str) -> bool {
+    strip_contd_suffix(cue).is_some()
+}
+
+/// Toggle ` (CONT'D)` on a character cue string: removes an existing
+/// `(CONT'D)` / `(ПРОД.)` suffix if present, otherwise appends ` (CONT'D)`.
+pub fn toggle_contd(cue: &str) -> String {
+    let trimmed = cue.trim_end();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    if let Some(base) = strip_contd_suffix(trimmed) {
+        base.to_string()
+    } else {
+        format!("{trimmed} (CONT'D)")
+    }
+}
+
+/// Find the owning `Character` block for `bi`: returns `Some(bi)` if `bi` is
+/// already a `Character` cue, or walks upward through `Dialogue` /
+/// `Parenthetical` / `Lyrics` blocks to find its speaker cue.
+pub fn owning_character_block(blocks: &[ScriptBlock], bi: usize) -> Option<usize> {
+    let b = blocks.get(bi)?;
+    if b.element_type == ElementType::Character {
+        return Some(bi);
+    }
+    if !matches!(
+        b.element_type,
+        ElementType::Dialogue | ElementType::Parenthetical | ElementType::Lyrics
+    ) {
+        return None;
+    }
+    let mut j = bi;
+    while j > 0 {
+        j -= 1;
+        match blocks.get(j)?.element_type {
+            ElementType::Character => return Some(j),
+            ElementType::Dialogue | ElementType::Parenthetical | ElementType::Lyrics => continue,
+            _ => return None,
+        }
+    }
+    None
+}
+
+/// Whether the `Character` cue at `bi` continues the same speaker's speech
+/// after an intervening non-dialogue block (such as `Action` or `Shot`) within
+/// the same scene, so standard screenplay format adds `(CONT'D)`.
+pub fn needs_same_speaker_contd(blocks: &[ScriptBlock], bi: usize) -> bool {
+    let Some(cur) = blocks.get(bi) else {
+        return false;
+    };
+    if cur.element_type != ElementType::Character || cur.dual.is_some() {
+        return false;
+    }
+    let cur_name = character_name_of(&cur.text);
+    if cur_name.is_empty() {
+        return false;
+    }
+    let mut saw_interruption = false;
+    let mut j = bi;
+    while j > 0 {
+        j -= 1;
+        let prev = &blocks[j];
+        match prev.element_type {
+            ElementType::SceneHeading => return false,
+            ElementType::Character => {
+                if prev.dual.is_some() {
+                    return false;
+                }
+                let prev_name = character_name_of(&prev.text);
+                if prev_name.is_empty() {
+                    continue;
+                }
+                return saw_interruption && same_name(prev_name, cur_name);
+            }
+            ElementType::Dialogue
+            | ElementType::Parenthetical
+            | ElementType::Lyrics
+            | ElementType::NonPrintable => {}
+            _ => {
+                if !prev.text.trim().is_empty() {
+                    saw_interruption = true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Return `(block_index, updated_text)` pairs for every `Character` cue in
+/// `blocks` that continues the previous speaker after action in the same scene
+/// and does not yet carry `(CONT'D)`.
+pub fn sync_contd_edits(blocks: &[ScriptBlock]) -> Vec<(usize, String)> {
+    let mut edits = Vec::new();
+    for (bi, b) in blocks.iter().enumerate() {
+        if needs_same_speaker_contd(blocks, bi) && !has_contd(&b.text) {
+            edits.push((bi, toggle_contd(&b.text)));
+        }
+    }
+    edits
 }
 
 /// Bare character name from a cue: everything before a parenthetical
@@ -229,6 +358,21 @@ pub fn candidates(blocks: &[ScriptBlock], element_type: ElementType, prefix: &st
     match element_type {
         ElementType::Character => {
             let up = prefix.trim().to_uppercase();
+            // Typing "(" after a character name offers standard extensions
+            // like (CONT'D), (V.O.), (O.S.), etc.
+            if let Some((head_raw, ext_tail)) = prefix.rsplit_once('(') {
+                let head = head_raw.trim_end();
+                if !head.is_empty() {
+                    let typed_ext = format!("({}", ext_tail.to_uppercase());
+                    let mut out = Vec::new();
+                    for &ext in CHARACTER_EXTENSIONS {
+                        if ext.starts_with(&typed_ext) && ext != typed_ext {
+                            out.push(format!("{head} {ext}"));
+                        }
+                    }
+                    return out;
+                }
+            }
             let mut cues = Vec::new();
             for b in blocks {
                 if b.element_type == ElementType::Character && !cues.contains(&b.text) {
@@ -837,5 +981,53 @@ mod tests {
         assert_eq!(wrap_rows_chars("xxxxxxxxxxxxxxxxxx 10-литровите", 24), 2);
         assert_eq!(wrap_rows_chars("aaa bbbbbb", 6), 2);
         assert_eq!(wrap_rows_chars("aaa b-c", 7), 1);
+    }
+
+    #[test]
+    fn contd_helpers_toggle_detect_and_strip_cleanly() {
+        use ElementType::*;
+        assert_eq!(base_character_name("IVAN (CONT'D)"), "IVAN");
+        assert_eq!(base_character_name("ИВАН (cont'd)"), "ИВАН");
+        assert_eq!(base_character_name("МАРА (ПРОД.)"), "МАРА");
+        assert!(has_contd("IVAN (CONT'D)"));
+        assert!(!has_contd("IVAN (V.O.)"));
+        assert_eq!(toggle_contd("IVAN"), "IVAN (CONT'D)");
+        assert_eq!(toggle_contd("IVAN (CONT'D)"), "IVAN");
+        assert_eq!(toggle_contd("IVAN (V.O.)"), "IVAN (V.O.) (CONT'D)");
+        assert_eq!(toggle_contd("IVAN (V.O.) (CONT'D)"), "IVAN (V.O.)");
+
+        let blocks = vec![
+            ScriptBlock::new(SceneHeading, "INT. ROOM - NIGHT".into()),
+            ScriptBlock::new(Character, "ИВАН".into()),
+            ScriptBlock::new(Dialogue, "Първа реплика.".into()),
+            ScriptBlock::new(Action, "Иван взима чашата.".into()),
+            ScriptBlock::new(Character, "ИВАН".into()),
+            ScriptBlock::new(Dialogue, "Втора реплика.".into()),
+            ScriptBlock::new(Character, "МАРА".into()),
+            ScriptBlock::new(Dialogue, "Добре.".into()),
+            ScriptBlock::new(SceneHeading, "EXT. STREET - NIGHT".into()),
+            ScriptBlock::new(Character, "МАРА".into()),
+            ScriptBlock::new(Dialogue, "Нова сцена.".into()),
+        ];
+
+        assert!(!needs_same_speaker_contd(&blocks, 1));
+        assert!(needs_same_speaker_contd(&blocks, 4));
+        assert!(!needs_same_speaker_contd(&blocks, 6));
+        assert!(!needs_same_speaker_contd(&blocks, 9));
+        assert_eq!(owning_character_block(&blocks, 5), Some(4));
+        assert_eq!(owning_character_block(&blocks, 4), Some(4));
+        assert_eq!(owning_character_block(&blocks, 3), None);
+        assert_eq!(
+            sync_contd_edits(&blocks),
+            vec![(4, "ИВАН (CONT'D)".to_string())]
+        );
+
+        let exts = candidates(&blocks, Character, "ИВАН (");
+        assert!(exts.contains(&"ИВАН (CONT'D)".to_string()));
+        assert!(exts.contains(&"ИВАН (V.O.)".to_string()));
+        assert_eq!(
+            candidates(&blocks, Character, "ИВАН (C"),
+            vec!["ИВАН (CONT'D)".to_string()]
+        );
     }
 }

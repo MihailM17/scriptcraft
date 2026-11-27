@@ -38,6 +38,7 @@ pub(crate) fn italic_mono() -> egui::FontFamily {
 
 pub fn run() -> eframe::Result<()> {
     crate::panic_log::install();
+    crate::quit_guard::install_early();
     let viewport_builder = egui::ViewportBuilder::default()
         .with_inner_size([1360.0, 880.0])
         .with_maximized(true);
@@ -73,10 +74,21 @@ pub fn run() -> eframe::Result<()> {
             .with_icon(app_icon)
     };
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
     let viewport_builder = {
-        // Windows taskbars and Linux launchers expect artwork cropped to a
-        // thin margin (`ScriptCraft-app.png`) so it fills the tile cleanly.
+        // Windows: hide the heavy OS title bar (icon + window title) and merge
+        // native-style minimize/maximize/close controls directly into the top
+        // toolbar, matching macOS's single-bar studio chrome.
+        let app_icon =
+            eframe::icon_data::from_png_bytes(include_bytes!("../assets/ScriptCraft-app.png"))
+                .unwrap_or_default();
+        viewport_builder
+            .with_decorations(false)
+            .with_icon(app_icon)
+    };
+
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+    let viewport_builder = {
         let app_icon =
             eframe::icon_data::from_png_bytes(include_bytes!("../assets/ScriptCraft-app.png"))
                 .unwrap_or_default();
@@ -87,7 +99,7 @@ pub fn run() -> eframe::Result<()> {
         ..Default::default()
     };
     eframe::run_native(
-        "ScriptCraft",
+        "Kino Scenarist",
         options,
         Box::new(|cc| {
             apply_theme(&cc.egui_ctx);
@@ -98,6 +110,11 @@ pub fn run() -> eframe::Result<()> {
                 let path = std::path::Path::new(&arg);
                 if path.is_file() {
                     app.open_any_path(path);
+                }
+            }
+            for path in crate::quit_guard::take_open_files() {
+                if path.is_file() {
+                    app.open_any_path(&path);
                 }
             }
             app.start_update_check_on_open();
@@ -112,6 +129,10 @@ pub fn run() -> eframe::Result<()> {
                 ) {
                     app.menu = Some(menu);
                 }
+            }
+            #[cfg(target_os = "windows")]
+            {
+                app.custom_titlebar = true;
             }
             Ok(Box::new(app))
         }),
@@ -134,6 +155,8 @@ fn paint_windows_titlebar(frame: &eframe::Frame, theme: crate::theme::Theme) {
     /// `DWMWINDOWATTRIBUTE` values; kept as numbers so older SDK bindings
     /// without the constants still compile.
     const USE_IMMERSIVE_DARK_MODE: u32 = 20;
+    const WINDOW_CORNER_PREFERENCE: u32 = 33;
+    const DWMWCP_ROUND: u32 = 2;
     const BORDER_COLOR: u32 = 34;
     const CAPTION_COLOR: u32 = 35;
     const TEXT_COLOR: u32 = 36;
@@ -154,6 +177,7 @@ fn paint_windows_titlebar(frame: &eframe::Frame, theme: crate::theme::Theme) {
     let dark = u32::from(!theme.is_light());
     for (attribute, value) in [
         (USE_IMMERSIVE_DARK_MODE, dark),
+        (WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND),
         (CAPTION_COLOR, colorref(palette.window)),
         (TEXT_COLOR, colorref(palette.text)),
         (BORDER_COLOR, colorref(palette.stroke)),
@@ -169,6 +193,131 @@ fn paint_windows_titlebar(frame: &eframe::Frame, theme: crate::theme::Theme) {
             )
         };
     }
+}
+
+/// Edge and corner resize handling for Windows frameless mode (`with_decorations(false)`),
+/// delegating smooth native resizing to Win32 via `ViewportCommand::BeginResize`.
+#[cfg(target_os = "windows")]
+fn handle_windows_frameless_resize(ctx: &egui::Context) {
+    use egui::{CursorIcon, ResizeDirection, ViewportCommand};
+    let (maximized, fullscreen, rect, hover, pressed) = ctx.input(|i| {
+        (
+            i.viewport().maximized.unwrap_or(false),
+            i.viewport().fullscreen.unwrap_or(false),
+            i.screen_rect(),
+            i.pointer.hover_pos(),
+            i.pointer.primary_pressed(),
+        )
+    });
+    if maximized || fullscreen {
+        return;
+    }
+    let Some(pos) = hover else {
+        return;
+    };
+    let edge = 6.0_f32;
+    let left = pos.x <= rect.left() + edge;
+    let right = pos.x >= rect.right() - edge;
+    let top = pos.y <= rect.top() + edge;
+    let bottom = pos.y >= rect.bottom() - edge;
+    let dir = match (left, right, top, bottom) {
+        (true, _, true, _) => Some((ResizeDirection::NorthWest, CursorIcon::ResizeNwSe)),
+        (_, true, true, _) => Some((ResizeDirection::NorthEast, CursorIcon::ResizeNeSw)),
+        (true, _, _, true) => Some((ResizeDirection::SouthWest, CursorIcon::ResizeNeSw)),
+        (_, true, _, true) => Some((ResizeDirection::SouthEast, CursorIcon::ResizeNwSe)),
+        (true, _, _, _) => Some((ResizeDirection::West, CursorIcon::ResizeHorizontal)),
+        (_, true, _, _) => Some((ResizeDirection::East, CursorIcon::ResizeHorizontal)),
+        (_, _, true, _) => Some((ResizeDirection::North, CursorIcon::ResizeVertical)),
+        (_, _, _, true) => Some((ResizeDirection::South, CursorIcon::ResizeVertical)),
+        _ => None,
+    };
+    if let Some((resize_dir, cursor)) = dir {
+        ctx.set_cursor_icon(cursor);
+        if pressed {
+            ctx.send_viewport_cmd(ViewportCommand::BeginResize(resize_dir));
+        }
+    }
+}
+
+/// Paint crisp Windows 11-style Minimize / Maximize-Restore / Close caption
+/// buttons inside a right-to-left toolbar row. Returns `true` when Close is
+/// clicked so the caller can route it through the unsaved-changes guard.
+fn draw_windows_caption_buttons(ui: &mut egui::Ui) -> bool {
+    let c = kit();
+    let maximized = ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
+    let btn_size = egui::vec2(36.0, 26.0);
+    let mut close_clicked = false;
+
+    // 1. Close (far right, Windows red hover)
+    let (close_rect, close_resp) = ui.allocate_exact_size(btn_size, egui::Sense::click());
+    let close_hot = close_resp.hovered();
+    if close_hot {
+        ui.painter()
+            .rect_filled(close_rect, 4.0, egui::Color32::from_rgb(196, 43, 28));
+    }
+    let close_fg = if close_hot {
+        egui::Color32::WHITE
+    } else {
+        c.text
+    };
+    let cc = close_rect.center();
+    let r = 4.2_f32;
+    ui.painter().line_segment(
+        [egui::pos2(cc.x - r, cc.y - r), egui::pos2(cc.x + r, cc.y + r)],
+        egui::Stroke::new(1.15_f32, close_fg),
+    );
+    ui.painter().line_segment(
+        [egui::pos2(cc.x - r, cc.y + r), egui::pos2(cc.x + r, cc.y - r)],
+        egui::Stroke::new(1.15_f32, close_fg),
+    );
+    if close_resp.on_hover_text("Close").clicked() {
+        close_clicked = true;
+    }
+
+    // 2. Maximize / Restore
+    let (max_rect, max_resp) = ui.allocate_exact_size(btn_size, egui::Sense::click());
+    if max_resp.hovered() {
+        ui.painter().rect_filled(max_rect, 4.0, c.button_hover);
+    }
+    let mc = max_rect.center();
+    let stroke = egui::Stroke::new(1.1_f32, c.text);
+    if maximized {
+        // Overlapping restore squares
+        let front = egui::Rect::from_center_size(egui::pos2(mc.x - 1.0, mc.y + 1.0), egui::vec2(7.0, 7.0));
+        ui.painter().rect_stroke(front, 0.5, stroke, egui::StrokeKind::Inside);
+        let back_top = egui::pos2(mc.x - 2.0, mc.y - 4.5);
+        let back_tr = egui::pos2(mc.x + 4.5, mc.y - 4.5);
+        let back_br = egui::pos2(mc.x + 4.5, mc.y + 2.0);
+        ui.painter().line_segment([back_top, back_tr], stroke);
+        ui.painter().line_segment([back_tr, back_br], stroke);
+    } else {
+        let sq = egui::Rect::from_center_size(mc, egui::vec2(8.5, 8.5));
+        ui.painter().rect_stroke(sq, 0.5, stroke, egui::StrokeKind::Inside);
+    }
+    if max_resp
+        .on_hover_text(if maximized { "Restore" } else { "Maximize" })
+        .clicked()
+    {
+        ui.ctx()
+            .send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
+    }
+
+    // 3. Minimize
+    let (min_rect, min_resp) = ui.allocate_exact_size(btn_size, egui::Sense::click());
+    if min_resp.hovered() {
+        ui.painter().rect_filled(min_rect, 4.0, c.button_hover);
+    }
+    let nc = min_rect.center();
+    ui.painter().line_segment(
+        [egui::pos2(nc.x - 4.5, nc.y), egui::pos2(nc.x + 4.5, nc.y)],
+        stroke,
+    );
+    if min_resp.on_hover_text("Minimize").clicked() {
+        ui.ctx()
+            .send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+    }
+
+    close_clicked
 }
 
 pub fn install_fonts(ctx: &egui::Context) {
@@ -1002,7 +1151,7 @@ impl ScriptCraftApp {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
             PendingAction::New => self.do_new(),
-            PendingAction::Open(path) => self.open_path(&path),
+            PendingAction::Open(path) => self.open_any_path(std::path::Path::new(&path)),
             PendingAction::Restore { index, dst } => {
                 self.finish_restore_revision(index, &dst);
             }
@@ -1159,7 +1308,7 @@ impl ScriptCraftApp {
         if save {
             let user = std::env::var("USER")
                 .or_else(|_| std::env::var("USERNAME"))
-                .unwrap_or_else(|_| "ScriptCraft".to_string());
+                .unwrap_or_else(|_| "Kino Scenarist".to_string());
             let version = kitsp::VersionInfo::new(
                 self.version_name.trim(),
                 self.version_description.trim(),
@@ -1200,20 +1349,20 @@ impl ScriptCraftApp {
             ui.label(egui::RichText::new("Update available").size(17.0).strong());
             ui.add_space(6.0);
             ui.label(format!(
-                "ScriptCraft {} is available. You're on {}.",
+                "Kino Scenarist {} is available. You're on {}.",
                 release.version,
                 crate::update::CURRENT
             ));
             ui.add_space(4.0);
             let note = match &install {
                 Install::Idle => {
-                    "Installing downloads the build for this computer, verifies the published SHA-256, then restarts ScriptCraft. Your projects and settings are untouched.".to_string()
+                    "Installing downloads the build for this computer, verifies the published SHA-256, then restarts Kino Scenarist. Your projects and settings are untouched.".to_string()
                 }
                 Install::Downloading => {
-                    "Downloading and verifying the update… ScriptCraft will restart when it is ready."
+                    "Downloading and verifying the update… Kino Scenarist will restart when it is ready."
                         .to_string()
                 }
-                Install::Ready => "The update is verified. Restarting ScriptCraft…".to_string(),
+                Install::Ready => "The update is verified. Restarting Kino Scenarist…".to_string(),
                 Install::Failed(why) => {
                     format!("The update did not install: {why}")
                 }
@@ -2913,24 +3062,24 @@ impl ScriptCraftApp {
                     self.open_path(s);
                 }
             }
-            "fdx" => match std::fs::read_to_string(path) {
-                Ok(text) => {
-                    if let Err(e) = self.import_fdx_str(&text) {
-                        self.status = format!("FDX import failed: {e}");
-                    } else {
+            "fdx" => match std::fs::read(path) {
+                Ok(bytes) => match scriptcraft_core::fdx::from_fdx_bytes(&bytes) {
+                    Ok((p, meta)) => {
+                        self.adopt_imported(p, meta, &path.to_string_lossy());
                         self.side_tab = SideTab::Script;
                     }
-                }
+                    Err(e) => self.status = format!("FDX import failed: {e}"),
+                },
                 Err(e) => self.status = format!("Could not read FDX file: {e}"),
             },
             "fadein" => match std::fs::read(path) {
-                Ok(bytes) => {
-                    if let Err(e) = self.import_fadein_bytes(&bytes) {
-                        self.status = format!("Fade In import failed: {e}");
-                    } else {
+                Ok(bytes) => match scriptcraft_core::fadein::from_fadein_bytes(&bytes) {
+                    Ok((p, meta)) => {
+                        self.adopt_imported(p, meta, &path.to_string_lossy());
                         self.side_tab = SideTab::Script;
                     }
-                }
+                    Err(e) => self.status = format!("Fade In import failed: {e}"),
+                },
                 Err(e) => self.status = format!("Could not read Fade In file: {e}"),
             },
             "fountain" => match std::fs::read_to_string(path) {
@@ -2946,6 +3095,7 @@ impl ScriptCraftApp {
                         ..Default::default()
                     };
                     self.adopt_imported(p, meta, &path.to_string_lossy());
+                    self.side_tab = SideTab::Script;
                 }
                 Err(e) => self.status = format!("Could not read Fountain file: {e}"),
             },
@@ -3259,11 +3409,16 @@ impl ScriptCraftApp {
         self.recovery.retain(|(p, _)| p != &path);
     }
 
-    /// Pick an existing .kitsp and open it (menu + Start page), asking to
-    /// save the current project first when it has unsaved changes.
+    /// Pick an existing screenplay (`.kitsp`, `.fdx`, `.fadein`, or
+    /// `.fountain`) and open it (menu + Start page), asking to save the
+    /// current project first when it has unsaved changes.
     fn open_dialog(&mut self, ctx: &egui::Context) {
         if let Some(src) = rfd::FileDialog::new()
+            .add_filter("Screenplays", &["kitsp", "fdx", "fadein", "fountain"])
             .add_filter("KITScenarist", &["kitsp"])
+            .add_filter("Final Draft", &["fdx"])
+            .add_filter("Fade In", &["fadein"])
+            .add_filter("Fountain", &["fountain", "txt"])
             .pick_file()
         {
             self.request_pending(PendingAction::Open(src.to_string_lossy().into_owned()), ctx);
@@ -3501,15 +3656,18 @@ impl ScriptCraftApp {
         else {
             return;
         };
-        let text = match std::fs::read_to_string(&src) {
-            Ok(t) => t,
+        let bytes = match std::fs::read(&src) {
+            Ok(b) => b,
             Err(e) => {
                 self.status = format!("Import failed: {e}");
                 return;
             }
         };
-        match scriptcraft_core::fdx::from_fdx(&text) {
-            Ok((p, meta)) => self.adopt_imported(p, meta, &src.to_string_lossy()),
+        match scriptcraft_core::fdx::from_fdx_bytes(&bytes) {
+            Ok((p, meta)) => {
+                self.adopt_imported(p, meta, &src.to_string_lossy());
+                self.side_tab = SideTab::Script;
+            }
             Err(e) => self.status = format!("Import failed: {e}"),
         }
     }
@@ -4068,6 +4226,97 @@ impl ScriptCraftApp {
         };
     }
 
+    /// Return `(char_block_idx, has_contd, suggested_contd)` for the block
+    /// holding the caret (works from a `Character` cue or its `Dialogue` /
+    /// `Parenthetical` / `Lyrics` blocks).
+    fn contd_target(&self) -> Option<(usize, bool, bool)> {
+        let p = self.project.as_ref()?;
+        let bi = self
+            .editor2
+            .selection
+            .map(|s| s.focus.bi)
+            .or(self.selected_block)?;
+        let char_bi = scriptcraft_core::editing::owning_character_block(&p.blocks, bi)?;
+        let b = p.blocks.get(char_bi)?;
+        if b.text.trim().is_empty() {
+            return None;
+        }
+        let has = scriptcraft_core::editing::has_contd(&b.text);
+        let suggested = scriptcraft_core::editing::needs_same_speaker_contd(&p.blocks, char_bi);
+        Some((char_bi, has, suggested))
+    }
+
+    /// Toggle `(CONT'D)` on the active character cue (undoable with Cmd/Ctrl+Z).
+    fn toggle_contd_on_selection(&mut self) {
+        let Some((char_bi, had_contd, _)) = self.contd_target() else {
+            self.status = "Place the cursor on a character cue or dialogue to toggle (CONT'D)."
+                .to_string();
+            return;
+        };
+        let Some(p) = self.project.as_ref() else {
+            return;
+        };
+        let new_text = scriptcraft_core::editing::toggle_contd(&p.blocks[char_bi].text);
+        if new_text == p.blocks[char_bi].text {
+            return;
+        }
+        let next_sel = self.editor2.selection.map(|sel| {
+            if sel.focus.bi == char_bi && sel.anchor == sel.focus {
+                let end_ch = new_text.chars().count();
+                let pos = edit::Pos {
+                    bi: char_bi,
+                    para: 0,
+                    ch: sel.focus.ch.min(end_ch),
+                };
+                crate::script_view::Selection {
+                    anchor: pos,
+                    focus: pos,
+                }
+            } else {
+                sel
+            }
+        });
+        self.apply_editor2_output(crate::script_view::ScriptViewOutput {
+            commands: vec![edit::EditCommand::SetText {
+                bi: char_bi,
+                text: new_text,
+            }],
+            ..Default::default()
+        });
+        self.editor2.selection = next_sel;
+        self.status = if had_contd {
+            "Removed (CONT'D) from character cue.".to_string()
+        } else {
+            "Added (CONT'D) to character cue.".to_string()
+        };
+    }
+
+    /// Scan the script and add `(CONT'D)` to every character cue that continues
+    /// the previous speaker after action in the same scene (single undo step).
+    fn sync_contd_across_script(&mut self) {
+        let Some(p) = self.project.as_ref() else {
+            return;
+        };
+        let updates = scriptcraft_core::editing::sync_contd_edits(&p.blocks);
+        if updates.is_empty() {
+            self.status = "All continued speeches already have (CONT'D).".to_string();
+            return;
+        }
+        let count = updates.len();
+        let commands: Vec<edit::EditCommand> = updates
+            .into_iter()
+            .map(|(bi, text)| edit::EditCommand::SetText { bi, text })
+            .collect();
+        self.apply_editor2_output(crate::script_view::ScriptViewOutput {
+            commands,
+            ..Default::default()
+        });
+        self.status = format!(
+            "Added (CONT'D) to {count} character {}.",
+            if count == 1 { "cue" } else { "cues" }
+        );
+    }
+
     /// Set the element type of every selected block (Format bar, toolbar
     /// combo and Cmd/Ctrl+digit shortcuts).
     fn set_selected_type(&mut self, t: ElementType) {
@@ -4194,7 +4443,7 @@ impl ScriptCraftApp {
             String::new()
         } else {
             format!(
-                " {n} omitted scene{} stored in ScriptCraft metadata; KIT will show their body.",
+                " {n} omitted scene{} stored in Kino Scenarist metadata; KIT will show their body.",
                 if n == 1 { "" } else { "s" }
             )
         }
@@ -4213,7 +4462,7 @@ impl ScriptCraftApp {
             String::new()
         } else {
             format!(
-                " {n} dual-dialogue pair{} stored in ScriptCraft metadata; KIT will show them as ordinary dialogue.",
+                " {n} dual-dialogue pair{} stored in Kino Scenarist metadata; KIT will show them as ordinary dialogue.",
                 if n == 1 { "" } else { "s" }
             )
         }
@@ -5576,6 +5825,9 @@ impl eframe::App for ScriptCraftApp {
                 paint_windows_titlebar(frame, current);
                 self.titlebar_theme = Some(current);
             }
+            if self.custom_titlebar {
+                handle_windows_frameless_resize(ctx);
+            }
         }
         // Script face: reinstalling fonts is only needed when the choice
         // changes, but it must also run on the first frame so a project is
@@ -5603,6 +5855,24 @@ impl eframe::App for ScriptCraftApp {
         // `terminate:`; route them into the same prompt.
         if crate::quit_guard::take_request() {
             self.request_quit(ctx);
+        }
+        // Finder double-click / "Open With ▸ ScriptCraft" (macOS) and window
+        // drag-and-drop open `.kitsp`, `.fdx`, `.fadein`, or `.fountain`.
+        if let Some(path) = crate::quit_guard::take_open_files()
+            .into_iter()
+            .find(|p| p.is_file())
+        {
+            self.request_pending(PendingAction::Open(path.to_string_lossy().into_owned()), ctx);
+        }
+        let dropped_path = ctx.input(|i| {
+            i.raw
+                .dropped_files
+                .iter()
+                .filter_map(|f| f.path.clone())
+                .find(|p| p.is_file())
+        });
+        if let Some(path) = dropped_path {
+            self.request_pending(PendingAction::Open(path.to_string_lossy().into_owned()), ctx);
         }
         // Native macOS menu bar events (no-ops in tests).
         self.poll_native_menu(ctx);
@@ -5677,6 +5947,18 @@ impl eframe::App for ScriptCraftApp {
                 {
                     self.toggle_dual_dialogue();
                 }
+                if self.side_tab == SideTab::Script
+                    && self.pending_save.is_none()
+                    && !self.show_find
+                    && ctx.input_mut(|i| {
+                        i.consume_key(
+                            egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+                            egui::Key::C,
+                        )
+                    })
+                {
+                    self.toggle_contd_on_selection();
+                }
                 // FastFormat: Cmd/Ctrl+1…0 retypes the selected blocks.
                 if self.side_tab == SideTab::Script
                     && self.pending_save.is_none()
@@ -5694,11 +5976,11 @@ impl eframe::App for ScriptCraftApp {
         }
         // KIT-style OS window title with dirty dot (the toolbar shows stats).
         let want_title = if self.title.is_empty() {
-            "ScriptCraft".to_string()
+            "Kino Scenarist".to_string()
         } else if self.dirty {
-            format!("{} — ScriptCraft •", self.title)
+            format!("{} — Kino Scenarist •", self.title)
         } else {
-            format!("{} — ScriptCraft", self.title)
+            format!("{} — Kino Scenarist", self.title)
         };
         if want_title != self.last_window_title {
             self.last_window_title = want_title.clone();
@@ -5820,25 +6102,28 @@ impl ScriptCraftApp {
     /// undo/redo (painted icons — no glyph fallbacks), element menu.
     /// Status + duration live in the bottom status bar.
     fn toolbar(&mut self, ctx: &egui::Context) {
-        // macOS production window: the toolbar is painted behind the
-        // transparent native titlebar, so it doubles as window chrome (the
-        // traffic lights float top-left and the strip above the row drags
-        // the window). Fullscreen hides the titlebar, so drop the inset.
+        // Integrated titlebar mode (macOS transparent titlebar & Windows
+        // frameless window): the single top toolbar doubles as window chrome
+        // (drag to move, double-click to maximize; traffic lights on the left
+        // on macOS, caption buttons on the right on Windows).
         let custom =
             self.custom_titlebar && !ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
+        let mac_custom = custom && cfg!(target_os = "macos");
+        let win_custom = custom && cfg!(target_os = "windows");
+        let mut win_close_clicked = false;
         egui::TopBottomPanel::top("toolbar")
             .frame(
                 egui::Frame::new()
                     .fill(kit().window)
                     .inner_margin(egui::Margin {
                         left: 12,
-                        right: 12,
-                        top: if custom { 2 } else { 7 },
+                        right: if win_custom { 4 } else { 12 },
+                        top: if mac_custom { 2 } else if win_custom { 4 } else { 7 },
                         bottom: if custom { 4 } else { 7 },
                     }),
             )
             .show(ctx, |ui| {
-                if custom {
+                if mac_custom {
                     let (_, strip) = ui.allocate_exact_size(
                         egui::vec2(ui.available_width(), 6.0),
                         egui::Sense::click_and_drag(),
@@ -5852,8 +6137,9 @@ impl ScriptCraftApp {
                             .send_viewport_cmd(egui::ViewportCommand::Maximized(!max));
                     }
                 }
+                let row_rect = ui.available_rect_before_wrap();
                 ui.horizontal(|ui| {
-                    if custom {
+                    if mac_custom {
                         // Clear the native traffic lights (macOS owns them).
                         ui.add_space(62.0);
                     }
@@ -6041,8 +6327,14 @@ impl ScriptCraftApp {
                                 self.toggle_inline_style(style);
                             }
                         }
-                        // Page zoom cluster (script view only; pinch works too).
+                        // Page zoom cluster + Windows caption buttons (right-aligned).
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if win_custom {
+                                if draw_windows_caption_buttons(ui) {
+                                    win_close_clicked = true;
+                                }
+                                toolbar_sep(ui);
+                            }
                             let mut z = self.zoom;
                             let mut free = false;
                             if toolbar_icon_button(
@@ -6142,28 +6434,62 @@ impl ScriptCraftApp {
                                     .color(kit().disabled_text),
                             );
                         }
-                        if self.side_tab == SideTab::Cards && self.project.is_some() {
+                        if (self.side_tab == SideTab::Cards && self.project.is_some())
+                            || win_custom
+                        {
                             let n_scenes =
                                 self.project.as_ref().map(|p| p.scenes().len()).unwrap_or(0);
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
-                                    if toolbar_icon_button(ui, true, "Add scene", draw_plus)
-                                        .clicked()
-                                    {
-                                        self.insert_scene_below();
+                                    if win_custom {
+                                        if draw_windows_caption_buttons(ui) {
+                                            win_close_clicked = true;
+                                        }
+                                        if self.side_tab == SideTab::Cards
+                                            && self.project.is_some()
+                                        {
+                                            toolbar_sep(ui);
+                                        }
                                     }
-                                    ui.label(
-                                        egui::RichText::new(format!("{n_scenes} scenes"))
-                                            .size(12.0)
-                                            .color(kit().disabled_text),
-                                    );
+                                    if self.side_tab == SideTab::Cards && self.project.is_some() {
+                                        if toolbar_icon_button(ui, true, "Add scene", draw_plus)
+                                            .clicked()
+                                        {
+                                            self.insert_scene_below();
+                                        }
+                                        ui.label(
+                                            egui::RichText::new(format!("{n_scenes} scenes"))
+                                                .size(12.0)
+                                                .color(kit().disabled_text),
+                                        );
+                                    }
                                 },
                             );
                         }
                     }
                 });
+                // On Windows frameless mode, dragging or double-clicking any
+                // empty background spot of the toolbar moves / maximizes the window.
+                if win_custom {
+                    let bg_resp = ui.interact(
+                        row_rect,
+                        ui.id().with("win_titlebar_drag"),
+                        egui::Sense::click_and_drag(),
+                    );
+                    if bg_resp.drag_started() {
+                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
+                    }
+                    if bg_resp.double_clicked() {
+                        let max = ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
+                        ui.ctx()
+                            .send_viewport_cmd(egui::ViewportCommand::Maximized(!max));
+                    }
+                }
             });
+        if win_close_clicked {
+            self.request_quit(ctx);
+        }
     }
 
     /// Bottom status bar (KIT): plain status text left, duration right.
@@ -6381,10 +6707,10 @@ impl ScriptCraftApp {
         egui::Popup::menu(&help).show(|ui| {
             ui.set_min_width(230.0);
             ui.spacing_mut().item_spacing.y = 2.0;
-            if menu_item(ui, "ScriptCraft Help", Some("F1"), true) {
+            if menu_item(ui, "Kino Scenarist Help", Some("F1"), true) {
                 cmd = Some(MenuCommand::Help);
             }
-            if menu_item(ui, "About ScriptCraft", None, true) {
+            if menu_item(ui, "About Kino Scenarist", None, true) {
                 cmd = Some(MenuCommand::About);
             }
             ui.separator();
@@ -6609,7 +6935,7 @@ impl ScriptCraftApp {
             if menu_item(ui, "Help", None, true) {
                 action = Some(M::Help);
             }
-            if menu_item(ui, "About ScriptCraft", None, true) {
+            if menu_item(ui, "About Kino Scenarist", None, true) {
                 action = Some(M::About);
             }
         }
@@ -8082,6 +8408,81 @@ impl ScriptCraftApp {
                     }
                 }
                 ui.add_space(10.0);
+                let (rule0, _) = ui.allocate_exact_size(
+                    egui::vec2(ui.available_width(), 1.0),
+                    egui::Sense::hover(),
+                );
+                ui.painter().rect_filled(rule0, 0.0, kit().sep);
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    ui.add_space(6.0);
+                    overline(ui, "Dialogue");
+                });
+                ui.add_space(6.0);
+                let contd_info = self.contd_target();
+                let contd_active = contd_info.is_some_and(|(_, has, _)| has);
+                let contd_suggested = contd_info.is_some_and(|(_, has, sug)| !has && sug);
+                let contd_label = if contd_suggested {
+                    "(CONT'D) *"
+                } else {
+                    "(CONT'D)"
+                };
+                let contd_tip = format!(
+                    "Toggle (CONT'D) on the active character cue ({})",
+                    shift_shortcut("C")
+                );
+                let mut toggle_contd_clicked = false;
+                ui.add_enabled_ui(contd_info.is_some(), |ui| {
+                    let btn = egui::Button::new(
+                        egui::RichText::new(contd_label).size(12.5).color(if contd_active {
+                            kit().accent_text
+                        } else {
+                            kit().text
+                        }),
+                    )
+                    .fill(if contd_active {
+                        kit().accent_soft
+                    } else {
+                        kit().button
+                    })
+                    .stroke(egui::Stroke::new(
+                        1.0_f32,
+                        if contd_active {
+                            kit().accent
+                        } else {
+                            kit().stroke
+                        },
+                    ))
+                    .corner_radius(egui::CornerRadius::same(5))
+                    .min_size(egui::vec2(ui.available_width(), 26.0));
+                    if ui.add(btn).on_hover_text(contd_tip).clicked() {
+                        toggle_contd_clicked = true;
+                    }
+                });
+                if toggle_contd_clicked {
+                    self.toggle_contd_on_selection();
+                }
+                ui.add_space(4.0);
+                let sync_btn = egui::Button::new(
+                    egui::RichText::new("Auto (CONT'D) All")
+                        .size(11.5)
+                        .color(kit().disabled_text),
+                )
+                .fill(kit().base)
+                .stroke(egui::Stroke::new(1.0_f32, kit().stroke))
+                .corner_radius(egui::CornerRadius::same(5))
+                .min_size(egui::vec2(ui.available_width(), 24.0));
+                if ui
+                    .add(sync_btn)
+                    .on_hover_text(
+                        "Add (CONT'D) to every same-speaker cue after action in this script (undoable)",
+                    )
+                    .clicked()
+                {
+                    self.sync_contd_across_script();
+                }
+
+                ui.add_space(10.0);
                 let (rule, _) = ui.allocate_exact_size(
                     egui::vec2(ui.available_width(), 1.0),
                     egui::Sense::hover(),
@@ -9033,7 +9434,7 @@ impl ScriptCraftApp {
                                     );
                                     ui.add_space(4.0);
                                     ui.label(
-                                        egui::RichText::new("ScriptCraft")
+                                        egui::RichText::new("Kino Scenarist")
                                             .size(28.0)
                                             .strong()
                                             .color(c.heading_text),
@@ -9075,7 +9476,7 @@ impl ScriptCraftApp {
                                         .show(ui, |ui| {
                                             ui.set_width(ui.available_width());
                                             ui.label(
-                                                egui::RichText::new("New to ScriptCraft?")
+                                                egui::RichText::new("New to Kino Scenarist?")
                                                     .size(13.5)
                                                     .strong()
                                                     .color(c.heading_text),
@@ -9258,7 +9659,7 @@ impl ScriptCraftApp {
                 if self.project.is_none() {
                     ui.centered_and_justified(|ui| {
                         ui.vertical_centered(|ui| {
-                            ui.heading("ScriptCraft");
+                            ui.heading("Kino Scenarist");
                             ui.label("A 100% Rust screenwriting studio (egui + eframe).");
                             ui.label(
                                 "Open a .kitsp via the File menu, or create a new script with File \u{25b8} New\u{2026}",

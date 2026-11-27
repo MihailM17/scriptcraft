@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build a macOS .app and DMG for ScriptCraft.
+# Build a macOS .app and DMG for Kino Scenarist.
 #
 # Ad-hoc signing works without secrets and is fine for local testing:
 #   packaging/macos/bundle.sh
@@ -23,16 +23,16 @@ case "$ARCH" in
   *) echo "unsupported architecture: $ARCH" >&2; exit 1 ;;
 esac
 
-STAGE="$ROOT/dist/ScriptCraft-$VERSION-$LABEL"
-APP="$STAGE/ScriptCraft.app"
-DMG="$ROOT/dist/ScriptCraft-$VERSION-$LABEL.dmg"
+STAGE="$ROOT/dist/KinoScenarist-$VERSION-$LABEL"
+APP="$STAGE/Kino Scenarist.app"
+DMG="$ROOT/dist/KinoScenarist-$VERSION-$LABEL.dmg"
 
-echo "Building ScriptCraft $VERSION ($LABEL)"
+echo "Building Kino Scenarist $VERSION ($LABEL)"
 cargo build --release --manifest-path "$ROOT/Cargo.toml" -p scriptcraft-app
 
 rm -rf "$STAGE" "$DMG"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$ROOT/target/release/scriptcraft-app" "$APP/Contents/MacOS/ScriptCraft"
+cp "$ROOT/target/release/scriptcraft-app" "$APP/Contents/MacOS/KinoScenarist"
 cp "$ROOT/scriptcraft-app/assets/ScriptCraft.icns" "$APP/Contents/Resources/"
 # Spellcheck dictionaries stay data files (their licences differ from the
 # app's); `spell::dictionary_search_paths` finds them in Contents/Resources.
@@ -53,7 +53,7 @@ else
   codesign --verify --deep --strict --verbose=2 "$APP"
 fi
 
-hdiutil create -volname "ScriptCraft $VERSION" -srcfolder "$STAGE" \
+hdiutil create -volname "Kino Scenarist $VERSION" -srcfolder "$STAGE" \
   -ov -format UDZO "$DMG"
 shasum -a 256 "$DMG" | tee "$DMG.sha256"
 

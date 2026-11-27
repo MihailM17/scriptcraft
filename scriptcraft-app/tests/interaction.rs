@@ -308,7 +308,7 @@ fn inline_menu_bar_has_every_native_menu_and_opens_help() {
     );
     h.get_by_label("Help").click();
     h.run();
-    h.get_by_label("ScriptCraft Help").click();
+    h.get_by_label("Kino Scenarist Help").click();
     h.run();
     h.run();
     assert!(
@@ -669,7 +669,7 @@ fn menu_popup_opens_help_and_closes() {
     } else {
         h.get_by_label("Help").click();
         h.run();
-        h.get_by_label("ScriptCraft Help").click();
+        h.get_by_label("Kino Scenarist Help").click();
         h.run();
         h.run();
     }
@@ -3331,7 +3331,7 @@ fn theme_picker_lists_kit_scenarist_and_omarchy_themes() {
     // Both family headings and the palettes below them are in the menu; the
     // long list is grouped so 29 entries stay navigable.
     for label in [
-        "ScriptCraft",
+        "Kino Scenarist",
         "Omarchy",
         "KIT Scenarist",
         "KIT Scenarist Dark",

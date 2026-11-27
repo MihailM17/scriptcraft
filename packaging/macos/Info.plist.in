@@ -5,17 +5,17 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>ScriptCraft</string>
+	<string>Kino Scenarist</string>
 	<key>CFBundleExecutable</key>
-	<string>ScriptCraft</string>
+	<string>KinoScenarist</string>
 	<key>CFBundleIconFile</key>
 	<string>ScriptCraft.icns</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.scriptcraft.app</string>
+	<string>com.kinoscenarist.app</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>ScriptCraft</string>
+	<string>Kino Scenarist</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -39,8 +39,14 @@
 			<array>
 				<string>kitsp</string>
 			</array>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.scriptcraft.kitsp</string>
+			</array>
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
 		</dict>
 		<dict>
 			<key>CFBundleTypeName</key>
@@ -49,8 +55,14 @@
 			<array>
 				<string>fdx</string>
 			</array>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.finaldraft.fdx</string>
+			</array>
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
 		</dict>
 		<dict>
 			<key>CFBundleTypeName</key>
@@ -59,8 +71,14 @@
 			<array>
 				<string>fadein</string>
 			</array>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.generalcoffee.fadein</string>
+			</array>
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
 		</dict>
 		<dict>
 			<key>CFBundleTypeName</key>
@@ -69,8 +87,87 @@
 			<array>
 				<string>fountain</string>
 			</array>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>io.fountain.screenplay</string>
+			</array>
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+		</dict>
+	</array>
+	<key>UTImportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.scriptcraft.kitsp</string>
+			<key>UTTypeDescription</key>
+			<string>KIT Scenarist Project</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>kitsp</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.finaldraft.fdx</string>
+			<key>UTTypeDescription</key>
+			<string>Final Draft Screenplay</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.xml</string>
+				<string>public.text</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>fdx</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.generalcoffee.fadein</string>
+			<key>UTTypeDescription</key>
+			<string>Fade In Screenplay</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.zip-archive</string>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>fadein</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>io.fountain.screenplay</string>
+			<key>UTTypeDescription</key>
+			<string>Fountain Screenplay</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.plain-text</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>fountain</string>
+				</array>
+			</dict>
 		</dict>
 	</array>
 </dict>

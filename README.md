@@ -1,8 +1,8 @@
 <div align="center">
 
-  <img src="scriptcraft-app/assets/ScriptCraft-1024.png" alt="ScriptCraft Logo" width="120" />
+  <img src="scriptcraft-app/assets/ScriptCraft-1024.png" alt="Kino Scenarist Logo" width="120" />
 
-  # ScriptCraft
+  # Kino Scenarist
 
   **The free, open-source, revision-first screenwriting studio.**
 
@@ -26,13 +26,13 @@
 
 ---
 
-ScriptCraft is a native, offline-first screenwriting application built in Rust for writers and production teams. 
+Kino Scenarist is a native, offline-first screenwriting application built in Rust for writers and production teams. 
 
-Most screenwriting software treats the production phase as an afterthought or a paywalled extra. ScriptCraft is engineered from the ground up around **production revisions**: open KIT Scenarist projects, exchange Final Draft and Fade In files, lock pages and scene numbers, issue colored revision sets, and export page-exact PDFs—blazing fast, fully offline, on macOS, Windows, and Linux.
+Most screenwriting software treats the production phase as an afterthought or a paywalled extra. Kino Scenarist is engineered from the ground up around **production revisions**: open KIT Scenarist projects, exchange Final Draft and Fade In files, lock pages and scene numbers, issue colored revision sets, and export page-exact PDFs—blazing fast, fully offline, on macOS, Windows, and Linux.
 
 <div align="center">
-  <img src="scriptcraft-app/tests/snapshots/01_script_top.png" alt="ScriptCraft Screenplay Editor" width="100%" />
-  <p><em>The ScriptCraft Editor: Typographically exact 1/6-inch line pitch, live revision marks, and distraction-free writing.</em></p>
+  <img src="scriptcraft-app/tests/snapshots/01_script_top.png" alt="Kino Scenarist Screenplay Editor" width="100%" />
+  <p><em>The Kino Scenarist Editor: Typographically exact 1/6-inch line pitch, live revision marks, and distraction-free writing.</em></p>
 </div>
 
 <details>
@@ -58,7 +58,7 @@ Most screenwriting software treats the production phase as an afterthought or a 
 
 A screenplay is not finished when the first draft is written. It is finished when **pages are locked, scenes are numbered, revisions are issued, and the entire cast and crew are working from the exact same colored pages**.
 
-ScriptCraft treats the production workflow as the core product:
+Kino Scenarist treats the production workflow as the core product:
 
 * 🎨 **Industry Revision Sets:** Blue → Pink → Yellow → Green → Goldenrod → Buff → Salmon → Cherry with timestamps, names, and page-count baselines saved inside the project.
 * 🔒 **Locked Pages & Scenes:** Freeze issued pagination. Adding text after a lock generates `42A`, `42B` sub-pages; subsequent pages maintain their original numbers. Scene numbers lock independently.
@@ -68,7 +68,7 @@ ScriptCraft treats the production workflow as the core product:
 * 🔄 **Restore-as-Copy:** Safely restore any past revision baseline as a fresh project without overwriting current work.
 
 <div align="center">
-  <img src="scriptcraft-app/tests/snapshots/14_compare_drafts.png" alt="ScriptCraft Compare Workspace" width="100%" />
+  <img src="scriptcraft-app/tests/snapshots/14_compare_drafts.png" alt="Kino Scenarist Compare Workspace" width="100%" />
   <p><em>Compare a revision baseline against the active draft: filter deltas, inspect changes, and jump directly to blocks that need attention.</em></p>
 </div>
 
@@ -88,7 +88,7 @@ ScriptCraft treats the production workflow as the core product:
 * **Writing-Aware Spellchecker:** Built-in Hunspell spellchecking for English (US), Bulgarian, and Russian. Intelligently ignores ALL-CAPS sluglines and character cues to avoid false flags.
 
 ### 🎨 35 Contrast-Checked Themes
-* **ScriptCraft Originals:** Midnight, Light, Sepia, High Contrast, KIT Scenarist Light & Dark, and Writer Palettes (Midnight Ink, Amber Projector, Noir Emerald, Velvet Curtain, Red Light, Paper and Rust).
+* **Kino Scenarist Originals:** Midnight, Light, Sepia, High Contrast, KIT Scenarist Light & Dark, and Writer Palettes (Midnight Ink, Amber Projector, Noir Emerald, Velvet Curtain, Red Light, Paper and Rust).
 * **Curated Studio Themes:** Tokyo Night, Catppuccin, Nord, Gruvbox, Rosé Pine, Everforest, Kanagawa, Dracula, and more.
 * **Monochrome Paper Mode:** Render white paper with dark ink while keeping your editor chrome dark.
 
@@ -99,7 +99,7 @@ ScriptCraft treats the production workflow as the core product:
 * **Director's Breakdown PDF & Storyboards:** Attach storyboard/reference frames per shot and export a complete package containing Title Page, vector 2D floor plans, shot cards with thumbnails and cues, and the full Colored Script.
 
 <div align="center">
-  <img src="scriptcraft-app/tests/snapshots/42_shots_floor_plan.png" alt="ScriptCraft 2D Blocking Floor Plan and Scene Timeline" width="100%" />
+  <img src="scriptcraft-app/tests/snapshots/42_shots_floor_plan.png" alt="Kino Scenarist 2D Blocking Floor Plan and Scene Timeline" width="100%" />
   <p><em>The Shots Workspace: True-to-scale 2D blocking floor plan with lens-calibrated FOV cones, 180° axis, dolly tracks, and live beat timeline spotlight.</em></p>
 </div>
 
@@ -112,7 +112,7 @@ ScriptCraft treats the production workflow as the core product:
 
 ## 🔄 Interchange Support
 
-ScriptCraft prioritizes open ecosystems and guarantees honest interchange with industry-standard software:
+Kino Scenarist prioritizes open ecosystems and guarantees honest interchange with industry-standard software:
 
 | Format | Extension | Import | Export | Revision Tracking | Fidelity Notes |
 |:---|:---:|:---:|:---:|:---:|:---|
@@ -127,7 +127,7 @@ ScriptCraft prioritizes open ecosystems and guarantees honest interchange with i
 
 ## ⚡ Performance Budgets
 
-ScriptCraft is written in 100% native Rust—no web views, no Electron overhead, and zero runtime bloat. Every critical path is covered by Criterion benchmarks ([`docs/benchmarks.md`](docs/benchmarks.md)):
+Kino Scenarist is written in 100% native Rust—no web views, no Electron overhead, and zero runtime bloat. Every critical path is covered by Criterion benchmarks ([`docs/benchmarks.md`](docs/benchmarks.md)):
 
 | Benchmark Metric | Measurement | Performance Target |
 |:---|:---|:---|
@@ -146,9 +146,9 @@ Prebuilt binaries are available for every major desktop operating system on the 
 
 | Platform | Architecture | Package Format | Notes |
 |:---|:---|:---|:---|
-| **macOS** | Apple Silicon (`arm64`) | `ScriptCraft-<version>-macos-arm64.dmg` | Ad-hoc signed. *Right-click ▸ Open on first launch*. |
-| **Windows** | x64 (Windows 10/11) | `ScriptCraft-<version>-windows-x64.zip` | Unzip and run `ScriptCraft.exe`. Dark DWM titlebar enabled. |
-| **Linux** | x86_64 | `ScriptCraft-<version>-linux-x86_64.tar.gz` | Requires GTK3 (`libgtk-3-0`). Includes desktop file and icon. |
+| **macOS** | Apple Silicon (`arm64`) | `KinoScenarist-<version>-macos-arm64.dmg` | Ad-hoc signed. *Right-click ▸ Open on first launch*. |
+| **Windows** | x64 (Windows 10/11) | `KinoScenarist-<version>-windows-x64.zip` | Unzip and run `Kino Scenarist.exe`. Integrated frameless titlebar. |
+| **Linux** | x86_64 | `KinoScenarist-<version>-linux-x86_64.tar.gz` | Requires GTK3 (`libgtk-3-0`). Includes desktop file and icon. |
 
 > [!NOTE]
 > **Code Signing:** macOS builds are currently ad-hoc signed and Windows/Linux archives are unsigned. An in-place SHA-256 verified updater is included in-app. Developer ID notarization is in progress.
@@ -173,7 +173,7 @@ cargo build --release -p scriptcraft-app
 The compiled binary will be located at `target/release/scriptcraft-app`.
 
 ### Testing & Verification
-ScriptCraft maintains strict test coverage, visual snapshots, and supply-chain checks:
+Kino Scenarist maintains strict test coverage, visual snapshots, and supply-chain checks:
 
 ```sh
 # Run the full unit and integration test suite
@@ -223,5 +223,5 @@ The highest-value contributions right now:
 
 ## 📄 License
 
-ScriptCraft is licensed under the [Apache License, Version 2.0](LICENSE).  
+Kino Scenarist is licensed under the [Apache License, Version 2.0](LICENSE).  
 Bundled typefaces (Courier Prime, IBM Plex Mono, Liberation Mono, PT Sans) are distributed under the [SIL Open Font License](http://scripts.sil.org/OFL). See `NOTICE` and [`scriptcraft-app/assets/fonts/licenses/`](scriptcraft-app/assets/fonts/licenses/) for details.

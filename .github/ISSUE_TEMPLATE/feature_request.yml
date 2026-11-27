@@ -6,14 +6,14 @@ body:
   - type: markdown
     attributes:
       value: |
-        ScriptCraft is revision-first and deliberately scoped. Explain the
+        Kino Scenarist is revision-first and deliberately scoped. Explain the
         workflow you are trying to complete, not only the control you want.
         Check `docs/v0.8-plan.md` for current non-goals first.
   - type: textarea
     id: workflow
     attributes:
       label: What workflow are you trying to complete?
-      description: Describe the real task and where ScriptCraft currently stops you.
+      description: Describe the real task and where Kino Scenarist currently stops you.
     validations:
       required: true
   - type: textarea

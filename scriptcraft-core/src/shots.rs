@@ -1561,6 +1561,80 @@ impl ShotList {
         }
     }
 
+    /// Editorial cut count and average cut duration (ASL) for one scene.
+    ///
+    /// Consecutive covered beats belonging to the same shot are merged across
+    /// uncovered `Character`-only cue blocks so dialogue-only shot highlighting
+    /// never invents artificial cuts.
+    pub fn scene_cut_stats(&self, scene: &Scene, blocks: &[ScriptBlock]) -> CutStats {
+        let shot_count = self.shots_for_scene(scene, blocks).len();
+        let tl = self.scene_timeline(scene, blocks);
+        let mut cut_count = 0usize;
+        let mut covered_secs = 0.0_f32;
+        let mut last_shot: Option<Uuid> = None;
+        let mut gap_had_content = false;
+
+        for beat in &tl.beats {
+            if let Some(sid) = beat.shot_id {
+                let dur = (beat.end_sec - beat.start_sec).max(0.0);
+                if last_shot == Some(sid) && !gap_had_content {
+                    covered_secs += dur;
+                } else {
+                    cut_count += 1;
+                    covered_secs += dur;
+                    last_shot = Some(sid);
+                }
+                gap_had_content = false;
+            } else {
+                // Only treat an uncovered gap as breaking a continuous cut if it
+                // holds actual action/dialogue/other printable text (not just a
+                // bare Character cue above highlighted Dialogue).
+                let has_non_cue = beat.ranges.iter().any(|&(bi, _, _)| {
+                    blocks
+                        .get(bi)
+                        .is_some_and(|b| b.element_type != ElementType::Character)
+                });
+                if has_non_cue {
+                    gap_had_content = true;
+                }
+            }
+        }
+
+        let avg_cut_secs = if cut_count > 0 {
+            covered_secs / cut_count as f32
+        } else {
+            0.0
+        };
+        CutStats {
+            shot_count,
+            cut_count,
+            covered_secs,
+            avg_cut_secs,
+        }
+    }
+
+    /// Editorial cut count and average cut duration (ASL) aggregated across all scenes.
+    pub fn project_cut_stats(&self, scenes: &[Scene], blocks: &[ScriptBlock]) -> CutStats {
+        let mut cut_count = 0usize;
+        let mut covered_secs = 0.0_f32;
+        for scene in scenes {
+            let st = self.scene_cut_stats(scene, blocks);
+            cut_count += st.cut_count;
+            covered_secs += st.covered_secs;
+        }
+        let avg_cut_secs = if cut_count > 0 {
+            covered_secs / cut_count as f32
+        } else {
+            0.0
+        };
+        CutStats {
+            shot_count: self.shots.len(),
+            cut_count,
+            covered_secs,
+            avg_cut_secs,
+        }
+    }
+
     /// Apply char-offset shifting for a batch of [`crate::edit::EditCommand`]s
     /// against `blocks` (call right before applying `cmds` to `blocks`).
     pub fn sync_for_edit_commands(
@@ -1735,6 +1809,19 @@ pub struct TimelineBeat {
     pub ranges: Vec<(usize, usize, usize)>,
     pub start_sec: f32,
     pub end_sec: f32,
+}
+
+/// Editorial pacing metrics derived from shot coverage across a scene or full script.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CutStats {
+    /// Distinct camera setups / shots.
+    pub shot_count: usize,
+    /// Number of editorial cuts (continuous covered beats in screenplay order).
+    pub cut_count: usize,
+    /// Total estimated covered screen time across all cuts (seconds).
+    pub covered_secs: f32,
+    /// Average duration of a cut (ASL) in seconds (`0.0` when `cut_count == 0`).
+    pub avg_cut_secs: f32,
 }
 
 /// Chronological scene timeline derived automatically from shot spans and script timing.
@@ -2487,5 +2574,75 @@ mod tests {
         // Removing note cleans it up
         assert!(list.remove_beat_note(sid, nid));
         assert!(list.get(sid).unwrap().notes.is_empty());
+    }
+
+    #[test]
+    fn cut_stats_counts_editorial_cuts_and_average_duration() {
+        let mut p = Project {
+            title: "Cuts".into(),
+            blocks: vec![
+                ScriptBlock::new(ElementType::SceneHeading, "INT. BAR - NIGHT".into()),
+                ScriptBlock::new(ElementType::Character, "IVAN".into()),
+                ScriptBlock::new(
+                    ElementType::Dialogue,
+                    "One two three four five six seven eight.".into(),
+                ),
+                ScriptBlock::new(ElementType::Character, "MARIA".into()),
+                ScriptBlock::new(
+                    ElementType::Dialogue,
+                    "Nine ten eleven twelve thirteen fourteen.".into(),
+                ),
+                ScriptBlock::new(ElementType::Character, "IVAN".into()),
+                ScriptBlock::new(
+                    ElementType::Dialogue,
+                    "Fifteen sixteen seventeen eighteen.".into(),
+                ),
+                ScriptBlock::new(ElementType::Character, "MARIA".into()),
+                ScriptBlock::new(
+                    ElementType::Dialogue,
+                    "Nineteen twenty twentyone.".into(),
+                ),
+            ],
+            ..Default::default()
+        };
+        let scene_id = p.blocks[0].id;
+        let b2 = p.blocks[2].id;
+        let b4 = p.blocks[4].id;
+        let b6 = p.blocks[6].id;
+        let b8 = p.blocks[8].id;
+
+        // Two camera setups (1A on Ivan, 1B on Maria) cutting back and forth 4 times:
+        let s1 = p.shots.add_shot(
+            Some(scene_id),
+            "1",
+            ShotSize::Cu,
+            ShotMovement::Static,
+            "50mm".into(),
+            "Ivan CU".into(),
+            ShotRange::blocks(b2, b2),
+        );
+        p.shots.assign_range(s1, ShotRange::blocks(b6, b6));
+        let s2 = p.shots.add_shot(
+            Some(scene_id),
+            "1",
+            ShotSize::Cu,
+            ShotMovement::Static,
+            "50mm".into(),
+            "Maria CU".into(),
+            ShotRange::blocks(b4, b4),
+        );
+        p.shots.assign_range(s2, ShotRange::blocks(b8, b8));
+
+        let scenes = p.scenes();
+        let st = p.shots.scene_cut_stats(&scenes[0], &p.blocks);
+        assert_eq!(st.shot_count, 2);
+        assert_eq!(st.cut_count, 4);
+        assert!(st.covered_secs > 4.0);
+        assert!((st.avg_cut_secs - st.covered_secs / 4.0).abs() < 1e-4);
+
+        let proj = p.shots.project_cut_stats(&scenes, &p.blocks);
+        assert_eq!(proj.shot_count, 2);
+        assert_eq!(proj.cut_count, 4);
+        assert!((proj.avg_cut_secs - st.avg_cut_secs).abs() < 1e-4);
     }
 }

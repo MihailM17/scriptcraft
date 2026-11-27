@@ -1,5 +1,5 @@
-ScriptCraft
-Copyright 2026 ScriptCraft contributors
+Kino Scenarist
+Copyright 2026 Kino Scenarist contributors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -37,7 +37,7 @@ scriptcraft-app/assets/fonts/licenses/ for full texts):
   License: scriptcraft-app/assets/fonts/licenses/OFL-LiberationMono.txt
 
 --------------------------------------------------------------------------------
-ScriptCraft is a clean-room implementation. It is inspired by the workflow and
+Kino Scenarist is a clean-room implementation. It is inspired by the workflow and
 typography of KIT Scenarist and interoperates with the .kitsp file format, but
 contains no KIT Scenarist code.
 

@@ -1,6 +1,6 @@
-# Contributing to ScriptCraft
+# Contributing to Kino Scenarist
 
-ScriptCraft is a free, open-source, local-first screenwriting studio. The
+Kino Scenarist is a free, open-source, local-first screenwriting studio. The
 current development focus is the revision workflow; read
 [`docs/v0.8-plan.md`](docs/v0.8-plan.md) before starting a large change.
 
@@ -55,7 +55,7 @@ Rules that keep the core testable:
 - Do not put egui types in `scriptcraft-core` or `scriptcraft-layout`.
 - Do not compute layout in the app. If the editor needs a new placement rule,
   add it to `scriptcraft-layout` and test it there.
-- Do not change `.kitsp` tables. ScriptCraft-only data goes in versioned
+- Do not change `.kitsp` tables. Kino Scenarist-only data goes in versioned
   `scenario_data` rows that KIT ignores.
 - Keep editor and PDF output in sync. A layout change needs a parity test.
 

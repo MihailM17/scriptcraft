@@ -122,7 +122,7 @@ impl Check {
                 "Looks for a newer release on github.com/MihailM17/scriptcraft.".to_string()
             }
             Check::Checking => "Asking GitHub for the latest release…".to_string(),
-            Check::UpToDate => format!("ScriptCraft {CURRENT} is the latest release."),
+            Check::UpToDate => format!("Kino Scenarist {CURRENT} is the latest release."),
             Check::Available(r) => format!("Download it from {}", r.url),
             Check::Failed(why) => why.clone(),
         }
@@ -488,7 +488,7 @@ struct Staged {
 
 fn install_target() -> Result<PathBuf, String> {
     let exe = std::env::current_exe()
-        .map_err(|e| format!("cannot locate this ScriptCraft build: {e}"))?;
+        .map_err(|e| format!("cannot locate this Kino Scenarist build: {e}"))?;
     #[cfg(target_os = "macos")]
     {
         if let Some(app) = exe
@@ -500,7 +500,7 @@ fn install_target() -> Result<PathBuf, String> {
     }
     exe.parent()
         .map(Path::to_path_buf)
-        .ok_or_else(|| "cannot locate this ScriptCraft build".to_string())
+        .ok_or_else(|| "cannot locate this Kino Scenarist build".to_string())
 }
 
 /// Download the platform archive and its checksum, verify the digest and
@@ -538,7 +538,7 @@ fn stage_release(release: &Release) -> Result<Staged, String> {
     let _ = std::fs::write(
         &log,
         format!(
-            "ScriptCraft {} update
+            "Kino Scenarist {} update
 archive: {}
 sha256: {}
 target: {}
@@ -654,7 +654,7 @@ while kill -0 "$PID" 2>/dev/null; do sleep 0.2; done
   trap cleanup EXIT
   if ! hdiutil attach "$DMG" -nobrowse -quiet -mountpoint "$MP"; then
     echo "could not mount $DMG"
-    osascript -e 'display alert "ScriptCraft update failed" message "The downloaded disk image could not be opened. Your current copy is unchanged."' >/dev/null 2>&1 || true
+    osascript -e 'display alert "Kino Scenarist update failed" message "The downloaded disk image could not be opened. Your current copy is unchanged."' >/dev/null 2>&1 || true
     open "$TARGET"
     exit 1
   fi
@@ -667,7 +667,7 @@ while kill -0 "$PID" 2>/dev/null; do sleep 0.2; done
   BACKUP="$TARGET.old.$$"
   if ! mv "$TARGET" "$BACKUP"; then
     echo "cannot replace $TARGET (permission denied)"
-    osascript -e 'display alert "ScriptCraft update failed" message "ScriptCraft could not replace the app in this folder. Move it to Applications, or install the update manually."' >/dev/null 2>&1 || true
+    osascript -e 'display alert "Kino Scenarist update failed" message "Kino Scenarist could not replace the app in this folder. Move it to Applications, or install the update manually."' >/dev/null 2>&1 || true
     open "$TARGET"
     exit 1
   fi
@@ -693,18 +693,19 @@ while kill -0 "$PID" 2>/dev/null; do sleep 0.2; done
             r#"param([int]$ProcId, [string]$Zip, [string]$Target, [string]$Log)
 Wait-Process -Id $ProcId -ErrorAction SilentlyContinue
 Start-Transcript -Path $Log -Append | Out-Null
-$exe = Join-Path $Target "ScriptCraft.exe"
+$exe = Join-Path $Target "Kino Scenarist.exe"
 try {
-  $temp = Join-Path $env:TEMP ("scriptcraft-update-" + [guid]::NewGuid().ToString("N"))
+  $temp = Join-Path $env:TEMP ("kinoscenarist-update-" + [guid]::NewGuid().ToString("N"))
   Expand-Archive -LiteralPath $Zip -DestinationPath $temp -Force
-  $src = Get-ChildItem $temp -Recurse -Filter "ScriptCraft.exe" | Select-Object -First 1
-  if (-not $src) { throw "the archive has no ScriptCraft.exe" }
+  $src = Get-ChildItem $temp -Recurse -Filter "*.exe" | Select-Object -First 1
+  if (-not $src) { throw "the archive has no executable" }
   Copy-Item (Join-Path $src.DirectoryName "*") $Target -Recurse -Force
+  $launched = Join-Path $Target $src.Name
   Remove-Item $temp -Recurse -Force -ErrorAction SilentlyContinue
-  Start-Process -FilePath $exe
+  Start-Process -FilePath $launched
 } catch {
   Write-Host $_
-  Start-Process -FilePath $exe
+  if (Test-Path $exe) { Start-Process -FilePath $exe }
   exit 1
 } finally {
   Stop-Transcript | Out-Null

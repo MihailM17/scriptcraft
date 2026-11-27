@@ -61,7 +61,7 @@ fn shortcut_row(ui: &mut egui::Ui, keys: &str, desc: &str) {
 pub fn about(ctx: &Context, open: &mut bool) {
     let mut win_open = *open;
     let mut close = false;
-    egui::Window::new("About ScriptCraft")
+    egui::Window::new("About Kino Scenarist")
         .open(&mut win_open)
         .collapsible(false)
         .resizable(false)
@@ -78,7 +78,7 @@ pub fn about(ctx: &Context, open: &mut bool) {
             ui.add_space(4.0);
             ui.horizontal(|ui| {
                 ui.label(
-                    egui::RichText::new("ScriptCraft")
+                    egui::RichText::new("Kino Scenarist")
                         .size(22.0)
                         .strong()
                         .color(c.heading_text),
@@ -165,7 +165,7 @@ pub fn help(ctx: &Context, open: &mut bool) {
             );
             ui.add_space(2.0);
             ui.label(
-                egui::RichText::new("ScriptCraft Shortcuts & Workflow")
+                egui::RichText::new("Kino Scenarist Shortcuts & Workflow")
                     .size(18.0)
                     .strong()
                     .color(c.heading_text),

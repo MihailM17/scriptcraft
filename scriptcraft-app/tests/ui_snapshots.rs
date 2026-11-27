@@ -676,7 +676,7 @@ fn snap_38_about_dialog() {
     h.run();
     h.get_by_label("Menu").click();
     h.run();
-    h.get_by_label("About ScriptCraft").click();
+    h.get_by_label("About Kino Scenarist").click();
     h.run();
     h.input_mut().events.push(egui::Event::PointerGone);
     h.run();

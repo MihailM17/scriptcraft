@@ -11,8 +11,8 @@ fn main() {
     {
         let mut res = winresource::WindowsResource::new();
         res.set_icon("assets/ScriptCraft.ico");
-        res.set("FileDescription", "ScriptCraft");
-        res.set("ProductName", "ScriptCraft");
+        res.set("FileDescription", "Kino Scenarist");
+        res.set("ProductName", "Kino Scenarist");
         res.set("LegalCopyright", "Apache-2.0");
         if let Err(err) = res.compile() {
             panic!("failed to embed the Windows icon resource: {err}");

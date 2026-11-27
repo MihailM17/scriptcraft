@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Name=ScriptCraft
+Name=Kino Scenarist
 Comment=Local-first screenwriting studio
 Exec=scriptcraft %f
 Icon=scriptcraft

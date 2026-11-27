@@ -16,6 +16,6 @@ pub mod summary;
 
 pub use model::{DocumentView, ElementType, Project, Scene, SceneMeta, ScriptBlock, Stats};
 pub use shots::{
-    PlanActor, PlanCamera, PlanProp, PropKind, SceneFloorPlan, Shot, ShotBeatNote, ShotColor,
-    ShotList, ShotMovement, ShotRange, ShotSize,
+    CutStats, PlanActor, PlanCamera, PlanProp, PropKind, SceneFloorPlan, Shot, ShotBeatNote,
+    ShotColor, ShotList, ShotMovement, ShotRange, ShotSize,
 };

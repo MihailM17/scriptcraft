@@ -220,6 +220,7 @@ pub struct EditorOptions {
     pub show_scene_numbers: bool,
     pub highlight_current_line: bool,
     pub bold_character_cues: bool,
+    pub auto_contd: bool,
     pub capitalize_first_word: bool,
     pub correct_double_capitals: bool,
     pub replace_three_dots: bool,
@@ -233,6 +234,7 @@ impl Default for EditorOptions {
             show_scene_numbers: true,
             highlight_current_line: false,
             bold_character_cues: false,
+            auto_contd: false,
             capitalize_first_word: false,
             correct_double_capitals: false,
             replace_three_dots: false,
@@ -818,7 +820,11 @@ fn apply_completion(
         return;
     };
     let abs = char_index(&b.text, caret);
-    let completed = if b.element_type == ElementType::SceneHeading {
+    let whole_line = matches!(
+        b.element_type,
+        ElementType::SceneHeading | ElementType::Character
+    );
+    let completed = if whole_line {
         complete_line_at(&b.text, abs, pick)
     } else {
         complete_at(&b.text, abs, pick)
@@ -830,7 +836,7 @@ fn apply_completion(
     };
     let chars: Vec<char> = b.text.chars().collect();
     let abs = abs.min(chars.len());
-    let from = if b.element_type == ElementType::SceneHeading {
+    let from = if whole_line {
         chars[..abs]
             .iter()
             .rposition(|&c| c == '\n')
@@ -968,7 +974,7 @@ fn handle_events(
                         }
                     }
                 }
-                if let Some(action) = key_action(
+                if let Some(mut action) = key_action(
                     ed.blocks(),
                     doc,
                     ed.sel,
@@ -977,6 +983,50 @@ fn handle_events(
                     hidden_blocks,
                     omitted_headings,
                 ) {
+                    // Optional auto-(CONT'D): when finishing a Character cue
+                    // with Enter after an action interruption of the same
+                    // speaker in the same scene, append " (CONT'D)" atomically.
+                    if *key == egui::Key::Enter && ed.options.auto_contd {
+                        if let Some(EditCommand::SplitBlock {
+                            at,
+                            new_type: ElementType::Dialogue,
+                            ..
+                        }) = action.commands.last()
+                        {
+                            let at = *at;
+                            if let Some(b) = ed.blocks().get(at.bi) {
+                                let para_len = b
+                                    .text
+                                    .split('\n')
+                                    .nth(at.para)
+                                    .map(|s| s.chars().count())
+                                    .unwrap_or(0);
+                                if b.element_type == ElementType::Character
+                                    && at.ch >= para_len
+                                    && scriptcraft_core::editing::needs_same_speaker_contd(
+                                        ed.blocks(),
+                                        at.bi,
+                                    )
+                                    && !scriptcraft_core::editing::has_contd(&b.text)
+                                {
+                                    const SUFFIX: &str = " (CONT'D)";
+                                    let insert_idx = action.commands.len() - 1;
+                                    action.commands.insert(
+                                        insert_idx,
+                                        EditCommand::InsertText {
+                                            at,
+                                            text: SUFFIX.to_string(),
+                                        },
+                                    );
+                                    if let Some(EditCommand::SplitBlock { at: split_at, .. }) =
+                                        action.commands.last_mut()
+                                    {
+                                        split_at.ch += SUFFIX.chars().count();
+                                    }
+                                }
+                            }
+                        }
+                    }
                     let edited = !action.commands.is_empty();
                     ed.sel = action.selection;
                     ed.press(action.commands);

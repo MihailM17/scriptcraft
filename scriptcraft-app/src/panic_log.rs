@@ -58,7 +58,7 @@ pub fn record(path: &Path, info: &std::panic::PanicHookInfo<'_>) {
 fn entry_text(payload: &str, location: &str, backtrace: Option<&str>) -> String {
     let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
     let mut out = format!(
-        "== {now} ==\nScriptCraft {} / {} {}\npanic: {payload}\nat {location}\n",
+        "== {now} ==\nKino Scenarist {} / {} {}\npanic: {payload}\nat {location}\n",
         env!("CARGO_PKG_VERSION"),
         std::env::consts::OS,
         std::env::consts::ARCH

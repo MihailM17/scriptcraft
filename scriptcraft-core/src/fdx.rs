@@ -386,8 +386,40 @@ struct Para {
     notes: Vec<String>,
 }
 
+/// Decode raw `.fdx` file bytes (UTF-8 with optional BOM, UTF-16 LE/BE with
+/// BOM, or UTF-8 lossy fallback) and parse the FDX document.
+pub fn from_fdx_bytes(bytes: &[u8]) -> Result<(Project, Metadata), FdxError> {
+    let owned: String;
+    let xml: &str = if bytes.starts_with(&[0xFF, 0xFE]) {
+        let units: Vec<u16> = bytes[2..]
+            .chunks_exact(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect();
+        owned = String::from_utf16_lossy(&units);
+        &owned
+    } else if bytes.starts_with(&[0xFE, 0xFF]) {
+        let units: Vec<u16> = bytes[2..]
+            .chunks_exact(2)
+            .map(|c| u16::from_be_bytes([c[0], c[1]]))
+            .collect();
+        owned = String::from_utf16_lossy(&units);
+        &owned
+    } else {
+        let stripped = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(bytes);
+        match std::str::from_utf8(stripped) {
+            Ok(s) => s,
+            Err(_) => {
+                owned = String::from_utf8_lossy(stripped).into_owned();
+                &owned
+            }
+        }
+    };
+    from_fdx(xml)
+}
+
 /// Parse an FDX document into a project plus title-page metadata.
 pub fn from_fdx(xml: &str) -> Result<(Project, Metadata), FdxError> {
+    let xml = xml.strip_prefix('\u{FEFF}').unwrap_or(xml);
     let mut reader = Reader::from_str(xml);
     // Keep raw text runs (entities are separate `GeneralRef` events) and
     // trim whole paragraph bodies at dispatch instead.
@@ -395,6 +427,7 @@ pub fn from_fdx(xml: &str) -> Result<(Project, Metadata), FdxError> {
 
     let mut saw_root = false;
     let mut in_title_page = false;
+    let mut skip_depth: usize = 0;
     let mut in_text = false;
     let mut cur_text_style = (false, false, false);
     let mut cur_text_start = 0usize;
@@ -421,13 +454,23 @@ pub fn from_fdx(xml: &str) -> Result<(Project, Metadata), FdxError> {
                     }
                     continue;
                 }
+                if skip_depth > 0 {
+                    skip_depth += 1;
+                    continue;
+                }
                 match name.as_str() {
+                    // Non-script containers in real-world Final Draft files can hold
+                    // their own `<Paragraph>` nodes (running headers/footers, scene
+                    // summaries, beat board cards); never mix them into script body.
+                    "HeaderAndFooter" | "SceneProperties" | "BeatBoard" | "MoresAndContinueds" => {
+                        skip_depth = 1;
+                    }
                     "TitlePage" => in_title_page = true,
                     "DualDialogue" if !in_title_page => {
                         in_dual = true;
                         dual_blocks.clear();
                     }
-                    "Paragraph" => {
+                    "Paragraph" if !in_note => {
                         let mut p = Para::default();
                         for key in ["Type", "Number", "Alignment"] {
                             if let Ok(Some(a)) = e.try_get_attribute(key) {
@@ -470,6 +513,9 @@ pub fn from_fdx(xml: &str) -> Result<(Project, Metadata), FdxError> {
                 }
             }
             Event::Empty(e) => {
+                if skip_depth > 0 {
+                    continue;
+                }
                 let name = String::from_utf8_lossy(e.name().as_ref()).into_owned();
                 if name == "Paragraph" && in_title_page {
                     // Self-closing spacer paragraph.
@@ -485,7 +531,7 @@ pub fn from_fdx(xml: &str) -> Result<(Project, Metadata), FdxError> {
                 }
             }
             Event::GeneralRef(e) => {
-                if !(in_note || in_text) {
+                if skip_depth > 0 || !(in_note || in_text) {
                     continue;
                 }
                 let s = match e.resolve_char_ref().ok().flatten() {
@@ -506,6 +552,9 @@ pub fn from_fdx(xml: &str) -> Result<(Project, Metadata), FdxError> {
                 }
             }
             Event::Text(e) => {
+                if skip_depth > 0 {
+                    continue;
+                }
                 if in_note || in_text {
                     let s = reader.decoder().decode(e.as_ref()).unwrap_or_default();
                     let s = unescape_text(&s);
@@ -517,6 +566,9 @@ pub fn from_fdx(xml: &str) -> Result<(Project, Metadata), FdxError> {
                 }
             }
             Event::CData(e) => {
+                if skip_depth > 0 {
+                    continue;
+                }
                 if in_note || in_text {
                     let s = String::from_utf8_lossy(&e.into_inner()).into_owned();
                     if in_note {
@@ -527,6 +579,10 @@ pub fn from_fdx(xml: &str) -> Result<(Project, Metadata), FdxError> {
                 }
             }
             Event::End(e) => {
+                if skip_depth > 0 {
+                    skip_depth -= 1;
+                    continue;
+                }
                 let name = String::from_utf8_lossy(e.name().as_ref()).into_owned();
                 match name.as_str() {
                     "TitlePage" => in_title_page = false,
@@ -573,7 +629,7 @@ pub fn from_fdx(xml: &str) -> Result<(Project, Metadata), FdxError> {
                         }
                         note_buf.clear();
                     }
-                    "Paragraph" => {
+                    "Paragraph" if !in_note => {
                         let Some(p) = para.take() else { continue };
                         if in_title_page {
                             title_paras.push((p.alignment, p.text));
@@ -1043,5 +1099,45 @@ mod tests {
         let (q, _) = from_fdx(&xml).unwrap();
         assert_eq!(q.blocks[0].text, blk.text);
         assert_eq!(q.blocks[0].styles, blk.styles);
+    }
+
+    #[test]
+    fn from_fdx_bytes_handles_bom_utf16_and_skips_headers_summaries() {
+        let xml = r##"<?xml version="1.0" encoding="UTF-8"?>
+<FinalDraft DocumentType="Script" Template="No" Version="5">
+<Content>
+<Paragraph Type="Scene Heading"><Text>INT. OFFICE - DAY</Text></Paragraph>
+<Paragraph Type="Action"><Text>A phone rings.</Text>
+<ScriptNote ID="1"><Paragraph><Text>Trim later.</Text></Paragraph></ScriptNote>
+</Paragraph>
+</Content>
+<HeaderAndFooter>
+<Header><Paragraph><Text>SHOULD NOT APPEAR IN BODY</Text></Paragraph></Header>
+<Footer><Paragraph><Text>PAGE FOOTER</Text></Paragraph></Footer>
+</HeaderAndFooter>
+<SceneProperties>
+<Summary><Paragraph><Text>SUMMARY TEXT</Text></Paragraph></Summary>
+</SceneProperties>
+</FinalDraft>"##;
+
+        // UTF-8 with BOM
+        let mut utf8_bom = vec![0xEF, 0xBB, 0xBF];
+        utf8_bom.extend_from_slice(xml.as_bytes());
+        let (p1, _) = from_fdx_bytes(&utf8_bom).expect("UTF-8 BOM FDX");
+        assert_eq!(p1.blocks.len(), 3);
+        assert_eq!(p1.blocks[0].text, "INT. OFFICE - DAY");
+        assert_eq!(p1.blocks[1].text, "A phone rings.");
+        assert_eq!(p1.blocks[2].element_type, ElementType::NonPrintable);
+        assert_eq!(p1.blocks[2].text, "Trim later.");
+
+        // UTF-16 LE with BOM
+        let mut utf16_le = vec![0xFF, 0xFE];
+        for unit in xml.encode_utf16() {
+            utf16_le.extend_from_slice(&unit.to_le_bytes());
+        }
+        let (p2, _) = from_fdx_bytes(&utf16_le).expect("UTF-16 LE FDX");
+        assert_eq!(p2.blocks.len(), 3);
+        assert_eq!(p2.blocks[0].text, "INT. OFFICE - DAY");
+        assert_eq!(p2.blocks[1].text, "A phone rings.");
     }
 }

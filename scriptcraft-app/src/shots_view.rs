@@ -300,6 +300,7 @@ pub fn show(
     let total_pct = (covered_body_blocks * 100)
         .checked_div(total_body_blocks)
         .unwrap_or(0);
+    let proj_cuts = project.shots.project_cut_stats(&scenes, &project.blocks);
 
     // 1. Top workspace header strip (view mode + KPI + export controls)
     egui::TopBottomPanel::top("shots_header")
@@ -359,27 +360,58 @@ pub fn show(
                         }
                     });
 
-                // Coverage KPI pill
+                // Coverage & pacing KPI pill (shots, editorial cuts, avg cut length, coverage)
+                let kpi_text = if proj_cuts.cut_count > 0 {
+                    format!(
+                        "{} {}  ·  {} {}  ·  avg {:.1}s  ·  {}%",
+                        project.shots.len(),
+                        if project.shots.len() == 1 {
+                            "shot"
+                        } else {
+                            "shots"
+                        },
+                        proj_cuts.cut_count,
+                        if proj_cuts.cut_count == 1 {
+                            "cut"
+                        } else {
+                            "cuts"
+                        },
+                        proj_cuts.avg_cut_secs,
+                        total_pct
+                    )
+                } else {
+                    format!(
+                        "{} {}  ·  {}% covered",
+                        project.shots.len(),
+                        if project.shots.len() == 1 {
+                            "shot"
+                        } else {
+                            "shots"
+                        },
+                        total_pct
+                    )
+                };
+                let kpi_tip = if proj_cuts.cut_count > 0 {
+                    format!(
+                        "{} camera {} · {} editorial {} · avg {:.1}s per cut (ASL) · {}% script covered",
+                        project.shots.len(),
+                        if project.shots.len() == 1 { "setup" } else { "setups" },
+                        proj_cuts.cut_count,
+                        if proj_cuts.cut_count == 1 { "cut" } else { "cuts" },
+                        proj_cuts.avg_cut_secs,
+                        total_pct
+                    )
+                } else {
+                    "Assign shots to script beats to see cut count and average cut duration".to_string()
+                };
                 egui::Frame::new()
                     .fill(kit().surface)
                     .stroke(Stroke::new(1.0_f32, kit().stroke))
                     .corner_radius(CornerRadius::same(6))
                     .inner_margin(Margin::symmetric(10, 4))
                     .show(ui, |ui| {
-                        ui.label(
-                            RichText::new(format!(
-                                "{} {}  ·  {}% covered",
-                                project.shots.len(),
-                                if project.shots.len() == 1 {
-                                    "shot"
-                                } else {
-                                    "shots"
-                                },
-                                total_pct
-                            ))
-                            .size(12.0)
-                            .color(kit().text),
-                        );
+                        ui.label(RichText::new(kpi_text).size(12.0).color(kit().text))
+                            .on_hover_text(kpi_tip);
                     });
 
                 // Zoom controls (controls Floor Plan zoom in Floor Plan mode, script zoom otherwise)
@@ -636,11 +668,20 @@ pub fn show(
                             &project.blocks,
                             &block_coverage,
                         );
+                        let scene_cuts = project.shots.scene_cut_stats(scene, &project.blocks);
                         let pct = (covered * 100).checked_div(total).unwrap_or(0);
                         let active = state.selected_scene == si;
 
-                        let row_resp =
-                            scene_nav_row(ui, &label, &scene.heading, shot_count, pct, active);
+                        let row_resp = scene_nav_row(
+                            ui,
+                            &label,
+                            &scene.heading,
+                            shot_count,
+                            scene_cuts.cut_count,
+                            scene_cuts.avg_cut_secs,
+                            pct,
+                            active,
+                        );
                         if row_resp.clicked() && state.selected_scene != si {
                             state.selected_scene = si;
                             state.clear_selection();
@@ -815,11 +856,14 @@ pub fn show(
     action
 }
 
+#[allow(clippy::too_many_arguments)]
 fn scene_nav_row(
     ui: &mut Ui,
     label: &str,
     heading: &str,
     shot_count: usize,
+    cut_count: usize,
+    avg_cut_secs: f32,
     pct: usize,
     active: bool,
 ) -> egui::Response {
@@ -827,6 +871,15 @@ fn scene_nav_row(
     let height = 54.0;
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, height), Sense::click());
     let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+    let resp = if cut_count > 0 {
+        resp.on_hover_text(format!(
+            "{shot_count} {} · {cut_count} {} · avg {avg_cut_secs:.1}s/cut · {pct}% covered",
+            if shot_count == 1 { "shot" } else { "shots" },
+            if cut_count == 1 { "cut" } else { "cuts" },
+        ))
+    } else {
+        resp
+    };
     resp.widget_info(|| {
         egui::WidgetInfo::labeled(
             egui::WidgetType::Button,
@@ -905,10 +958,17 @@ fn scene_nav_row(
             head_w,
         );
 
-        let meta = format!(
-            "{shot_count} {} · {pct}%",
-            if shot_count == 1 { "shot" } else { "shots" }
-        );
+        let meta = if cut_count > 0 {
+            format!(
+                "{shot_count} sh · {cut_count} {} · {avg_cut_secs:.1}s",
+                if cut_count == 1 { "cut" } else { "cuts" }
+            )
+        } else {
+            format!(
+                "{shot_count} {} · {pct}%",
+                if shot_count == 1 { "shot" } else { "shots" }
+            )
+        };
         let meta_galley = p.layout_no_wrap(meta, FontId::proportional(10.5), kit().disabled_text);
         let meta_pos = Pos2::new(
             rect.right() - 10.0 - meta_galley.size().x,
@@ -955,6 +1015,7 @@ fn show_right_pane(
         Some(sc) => project.shots.shots_for_scene(sc, &project.blocks),
         None => (0..project.shots.shots.len()).collect(),
     };
+    let active_cuts = active_scene.map(|sc| project.shots.scene_cut_stats(sc, &project.blocks));
 
     ui.horizontal(|ui| {
         overline(
@@ -962,11 +1023,22 @@ fn show_right_pane(
             &format!("SCENE {} SHOTS", scene_label.trim_end_matches('.')),
         );
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            let right_meta = match active_cuts {
+                Some(st) if st.cut_count > 0 => format!(
+                    "{} sh · {} {} · {:.1}s",
+                    scene_shot_indices.len(),
+                    st.cut_count,
+                    if st.cut_count == 1 { "cut" } else { "cuts" },
+                    st.avg_cut_secs
+                ),
+                _ => format!("{}", scene_shot_indices.len()),
+            };
             ui.label(
-                RichText::new(format!("{}", scene_shot_indices.len()))
+                RichText::new(right_meta)
                     .size(11.0)
                     .color(kit().disabled_text),
-            );
+            )
+            .on_hover_text("Camera setups · Editorial cuts · Average cut duration (ASL)");
         });
     });
     ui.add_space(6.0);
@@ -2374,6 +2446,7 @@ fn show_center_pane(
                                 block_coverage,
                             );
                             let sc_pct = (cov_b * 100).checked_div(tot_b).unwrap_or(0);
+                            let sc_cuts = project.shots.scene_cut_stats(sc, &project.blocks);
                             ui.horizontal(|ui| {
                                 ui.label(
                                     RichText::new(format!(
@@ -2385,13 +2458,24 @@ fn show_center_pane(
                                     .color(paper_accent),
                                 );
                                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                    ui.label(
-                                        RichText::new(format!(
+                                    let stats_lbl = if sc_cuts.cut_count > 0 {
+                                        format!(
+                                            "{n_shots} {} · {} {} · avg {:.1}s · {sc_pct}% covered",
+                                            if n_shots == 1 { "shot" } else { "shots" },
+                                            sc_cuts.cut_count,
+                                            if sc_cuts.cut_count == 1 { "cut" } else { "cuts" },
+                                            sc_cuts.avg_cut_secs,
+                                        )
+                                    } else {
+                                        format!(
                                             "{n_shots} {} · {sc_pct}% covered",
                                             if n_shots == 1 { "shot" } else { "shots" }
-                                        ))
-                                        .size(11.0 * zoom)
-                                        .color(paper_muted),
+                                        )
+                                    };
+                                    ui.label(
+                                        RichText::new(stats_lbl)
+                                            .size(11.0 * zoom)
+                                            .color(paper_muted),
                                     );
                                 });
                             });

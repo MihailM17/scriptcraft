@@ -63,18 +63,18 @@ impl NativeMenu {
         let preview = MenuItem::with_id(ID_PREVIEW, "Print preview script", true, acc("F12"));
 
         // The first submenu is the macOS application menu (app name).
-        let app_about = MenuItem::with_id(ID_ABOUT, "About ScriptCraft", true, None);
+        let app_about = MenuItem::with_id(ID_ABOUT, "About Kino Scenarist", true, None);
         let app_settings = MenuItem::with_id(ID_SETTINGS, "Settings...", true, acc("CmdOrCtrl+,"));
         let app_sep_a = PredefinedMenuItem::separator();
         let services = PredefinedMenuItem::services(None);
         let app_sep_b = PredefinedMenuItem::separator();
-        let hide = PredefinedMenuItem::hide(Some("Hide ScriptCraft"));
+        let hide = PredefinedMenuItem::hide(Some("Hide Kino Scenarist"));
         let hide_others = PredefinedMenuItem::hide_others(Some("Hide Others"));
         let show_all = PredefinedMenuItem::show_all(Some("Show All"));
         let app_sep_c = PredefinedMenuItem::separator();
-        let quit = MenuItem::with_id(ID_QUIT, "Quit ScriptCraft", true, acc("CmdOrCtrl+Q"));
+        let quit = MenuItem::with_id(ID_QUIT, "Quit Kino Scenarist", true, acc("CmdOrCtrl+Q"));
         let app_menu = Submenu::with_items(
-            "ScriptCraft",
+            "Kino Scenarist",
             true,
             &[
                 &app_about,
@@ -174,8 +174,8 @@ impl NativeMenu {
             ],
         )?;
 
-        let about = MenuItem::with_id(ID_ABOUT, "About ScriptCraft", true, None);
-        let help = MenuItem::with_id(ID_HELP, "ScriptCraft Help", true, acc("F1"));
+        let about = MenuItem::with_id(ID_ABOUT, "About Kino Scenarist", true, None);
+        let help = MenuItem::with_id(ID_HELP, "Kino Scenarist Help", true, acc("F1"));
         let help_menu = Submenu::with_items("Help", true, &[&about, &help])?;
 
         let menu = Menu::with_items(&[&app_menu, &file, &edit, &script, &view, &help_menu])?;

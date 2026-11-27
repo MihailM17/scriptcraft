@@ -983,3 +983,144 @@ fn directors_breakdown_pdf_renders_floor_plan_shapes_and_storyboard_images() {
         "breakdown sheet must show header and shot cards: {breakdown_txt}"
     );
 }
+
+#[test]
+fn directors_breakdown_dense_square_room_renders_camera_key_cleanly() {
+    use scriptcraft_core::kitsp;
+    use scriptcraft_core::model::{ElementType, Project, ScriptBlock};
+    use scriptcraft_core::shots::{
+        PlanActor, PlanCamera, PlanProp, PropKind, ShotColor, ShotMovement, ShotRange, ShotSize,
+    };
+    use scriptcraft_layout::pdf;
+
+    let mut p = Project {
+        title: "ПОКЕР".into(),
+        blocks: vec![
+            ScriptBlock::new(
+                ElementType::SceneHeading,
+                "ИНТ. СТАЯТА ЗА ПОЧИВКА. НОЩ".into(),
+            ),
+            ScriptBlock::new(
+                ElementType::Action,
+                "Групата изследователи се е наредила около бюрото отрупано с карти.".into(),
+            ),
+            ScriptBlock::new(ElementType::Character, "КОПИНОВ".into()),
+            ScriptBlock::new(
+                ElementType::Dialogue,
+                "Момчета, време е да се поразтъпчем.".into(),
+            ),
+        ],
+        ..Default::default()
+    };
+    let scene_id = p.blocks[0].id;
+    let b1 = p.blocks[1].id;
+    let b3 = p.blocks[3].id;
+
+    let shots_spec = [
+        ("Най-общ", ShotSize::Ws, "24mm", 0usize, 0.0_f32, 2.55_f32, -90.0_f32, 4.4_f32),
+        ("Цялата маса", ShotSize::Ws, "20mm", 1, 0.72, 1.75, -108.0, 3.6),
+        ("Копинов Близък", ShotSize::Cu, "50mm", 2, -0.78, -0.10, -172.0, 2.0),
+        ("Исаков Среден", ShotSize::Ms, "35mm", 3, -0.25, 0.25, -35.0, 2.6),
+        ("Копинов Среден", ShotSize::Ms, "35mm", 4, 0.18, 0.25, -145.0, 2.6),
+        ("Детайл Маса", ShotSize::Insert, "50mm", 5, 0.02, -0.18, -90.0, 1.6),
+        ("Исаков Близък", ShotSize::Cu, "50mm", 6, 0.62, -0.12, -15.0, 2.0),
+        ("О'Бърн Близък", ShotSize::Cu, "50mm", 7, 0.90, -0.22, -128.0, 2.2),
+    ];
+
+    let mut cams = Vec::new();
+    for (i, &(name, size, lens, col_i, cx, cy, ang, cone)) in shots_spec.iter().enumerate() {
+        let range = if i % 2 == 0 {
+            ShotRange::blocks(b1, b1)
+        } else {
+            ShotRange::blocks(b3, b3)
+        };
+        let sid = p.shots.add_shot(
+            Some(scene_id),
+            "1",
+            size,
+            ShotMovement::Static,
+            lens.into(),
+            String::new(),
+            range,
+        );
+        if let Some(s) = p.shots.get_mut(sid) {
+            s.code = name.into();
+            s.color = ShotColor::from_index(col_i);
+        }
+        cams.push(PlanCamera {
+            shot_id: sid,
+            x: cx,
+            y: cy,
+            angle_deg: ang,
+            fov_deg: None,
+            cone_length: Some(cone),
+            track_to: None,
+        });
+    }
+
+    let plan = p.shots.ensure_floor_plan(scene_id);
+    plan.props = vec![
+        PlanProp { id: uuid::Uuid::new_v4(), kind: PropKind::Wall, label: String::new(), x: 0.0, y: -2.4, w: 5.8, h: 0.24, angle_deg: 0.0 },
+        PlanProp { id: uuid::Uuid::new_v4(), kind: PropKind::Wall, label: String::new(), x: 0.0, y: 3.3, w: 5.8, h: 0.24, angle_deg: 0.0 },
+        PlanProp { id: uuid::Uuid::new_v4(), kind: PropKind::Wall, label: String::new(), x: -2.9, y: 0.45, w: 0.24, h: 5.9, angle_deg: 0.0 },
+        PlanProp { id: uuid::Uuid::new_v4(), kind: PropKind::Wall, label: String::new(), x: 2.9, y: -0.35, w: 0.24, h: 4.3, angle_deg: 0.0 },
+        PlanProp { id: uuid::Uuid::new_v4(), kind: PropKind::Door, label: String::new(), x: 2.9, y: 2.55, w: 1.1, h: 0.2, angle_deg: 90.0 },
+        PlanProp { id: uuid::Uuid::new_v4(), kind: PropKind::Circle, label: "Table".into(), x: 0.0, y: -0.55, w: 3.2, h: 1.35, angle_deg: 0.0 },
+    ];
+    plan.actors = vec![
+        PlanActor { id: uuid::Uuid::new_v4(), name: "КОПИНОВ".into(), x: -1.75, y: -0.05, angle_deg: 0.0, color: ShotColor::from_index(3), move_to: None },
+        PlanActor { id: uuid::Uuid::new_v4(), name: "ИСАКОВ".into(), x: 1.82, y: -0.02, angle_deg: 180.0, color: ShotColor::from_index(5), move_to: None },
+        PlanActor { id: uuid::Uuid::new_v4(), name: "О'БЪРН".into(), x: -1.35, y: -1.30, angle_deg: 42.0, color: ShotColor::from_index(4), move_to: None },
+        PlanActor { id: uuid::Uuid::new_v4(), name: "ТАЧЪР".into(), x: 0.0, y: -1.60, angle_deg: 90.0, color: ShotColor::from_index(8), move_to: None },
+        PlanActor { id: uuid::Uuid::new_v4(), name: "ЛЕДБЕНДЪР".into(), x: 1.32, y: -1.32, angle_deg: 138.0, color: ShotColor::from_index(0), move_to: None },
+    ];
+    plan.cameras = cams;
+
+    let read = |name: &str| {
+        std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../scriptcraft-app/assets/fonts")
+                .join(name),
+        )
+        .expect("font")
+    };
+    let fonts = pdf::ExportFonts {
+        regular: &read("IBMPlexMono-Regular.ttf"),
+        bold: &read("IBMPlexMono-Bold.ttf"),
+        italic: Some(&read("CourierPrime-Italic.ttf")),
+        fallback_regular: &read("CourierPrime-Regular.ttf"),
+        fallback_bold: &read("CourierPrime-Bold.ttf"),
+        fallback_italic: Some(&read("LiberationMono-Italic.ttf")),
+    };
+    let meta = kitsp::Metadata {
+        title: "ПОКЕР".into(),
+        ..Default::default()
+    };
+    let opts = pdf::ExportOptions {
+        title_page: false,
+        color_by_shots: true,
+        ..Default::default()
+    };
+    let bytes = pdf::to_directors_breakdown_pdf_bytes(
+        &p,
+        &meta,
+        &opts,
+        &[],
+        None,
+        &fonts,
+        &std::collections::HashMap::new(),
+    )
+    .expect("dense poker room breakdown pdf");
+    assert!(bytes.starts_with(b"%PDF-"));
+
+    if let Ok(dump_path) = std::env::var("DUMP_POKER_PDF") {
+        std::fs::write(&dump_path, &bytes).expect("dump poker breakdown pdf");
+    }
+
+    let doc = lopdf::Document::load_mem(&bytes).expect("parse poker breakdown pdf");
+    let page1_txt = doc.extract_text(&[1]).unwrap_or_default();
+    assert!(
+        page1_txt.contains("CAMERA KEY"),
+        "expected Camera Key legend beside square floor plan: {page1_txt}"
+    );
+}

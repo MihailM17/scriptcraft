@@ -2052,6 +2052,29 @@ fn build_shot_sheet_pages(
     } else {
         ((covered_blocks * 100 + total_blocks / 2) / total_blocks).max(1)
     };
+    let proj_cuts = p.shots.project_cut_stats(&scenes, &p.blocks);
+    let summary_hdr = if proj_cuts.cut_count > 0 {
+        format!(
+            "{} {}  |  {} {} (avg {:.1}s)  |  {} {}  |  {}% coverage",
+            p.shots.len(),
+            if p.shots.len() == 1 { "shot" } else { "shots" },
+            proj_cuts.cut_count,
+            if proj_cuts.cut_count == 1 { "cut" } else { "cuts" },
+            proj_cuts.avg_cut_secs,
+            scenes.len(),
+            if scenes.len() == 1 { "scene" } else { "scenes" },
+            pct
+        )
+    } else {
+        format!(
+            "{} {} across {} {}  |  {}% script coverage",
+            p.shots.len(),
+            if p.shots.len() == 1 { "shot" } else { "shots" },
+            scenes.len(),
+            if scenes.len() == 1 { "scene" } else { "scenes" },
+            pct
+        )
+    };
     ops.push(Op::SetFillColor { col: muted.clone() });
     draw_summary_text(
         &mut ops,
@@ -2060,14 +2083,7 @@ fn build_shot_sheet_pages(
         9.2,
         margin,
         y,
-        &format!(
-            "{} {} across {} {}  |  {}% script coverage",
-            p.shots.len(),
-            if p.shots.len() == 1 { "shot" } else { "shots" },
-            scenes.len(),
-            if scenes.len() == 1 { "scene" } else { "scenes" },
-            pct
-        ),
+        &summary_hdr,
     );
     y -= 7.0;
 
@@ -2899,44 +2915,222 @@ fn pdf_rot2(x: f32, y: f32, rad: f32) -> (f32, f32) {
     (x * c - y * s, x * s + y * c)
 }
 
-/// Draw a razor-sharp vector 2D overhead floor plan into `(box_x, box_y, box_w, box_h)` mm
-/// (where `box_y` is the bottom edge in PDF coordinates).
-#[allow(clippy::too_many_arguments)]
-fn draw_floor_plan_vector(
+fn push_pdf_rounded_rect(
     ops: &mut Vec<Op>,
-    p: &Project,
-    plan: &scriptcraft_core::shots::SceneFloorPlan,
-    box_x: f32,
-    box_y: f32,
-    box_w: f32,
-    box_h: f32,
-    regular: &Face,
-    bold: &Face,
-    fallback_regular: &Face,
-    fallback_bold: &Face,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    r: f32,
+    mode: PaintMode,
 ) {
-    use scriptcraft_core::shots::{lens_to_fov_deg, PropKind};
+    let r = r.min(w * 0.5).min(h * 0.5).max(0.0);
+    if r < 0.05 {
+        push_pdf_polygon(
+            ops,
+            &[(x, y), (x + w, y), (x + w, y + h), (x, y + h)],
+            mode,
+        );
+        return;
+    }
+    let segs = 4usize;
+    let corners = [
+        (x + w - r, y + r, -std::f32::consts::FRAC_PI_2, 0.0),
+        (x + w - r, y + h - r, 0.0, std::f32::consts::FRAC_PI_2),
+        (
+            x + r,
+            y + h - r,
+            std::f32::consts::FRAC_PI_2,
+            std::f32::consts::PI,
+        ),
+        (
+            x + r,
+            y + r,
+            std::f32::consts::PI,
+            std::f32::consts::PI * 1.5,
+        ),
+    ];
+    let mut pts = Vec::with_capacity(corners.len() * (segs + 1));
+    for (cx, cy, a0, a1) in corners {
+        for k in 0..=segs {
+            let a = a0 + (a1 - a0) * (k as f32 / segs as f32);
+            pts.push((cx + r * a.cos(), cy + r * a.sin()));
+        }
+    }
+    push_pdf_polygon(ops, &pts, mode);
+}
 
-    // Frame background + border
-    ops.push(Op::SetFillColor {
-        col: Color::Greyscale(Greyscale::new(0.985, None)),
-    });
-    ops.push(Op::SetOutlineColor {
-        col: Color::Greyscale(Greyscale::new(0.76, None)),
-    });
-    ops.push(Op::SetOutlineThickness { pt: Pt(0.6) });
+fn push_pdf_arrow_head(ops: &mut Vec<Op>, tip: (f32, f32), dir: (f32, f32), size_mm: f32) {
+    let len = dir.0.hypot(dir.1);
+    if len < 1e-4 {
+        return;
+    }
+    let ux = dir.0 / len;
+    let uy = dir.1 / len;
+    let px = -uy;
+    let py = ux;
+    let back = (tip.0 - ux * size_mm, tip.1 - uy * size_mm);
+    let half = size_mm * 0.52;
     push_pdf_polygon(
         ops,
         &[
-            (box_x, box_y),
-            (box_x + box_w, box_y),
-            (box_x + box_w, box_y + box_h),
-            (box_x, box_y + box_h),
+            tip,
+            (back.0 + px * half, back.1 + py * half),
+            (back.0 - px * half, back.1 - py * half),
         ],
-        PaintMode::FillStroke,
+        PaintMode::Fill,
     );
+}
 
-    // Compute world bounding box of all items (including camera cones & move targets)
+/// Exact Sutherland-Hodgman polygon clip against `[min_x, max_x] x [min_y, max_y]`.
+fn clip_polygon_to_rect(
+    poly: &[(f32, f32)],
+    min_x: f32,
+    min_y: f32,
+    max_x: f32,
+    max_y: f32,
+) -> Vec<(f32, f32)> {
+    fn clip_edge<F, G>(pts: &[(f32, f32)], inside: F, intersect: G) -> Vec<(f32, f32)>
+    where
+        F: Fn((f32, f32)) -> bool,
+        G: Fn((f32, f32), (f32, f32)) -> (f32, f32),
+    {
+        if pts.is_empty() {
+            return Vec::new();
+        }
+        let mut out = Vec::with_capacity(pts.len() + 2);
+        let mut s = *pts.last().unwrap();
+        let mut s_in = inside(s);
+        for &e in pts {
+            let e_in = inside(e);
+            if e_in {
+                if !s_in {
+                    out.push(intersect(s, e));
+                }
+                out.push(e);
+            } else if s_in {
+                out.push(intersect(s, e));
+            }
+            s = e;
+            s_in = e_in;
+        }
+        out
+    }
+
+    let p = clip_edge(
+        poly,
+        |pt| pt.0 >= min_x,
+        |a, b| {
+            let t = ((min_x - a.0) / (b.0 - a.0).max(1e-6_f32.copysign(b.0 - a.0))).clamp(0.0, 1.0);
+            (min_x, a.1 + t * (b.1 - a.1))
+        },
+    );
+    let p = clip_edge(
+        &p,
+        |pt| pt.0 <= max_x,
+        |a, b| {
+            let denom = b.0 - a.0;
+            let t = if denom.abs() < 1e-6 {
+                0.0
+            } else {
+                ((max_x - a.0) / denom).clamp(0.0, 1.0)
+            };
+            (max_x, a.1 + t * (b.1 - a.1))
+        },
+    );
+    let p = clip_edge(
+        &p,
+        |pt| pt.1 >= min_y,
+        |a, b| {
+            let denom = b.1 - a.1;
+            let t = if denom.abs() < 1e-6 {
+                0.0
+            } else {
+                ((min_y - a.1) / denom).clamp(0.0, 1.0)
+            };
+            (a.0 + t * (b.0 - a.0), min_y)
+        },
+    );
+    clip_edge(
+        &p,
+        |pt| pt.1 <= max_y,
+        |a, b| {
+            let denom = b.1 - a.1;
+            let t = if denom.abs() < 1e-6 {
+                0.0
+            } else {
+                ((max_y - a.1) / denom).clamp(0.0, 1.0)
+            };
+            (a.0 + t * (b.0 - a.0), max_y)
+        },
+    )
+}
+
+/// Exact Liang-Barsky segment clip against `[min_x, max_x] x [min_y, max_y]`.
+fn clip_segment_to_rect(
+    a: (f32, f32),
+    b: (f32, f32),
+    min_x: f32,
+    min_y: f32,
+    max_x: f32,
+    max_y: f32,
+) -> Option<((f32, f32), (f32, f32))> {
+    let dx = b.0 - a.0;
+    let dy = b.1 - a.1;
+    let mut t0 = 0.0_f32;
+    let mut t1 = 1.0_f32;
+    for (p, q) in [
+        (-dx, a.0 - min_x),
+        (dx, max_x - a.0),
+        (-dy, a.1 - min_y),
+        (dy, max_y - a.1),
+    ] {
+        if p.abs() < 1e-6 {
+            if q < 0.0 {
+                return None;
+            }
+        } else {
+            let r = q / p;
+            if p < 0.0 {
+                if r > t1 {
+                    return None;
+                }
+                if r > t0 {
+                    t0 = r;
+                }
+            } else {
+                if r < t0 {
+                    return None;
+                }
+                if r < t1 {
+                    t1 = r;
+                }
+            }
+        }
+    }
+    Some(((a.0 + t0 * dx, a.1 + t0 * dy), (a.0 + t1 * dx, a.1 + t1 * dy)))
+}
+
+fn rect_overlap_area(a: (f32, f32, f32, f32), b: (f32, f32, f32, f32)) -> f32 {
+    let ox = (a.2.min(b.2) - a.0.max(b.0)).max(0.0);
+    let oy = (a.3.min(b.3) - a.1.max(b.1)).max(0.0);
+    ox * oy
+}
+
+fn ink_contrast_on_rgb(r: u8, g: u8, b: u8) -> Color {
+    let lum = 0.299 * (r as f32) + 0.587 * (g as f32) + 0.114 * (b as f32);
+    if lum > 170.0 {
+        Color::Greyscale(Greyscale::new(0.10, None))
+    } else {
+        Color::Greyscale(Greyscale::new(1.0, None))
+    }
+}
+
+/// Tight world bounding box `(min_x, max_x, min_y, max_y)` for a scene's 2D
+/// floor plan, keeping room architecture large and crisp without letting long
+/// FOV beams shrink the room down.
+fn floor_plan_world_bounds(plan: &scriptcraft_core::shots::SceneFloorPlan) -> (f32, f32, f32, f32) {
+    use scriptcraft_core::shots::PropKind;
     let mut min_x = f32::INFINITY;
     let mut max_x = f32::NEG_INFINITY;
     let mut min_y = f32::INFINITY;
@@ -2953,41 +3147,94 @@ fn draw_floor_plan_vector(
         let hh = prop.h * 0.5;
         for (lx, ly) in [(-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)] {
             let (rx, ry) = pdf_rot2(lx, ly, rad);
-            expand(prop.x + rx, prop.y + ry, 0.45);
+            expand(prop.x + rx, prop.y + ry, 0.25);
+        }
+        if prop.kind == PropKind::Door {
+            let swing_rad = rad - 65.0_f32.to_radians();
+            expand(
+                prop.x - hw * rad.cos() + prop.w * swing_rad.cos(),
+                prop.y - hw * rad.sin() + prop.w * swing_rad.sin(),
+                0.22,
+            );
         }
     }
     for actor in &plan.actors {
-        expand(actor.x, actor.y, 0.9);
+        expand(actor.x, actor.y, 0.72);
         if let Some((mx, my)) = actor.move_to {
-            expand(mx, my, 0.6);
+            expand(mx, my, 0.45);
         }
     }
     for cam in &plan.cameras {
-        let cone = cam.effective_cone_length();
+        let cone = cam.effective_cone_length().min(3.0);
         let rad = cam.angle_deg.to_radians();
-        expand(cam.x, cam.y, 0.9);
+        expand(cam.x, cam.y, 0.62);
         expand(
-            cam.x + rad.cos() * cone * 0.65,
-            cam.y + rad.sin() * cone * 0.65,
-            0.7,
+            cam.x + rad.cos() * cone * 0.45,
+            cam.y + rad.sin() * cone * 0.45,
+            0.35,
         );
         if let Some((tx, ty)) = cam.track_to {
-            expand(tx, ty, 0.7);
+            expand(tx, ty, 0.50);
         }
     }
     if !min_x.is_finite() {
-        min_x = -4.0;
-        max_x = 4.0;
-        min_y = -2.5;
-        max_y = 2.5;
+        (-3.5, 3.5, -2.5, 2.5)
+    } else {
+        (min_x, max_x, min_y, max_y)
     }
+}
 
-    let span_x = (max_x - min_x).max(4.0);
-    let span_y = (max_y - min_y).max(3.0);
-    let pad_mm = 6.0_f32;
+/// Draw a razor-sharp vector 2D overhead floor plan into `(box_x, box_y, box_w, box_h)` mm
+/// (where `box_y` is the bottom edge in PDF coordinates).
+///
+/// Cameras display crisp centered index numbers from `shot_numbers` (paired
+/// with a dedicated Camera Key legend beside/below the diagram) so even dense
+/// multi-camera setups around one table stay completely legible with zero
+/// overlapping text.
+#[allow(clippy::too_many_arguments)]
+fn draw_floor_plan_vector(
+    ops: &mut Vec<Op>,
+    p: &Project,
+    plan: &scriptcraft_core::shots::SceneFloorPlan,
+    shot_numbers: &HashMap<uuid::Uuid, usize>,
+    box_x: f32,
+    box_y: f32,
+    box_w: f32,
+    box_h: f32,
+    regular: &Face,
+    bold: &Face,
+    fallback_regular: &Face,
+    fallback_bold: &Face,
+) {
+    use scriptcraft_core::shots::{lens_to_fov_deg, PropKind};
+
+    let inner_min_x = box_x + 0.5;
+    let inner_min_y = box_y + 0.5;
+    let inner_max_x = box_x + box_w - 0.5;
+    let inner_max_y = box_y + box_h - 0.5;
+
+    // Frame background
+    ops.push(Op::SetFillColor {
+        col: Color::Greyscale(Greyscale::new(0.988, None)),
+    });
+    push_pdf_polygon(
+        ops,
+        &[
+            (box_x, box_y),
+            (box_x + box_w, box_y),
+            (box_x + box_w, box_y + box_h),
+            (box_x, box_y + box_h),
+        ],
+        PaintMode::Fill,
+    );
+
+    let (min_x, max_x, min_y, max_y) = floor_plan_world_bounds(plan);
+    let span_x = (max_x - min_x).max(3.2);
+    let span_y = (max_y - min_y).max(2.6);
+    let pad_mm = 4.5_f32;
     let scale = ((box_w - 2.0 * pad_mm) / span_x)
         .min((box_h - 2.0 * pad_mm) / span_y)
-        .clamp(3.0, 22.0);
+        .clamp(4.0, 28.0);
     let plan_cx = (min_x + max_x) * 0.5;
     let plan_cy = (min_y + max_y) * 0.5;
     let box_cx = box_x + box_w * 0.5;
@@ -3000,176 +3247,344 @@ fn draw_floor_plan_vector(
             box_cy - (wy - plan_cy) * scale,
         )
     };
-    let clamp_pt = |pt: (f32, f32)| -> (f32, f32) {
-        (
-            pt.0.clamp(box_x + 0.8, box_x + box_w - 0.8),
-            pt.1.clamp(box_y + 0.8, box_y + box_h - 0.8),
-        )
-    };
 
-    // Subtle 1m blueprint grid inside frame
+    // Precompute camera FOV geometry for two-pass rendering (all soft fills
+    // first, then grid, then all crisp FOV boundary rays so no cone fill ever
+    // erases another camera's FOV edges).
+    struct ConeGeom {
+        cp: (f32, f32),
+        arc: Vec<(f32, f32)>,
+        col: Color,
+        tint: Color,
+        arc_col: Color,
+    }
+    let mut cones: Vec<ConeGeom> = Vec::with_capacity(plan.cameras.len());
+    for cam in &plan.cameras {
+        let Some(shot) = p.shots.get(cam.shot_id) else {
+            continue;
+        };
+        let cp = to_mm(cam.x, cam.y);
+        let rad = cam.angle_deg.to_radians();
+        let (r, g, b) = shot.color.rgb();
+        let rf = r as f32 / 255.0;
+        let gf = g as f32 / 255.0;
+        let bf = b as f32 / 255.0;
+        let col = Color::Rgb(Rgb::new(rf, gf, bf, None));
+        let tint = Color::Rgb(Rgb::new(
+            0.915 + 0.085 * rf,
+            0.915 + 0.085 * gf,
+            0.915 + 0.085 * bf,
+            None,
+        ));
+        let arc_col = Color::Rgb(Rgb::new(
+            0.55 + 0.45 * rf,
+            0.55 + 0.45 * gf,
+            0.55 + 0.45 * bf,
+            None,
+        ));
+        let fov_deg = cam.fov_deg.unwrap_or_else(|| lens_to_fov_deg(&shot.lens));
+        let half_fov = (fov_deg * 0.5).to_radians();
+        let cone_m = cam.effective_cone_length();
+        let steps = 20usize;
+        let mut arc = Vec::with_capacity(steps + 1);
+        for k in 0..=steps {
+            let a = rad - half_fov + (2.0 * half_fov) * (k as f32 / steps as f32);
+            arc.push(to_mm(cam.x + a.cos() * cone_m, cam.y + a.sin() * cone_m));
+        }
+        cones.push(ConeGeom {
+            cp,
+            arc,
+            col,
+            tint,
+            arc_col,
+        });
+    }
+
+    // Layer 0a: Airy pastel FOV wedge fills (clipped cleanly to diagram frame)
+    for cone in &cones {
+        let mut poly = Vec::with_capacity(cone.arc.len() + 1);
+        poly.push(cone.cp);
+        poly.extend_from_slice(&cone.arc);
+        let clipped = clip_polygon_to_rect(&poly, inner_min_x, inner_min_y, inner_max_x, inner_max_y);
+        if clipped.len() >= 3 {
+            ops.push(Op::SetFillColor {
+                col: cone.tint.clone(),
+            });
+            push_pdf_polygon(ops, &clipped, PaintMode::Fill);
+        }
+    }
+
+    // Layer 0b: Subtle 1m architectural blueprint grid (painted lightly over
+    // pastel fills so the scale grid stays visible across the whole floor plan)
     ops.push(Op::SetOutlineColor {
-        col: Color::Greyscale(Greyscale::new(0.91, None)),
+        col: Color::Greyscale(Greyscale::new(0.895, None)),
     });
-    ops.push(Op::SetOutlineThickness { pt: Pt(0.3) });
+    ops.push(Op::SetOutlineThickness { pt: Pt(0.28) });
     let half_w_m = (box_w * 0.5) / scale;
     let half_h_m = (box_h * 0.5) / scale;
     let mut gx = (plan_cx - half_w_m).ceil();
     while gx <= plan_cx + half_w_m {
         let sx = box_cx + (gx - plan_cx) * scale;
-        if sx > box_x + 1.0 && sx < box_x + box_w - 1.0 {
-            push_pdf_polyline(ops, &[(sx, box_y + 0.8), (sx, box_y + box_h - 0.8)], false);
+        if sx > inner_min_x + 0.5 && sx < inner_max_x - 0.5 {
+            push_pdf_polyline(ops, &[(sx, inner_min_y), (sx, inner_max_y)], false);
         }
         gx += 1.0;
     }
     let mut gy = (plan_cy - half_h_m).ceil();
     while gy <= plan_cy + half_h_m {
         let sy = box_cy - (gy - plan_cy) * scale;
-        if sy > box_y + 1.0 && sy < box_y + box_h - 1.0 {
-            push_pdf_polyline(ops, &[(box_x + 0.8, sy), (box_x + box_w - 0.8, sy)], false);
+        if sy > inner_min_y + 0.5 && sy < inner_max_y - 0.5 {
+            push_pdf_polyline(ops, &[(inner_min_x, sy), (inner_max_x, sy)], false);
         }
         gy += 1.0;
     }
 
-    // Layer 0: Camera FOV cones (painted FIRST under props/actors so cones
-    // never obscure actors, tables, or labels in PDF).
-    for cam in &plan.cameras {
-        let Some(shot) = p.shots.get(cam.shot_id) else {
-            continue;
-        };
-        let cp = clamp_pt(to_mm(cam.x, cam.y));
-        let rad = cam.angle_deg.to_radians();
-        let (r, g, b) = shot.color.rgb();
-        let col = Color::Rgb(Rgb::new(
-            r as f32 / 255.0,
-            g as f32 / 255.0,
-            b as f32 / 255.0,
-            None,
-        ));
-        let tint = Color::Rgb(Rgb::new(
-            0.86 + 0.14 * (r as f32 / 255.0),
-            0.86 + 0.14 * (g as f32 / 255.0),
-            0.86 + 0.14 * (b as f32 / 255.0),
-            None,
-        ));
-        let fov_deg = cam.fov_deg.unwrap_or_else(|| lens_to_fov_deg(&shot.lens));
-        let half_fov = (fov_deg * 0.5).to_radians();
-        let cone_m = cam.effective_cone_length();
+    // Precompute camera centers in mm so prop labels know if a camera sits on top
+    let cam_positions_mm: Vec<(f32, f32)> = plan
+        .cameras
+        .iter()
+        .filter(|c| p.shots.get(c.shot_id).is_some())
+        .map(|c| to_mm(c.x, c.y))
+        .collect();
 
-        let steps = 8usize;
-        let mut wedge = Vec::with_capacity(steps + 2);
-        wedge.push(cp);
-        for k in 0..=steps {
-            let a = rad - half_fov + (2.0 * half_fov) * (k as f32 / steps as f32);
-            wedge.push(clamp_pt(to_mm(
-                cam.x + a.cos() * cone_m,
-                cam.y + a.sin() * cone_m,
-            )));
-        }
-        ops.push(Op::SetFillColor { col: tint });
-        for k in 1..wedge.len() - 1 {
-            push_pdf_polygon(ops, &[cp, wedge[k], wedge[k + 1]], PaintMode::Fill);
-        }
-        ops.push(Op::SetOutlineColor { col });
-        ops.push(Op::SetOutlineThickness { pt: Pt(0.6) });
-        push_pdf_polyline(ops, &[cp, wedge[1]], false);
-        push_pdf_polyline(ops, &[cp, *wedge.last().unwrap()], false);
-    }
+    // Obstacle boxes in mm for smart collision-free actor name pill placement:
+    // (min_x, min_y, max_x, max_y, penalty_weight)
+    let mut obstacles: Vec<(f32, f32, f32, f32, f32)> = Vec::new();
 
-    // 180-degree Line of Action between first two actors
-    if plan.actors.len() >= 2 {
-        let a = to_mm(plan.actors[0].x, plan.actors[0].y);
-        let b = to_mm(plan.actors[1].x, plan.actors[1].y);
-        let dx = b.0 - a.0;
-        let dy = b.1 - a.1;
-        let len = dx.hypot(dy);
-        if len > 2.0 {
-            let ux = dx / len;
-            let uy = dy / len;
-            let p0 = clamp_pt((a.0 - ux * 24.0, a.1 - uy * 24.0));
-            let p1 = clamp_pt((b.0 + ux * 24.0, b.1 + uy * 24.0));
-            ops.push(Op::SetOutlineColor {
-                col: Color::Rgb(Rgb::new(0.86, 0.32, 0.32, None)),
-            });
-            ops.push(Op::SetOutlineThickness { pt: Pt(0.5) });
-            push_pdf_dashed_line(ops, p0, p1, 2.2, 1.8);
-        }
-    }
+    // Layer 1a: Furniture & floor props (tables, chairs, shapes, lights) first,
+    // then FOV sightlines on top of furniture so camera framing over tables is
+    // crystal clear, then Layer 1c: architectural walls/doors/windows.
+    let is_arch = |k: PropKind| matches!(k, PropKind::Wall | PropKind::Door | PropKind::Window);
+    for arch_pass in [false, true] {
+        if arch_pass {
+            // Layer 1b: Crisp FOV boundary rays + subtle outer arcs (drawn OVER
+            // tables/furniture so every camera's exact framing stays visible)
+            for cone in &cones {
+                if cone.arc.len() < 2 {
+                    continue;
+                }
+                ops.push(Op::SetOutlineColor {
+                    col: cone.arc_col.clone(),
+                });
+                ops.push(Op::SetOutlineThickness { pt: Pt(0.32) });
+                for seg in cone.arc.windows(2) {
+                    if let Some((a, b)) = clip_segment_to_rect(
+                        seg[0],
+                        seg[1],
+                        inner_min_x,
+                        inner_min_y,
+                        inner_max_x,
+                        inner_max_y,
+                    ) {
+                        push_pdf_polyline(ops, &[a, b], false);
+                    }
+                }
+                ops.push(Op::SetOutlineColor {
+                    col: cone.col.clone(),
+                });
+                ops.push(Op::SetOutlineThickness { pt: Pt(0.55) });
+                for &edge_pt in &[cone.arc[0], *cone.arc.last().unwrap()] {
+                    if let Some((a, b)) = clip_segment_to_rect(
+                        cone.cp,
+                        edge_pt,
+                        inner_min_x,
+                        inner_min_y,
+                        inner_max_x,
+                        inner_max_y,
+                    ) {
+                        push_pdf_polyline(ops, &[a, b], false);
+                    }
+                }
+            }
 
-    // Layer 1: Props
-    for prop in &plan.props {
-        let rad = prop.angle_deg.to_radians();
+            // 180-degree Line of Action between first two actors (clipped to frame)
+            if plan.actors.len() >= 2 {
+                let a = to_mm(plan.actors[0].x, plan.actors[0].y);
+                let b = to_mm(plan.actors[1].x, plan.actors[1].y);
+                let dx = b.0 - a.0;
+                let dy = b.1 - a.1;
+                let len = dx.hypot(dy);
+                if len > 2.0 {
+                    let ux = dx / len;
+                    let uy = dy / len;
+                    let ext = box_w.hypot(box_h);
+                    let p0 = (a.0 - ux * ext, a.1 - uy * ext);
+                    let p1 = (b.0 + ux * ext, b.1 + uy * ext);
+                    if let Some((c0, c1)) = clip_segment_to_rect(
+                        p0,
+                        p1,
+                        inner_min_x + 1.0,
+                        inner_min_y + 1.0,
+                        inner_max_x - 1.0,
+                        inner_max_y - 1.0,
+                    ) {
+                        ops.push(Op::SetOutlineColor {
+                            col: Color::Rgb(Rgb::new(0.86, 0.34, 0.34, None)),
+                        });
+                        ops.push(Op::SetOutlineThickness { pt: Pt(0.48) });
+                        push_pdf_dashed_line(ops, c0, c1, 2.4, 1.8);
+                    }
+                }
+            }
+        }
+
+        for prop in &plan.props {
+            if is_arch(prop.kind) != arch_pass {
+                continue;
+            }
+            let rad = prop.angle_deg.to_radians();
         let hw = prop.w * 0.5;
         let hh = prop.h * 0.5;
         let pt = |lx: f32, ly: f32| -> (f32, f32) {
             let (rx, ry) = pdf_rot2(lx, ly, rad);
-            clamp_pt(to_mm(prop.x + rx, prop.y + ry))
+            to_mm(prop.x + rx, prop.y + ry)
         };
         let corners = [pt(-hw, -hh), pt(hw, -hh), pt(hw, hh), pt(-hw, hh)];
+        let bx0 = corners.iter().map(|p| p.0).fold(f32::INFINITY, f32::min);
+        let bx1 = corners.iter().map(|p| p.0).fold(f32::NEG_INFINITY, f32::max);
+        let by0 = corners.iter().map(|p| p.1).fold(f32::INFINITY, f32::min);
+        let by1 = corners.iter().map(|p| p.1).fold(f32::NEG_INFINITY, f32::max);
+        let obs_weight = if prop.kind == PropKind::Wall { 6.5 } else { 4.2 };
+        obstacles.push((bx0, by0, bx1, by1, obs_weight));
+
         ops.push(Op::SetOutlineColor {
-            col: Color::Greyscale(Greyscale::new(0.32, None)),
+            col: Color::Greyscale(Greyscale::new(0.36, None)),
         });
-        ops.push(Op::SetOutlineThickness { pt: Pt(0.75) });
+        ops.push(Op::SetOutlineThickness { pt: Pt(0.65) });
         match prop.kind {
             PropKind::Wall => {
                 ops.push(Op::SetFillColor {
-                    col: Color::Greyscale(Greyscale::new(0.32, None)),
+                    col: Color::Greyscale(Greyscale::new(0.38, None)),
                 });
-                push_pdf_polygon(ops, &corners, PaintMode::FillStroke);
+                ops.push(Op::SetOutlineColor {
+                    col: Color::Greyscale(Greyscale::new(0.28, None)),
+                });
+                ops.push(Op::SetOutlineThickness { pt: Pt(0.45) });
+                let clipped = clip_polygon_to_rect(
+                    &corners,
+                    inner_min_x,
+                    inner_min_y,
+                    inner_max_x,
+                    inner_max_y,
+                );
+                if clipped.len() >= 3 {
+                    push_pdf_polygon(ops, &clipped, PaintMode::FillStroke);
+                }
             }
             PropKind::Window => {
                 ops.push(Op::SetFillColor {
                     col: Color::Rgb(Rgb::new(0.84, 0.93, 0.99, None)),
                 });
-                push_pdf_polygon(ops, &corners, PaintMode::FillStroke);
+                let clipped = clip_polygon_to_rect(
+                    &corners,
+                    inner_min_x,
+                    inner_min_y,
+                    inner_max_x,
+                    inner_max_y,
+                );
+                if clipped.len() >= 3 {
+                    push_pdf_polygon(ops, &clipped, PaintMode::FillStroke);
+                }
                 ops.push(Op::SetOutlineColor {
                     col: Color::Rgb(Rgb::new(0.28, 0.62, 0.90, None)),
                 });
-                push_pdf_polyline(ops, &[pt(-hw, 0.0), pt(hw, 0.0)], false);
+                if let Some((a, b)) = clip_segment_to_rect(
+                    pt(-hw, 0.0),
+                    pt(hw, 0.0),
+                    inner_min_x,
+                    inner_min_y,
+                    inner_max_x,
+                    inner_max_y,
+                ) {
+                    push_pdf_polyline(ops, &[a, b], false);
+                }
             }
             PropKind::Door => {
-                push_pdf_polyline(ops, &[pt(-hw, -hh), pt(-hw, hh)], false);
-                push_pdf_polyline(ops, &[pt(hw, -hh), pt(hw, hh)], false);
+                for (a, b) in [(pt(-hw, -hh), pt(-hw, hh)), (pt(hw, -hh), pt(hw, hh))] {
+                    if let Some((ca, cb)) = clip_segment_to_rect(
+                        a,
+                        b,
+                        inner_min_x,
+                        inner_min_y,
+                        inner_max_x,
+                        inner_max_y,
+                    ) {
+                        push_pdf_polyline(ops, &[ca, cb], false);
+                    }
+                }
                 let hinge = pt(-hw, 0.0);
                 let swing_rad = rad - 65.0_f32.to_radians();
-                let leaf_end = clamp_pt(to_mm(
+                let leaf_end = to_mm(
                     prop.x - hw * rad.cos() + prop.w * swing_rad.cos(),
                     prop.y - hw * rad.sin() + prop.w * swing_rad.sin(),
-                ));
-                ops.push(Op::SetOutlineThickness { pt: Pt(1.1) });
-                push_pdf_polyline(ops, &[hinge, leaf_end], false);
-                ops.push(Op::SetOutlineThickness { pt: Pt(0.45) });
-                let mut arc = Vec::with_capacity(11);
-                for k in 0..=10 {
-                    let a = rad - (65.0_f32 * k as f32 / 10.0).to_radians();
-                    arc.push(clamp_pt(to_mm(
+                );
+                ops.push(Op::SetOutlineThickness { pt: Pt(1.0) });
+                if let Some((ca, cb)) = clip_segment_to_rect(
+                    hinge,
+                    leaf_end,
+                    inner_min_x,
+                    inner_min_y,
+                    inner_max_x,
+                    inner_max_y,
+                ) {
+                    push_pdf_polyline(ops, &[ca, cb], false);
+                }
+                ops.push(Op::SetOutlineThickness { pt: Pt(0.42) });
+                let segs = 20usize;
+                let mut prev = to_mm(
+                    prop.x - hw * rad.cos() + prop.w * rad.cos(),
+                    prop.y - hw * rad.sin() + prop.w * rad.sin(),
+                );
+                for k in 1..=segs {
+                    let a = rad - (65.0_f32 * k as f32 / segs as f32).to_radians();
+                    let cur = to_mm(
                         prop.x - hw * rad.cos() + prop.w * a.cos(),
                         prop.y - hw * rad.sin() + prop.w * a.sin(),
-                    )));
+                    );
+                    if let Some((ca, cb)) = clip_segment_to_rect(
+                        prev,
+                        cur,
+                        inner_min_x,
+                        inner_min_y,
+                        inner_max_x,
+                        inner_max_y,
+                    ) {
+                        push_pdf_polyline(ops, &[ca, cb], false);
+                    }
+                    prev = cur;
                 }
-                push_pdf_polyline(ops, &arc, false);
             }
             PropKind::Circle => {
                 ops.push(Op::SetFillColor {
-                    col: Color::Greyscale(Greyscale::new(0.92, None)),
+                    col: Color::Greyscale(Greyscale::new(0.94, None)),
                 });
-                let pts: Vec<(f32, f32)> = (0..24)
+                let segs = 48usize;
+                let pts: Vec<(f32, f32)> = (0..segs)
                     .map(|k| {
-                        let a = std::f32::consts::TAU * (k as f32 / 24.0);
+                        let a = std::f32::consts::TAU * (k as f32 / segs as f32);
                         pt(hw * a.cos(), hh * a.sin())
                     })
                     .collect();
-                push_pdf_polygon(ops, &pts, PaintMode::FillStroke);
+                let clipped =
+                    clip_polygon_to_rect(&pts, inner_min_x, inner_min_y, inner_max_x, inner_max_y);
+                if clipped.len() >= 3 {
+                    push_pdf_polygon(ops, &clipped, PaintMode::FillStroke);
+                }
             }
             PropKind::Triangle => {
                 ops.push(Op::SetFillColor {
-                    col: Color::Greyscale(Greyscale::new(0.92, None)),
+                    col: Color::Greyscale(Greyscale::new(0.94, None)),
                 });
-                push_pdf_polygon(
-                    ops,
+                let clipped = clip_polygon_to_rect(
                     &[pt(0.0, -hh), pt(hw, hh), pt(-hw, hh)],
-                    PaintMode::FillStroke,
+                    inner_min_x,
+                    inner_min_y,
+                    inner_max_x,
+                    inner_max_y,
                 );
+                if clipped.len() >= 3 {
+                    push_pdf_polygon(ops, &clipped, PaintMode::FillStroke);
+                }
             }
             PropKind::Light => {
                 ops.push(Op::SetFillColor {
@@ -3179,106 +3594,184 @@ fn draw_floor_plan_vector(
                     col: Color::Rgb(Rgb::new(0.76, 0.52, 0.08, None)),
                 });
                 let r = hw.min(hh).max(0.18);
-                let pts: Vec<(f32, f32)> = (0..16)
+                let pts: Vec<(f32, f32)> = (0..24)
                     .map(|k| {
-                        let a = std::f32::consts::TAU * (k as f32 / 16.0);
+                        let a = std::f32::consts::TAU * (k as f32 / 24.0);
                         pt(r * a.cos(), r * a.sin())
                     })
                     .collect();
-                push_pdf_polygon(ops, &pts, PaintMode::FillStroke);
+                let clipped =
+                    clip_polygon_to_rect(&pts, inner_min_x, inner_min_y, inner_max_x, inner_max_y);
+                if clipped.len() >= 3 {
+                    push_pdf_polygon(ops, &clipped, PaintMode::FillStroke);
+                }
                 for ang in [-28.0_f32, 0.0, 28.0] {
                     let ar = ang.to_radians();
-                    push_pdf_polyline(
-                        ops,
-                        &[
-                            pt(r * ar.cos(), r * ar.sin()),
-                            pt((r + 0.35) * ar.cos(), (r + 0.35) * ar.sin()),
-                        ],
-                        false,
-                    );
+                    if let Some((ca, cb)) = clip_segment_to_rect(
+                        pt(r * ar.cos(), r * ar.sin()),
+                        pt((r + 0.35) * ar.cos(), (r + 0.35) * ar.sin()),
+                        inner_min_x,
+                        inner_min_y,
+                        inner_max_x,
+                        inner_max_y,
+                    ) {
+                        push_pdf_polyline(ops, &[ca, cb], false);
+                    }
                 }
             }
             PropKind::Car => {
                 ops.push(Op::SetFillColor {
-                    col: Color::Greyscale(Greyscale::new(0.91, None)),
+                    col: Color::Greyscale(Greyscale::new(0.92, None)),
                 });
-                push_pdf_polygon(ops, &corners, PaintMode::FillStroke);
+                let clipped = clip_polygon_to_rect(
+                    &corners,
+                    inner_min_x,
+                    inner_min_y,
+                    inner_max_x,
+                    inner_max_y,
+                );
+                if clipped.len() >= 3 {
+                    push_pdf_polygon(ops, &clipped, PaintMode::FillStroke);
+                }
                 ops.push(Op::SetFillColor {
                     col: Color::Rgb(Rgb::new(0.84, 0.93, 0.99, None)),
                 });
-                push_pdf_polygon(
-                    ops,
+                let ws = clip_polygon_to_rect(
                     &[
                         pt(hw * 0.35, -hh * 0.76),
                         pt(hw * 0.58, -hh * 0.66),
                         pt(hw * 0.58, hh * 0.66),
                         pt(hw * 0.35, hh * 0.76),
                     ],
-                    PaintMode::FillStroke,
+                    inner_min_x,
+                    inner_min_y,
+                    inner_max_x,
+                    inner_max_y,
                 );
+                if ws.len() >= 3 {
+                    push_pdf_polygon(ops, &ws, PaintMode::FillStroke);
+                }
             }
             PropKind::Chair => {
                 ops.push(Op::SetFillColor {
-                    col: Color::Greyscale(Greyscale::new(0.94, None)),
+                    col: Color::Greyscale(Greyscale::new(0.95, None)),
                 });
-                push_pdf_polygon(ops, &corners, PaintMode::FillStroke);
-                ops.push(Op::SetOutlineThickness { pt: Pt(1.5) });
-                push_pdf_polyline(ops, &[pt(-hw, -hh), pt(-hw, hh)], false);
+                let clipped = clip_polygon_to_rect(
+                    &corners,
+                    inner_min_x,
+                    inner_min_y,
+                    inner_max_x,
+                    inner_max_y,
+                );
+                if clipped.len() >= 3 {
+                    push_pdf_polygon(ops, &clipped, PaintMode::FillStroke);
+                }
+                ops.push(Op::SetOutlineThickness { pt: Pt(1.4) });
+                if let Some((ca, cb)) = clip_segment_to_rect(
+                    pt(-hw, -hh),
+                    pt(-hw, hh),
+                    inner_min_x,
+                    inner_min_y,
+                    inner_max_x,
+                    inner_max_y,
+                ) {
+                    push_pdf_polyline(ops, &[ca, cb], false);
+                }
             }
             PropKind::Bed => {
                 ops.push(Op::SetFillColor {
                     col: Color::Greyscale(Greyscale::new(0.95, None)),
                 });
-                push_pdf_polygon(ops, &corners, PaintMode::FillStroke);
+                let clipped = clip_polygon_to_rect(
+                    &corners,
+                    inner_min_x,
+                    inner_min_y,
+                    inner_max_x,
+                    inner_max_y,
+                );
+                if clipped.len() >= 3 {
+                    push_pdf_polygon(ops, &clipped, PaintMode::FillStroke);
+                }
                 for py in [-hh * 0.45, hh * 0.45] {
-                    push_pdf_polygon(
-                        ops,
+                    let pil = clip_polygon_to_rect(
                         &[
                             pt(-hw * 0.85, py - hh * 0.30),
                             pt(-hw * 0.45, py - hh * 0.30),
                             pt(-hw * 0.45, py + hh * 0.30),
                             pt(-hw * 0.85, py + hh * 0.30),
                         ],
-                        PaintMode::FillStroke,
+                        inner_min_x,
+                        inner_min_y,
+                        inner_max_x,
+                        inner_max_y,
                     );
+                    if pil.len() >= 3 {
+                        push_pdf_polygon(ops, &pil, PaintMode::FillStroke);
+                    }
                 }
             }
             PropKind::Table | PropKind::Square | PropKind::Custom => {
                 ops.push(Op::SetFillColor {
-                    col: Color::Greyscale(Greyscale::new(0.93, None)),
+                    col: Color::Greyscale(Greyscale::new(0.94, None)),
                 });
-                push_pdf_polygon(ops, &corners, PaintMode::FillStroke);
+                let clipped = clip_polygon_to_rect(
+                    &corners,
+                    inner_min_x,
+                    inner_min_y,
+                    inner_max_x,
+                    inner_max_y,
+                );
+                if clipped.len() >= 3 {
+                    push_pdf_polygon(ops, &clipped, PaintMode::FillStroke);
+                }
             }
         }
         if !prop.label.trim().is_empty() {
             let lbl = prop.label.trim();
             let c = to_mm(prop.x, prop.y);
-            let pt_sz = 6.5_f32;
-            let lw = lbl.chars().count() as f32 * CHAR_MM * (pt_sz / FONT_PT);
-            let (label_col, label_y) = if prop.kind == PropKind::Wall {
-                (
-                    Color::Greyscale(Greyscale::new(0.24, None)),
-                    c.1 + (prop.h * 0.5 * scale) + 1.4,
-                )
-            } else {
-                (Color::Greyscale(Greyscale::new(0.22, None)), c.1 - 0.8)
-            };
-            ops.push(Op::SetFillColor { col: label_col });
-            draw_summary_text(
-                ops,
-                regular,
-                fallback_regular,
-                pt_sz,
-                (c.0 - lw * 0.5).clamp(box_x + 1.5, box_x + box_w - lw - 1.5),
-                label_y.clamp(box_y + 1.5, box_y + box_h - 3.0),
-                lbl,
-            );
+            // Skip prop center label when a camera sits right over it
+            let obscured_by_cam = prop.kind != PropKind::Wall
+                && cam_positions_mm
+                    .iter()
+                    .any(|&(cx, cy)| (cx - c.0).hypot(cy - c.1) < 5.0);
+            if !obscured_by_cam {
+                let pt_sz = 5.8_f32;
+                let lw = lbl.chars().count() as f32 * CHAR_MM * (pt_sz / FONT_PT);
+                let (label_col, label_y) = if prop.kind == PropKind::Wall {
+                    (
+                        Color::Greyscale(Greyscale::new(0.42, None)),
+                        c.1 + (prop.h * 0.5 * scale) + 1.4,
+                    )
+                } else {
+                    (Color::Greyscale(Greyscale::new(0.48, None)), c.1 - 0.7)
+                };
+                ops.push(Op::SetFillColor { col: label_col });
+                draw_summary_text(
+                    ops,
+                    regular,
+                    fallback_regular,
+                    pt_sz,
+                    (c.0 - lw * 0.5).clamp(box_x + 1.5, box_x + box_w - lw - 1.5),
+                    label_y.clamp(box_y + 1.5, box_y + box_h - 3.0),
+                    lbl,
+                );
+            }
+        }
         }
     }
 
-    // Layer 2: Actors
+    // Layer 2: Actors (true-to-scale silhouettes; name pills painted cleanly in Layer 4)
+    struct ActorLabelSpec<'a> {
+        ap: (f32, f32),
+        fwd: (f32, f32),
+        sh_half: f32,
+        sh_thick: f32,
+        name: &'a str,
+    }
+    let mut actor_labels: Vec<ActorLabelSpec<'_>> = Vec::with_capacity(plan.actors.len());
+
     for actor in &plan.actors {
-        let ap = clamp_pt(to_mm(actor.x, actor.y));
+        let ap = to_mm(actor.x, actor.y);
         let rad = actor.angle_deg.to_radians();
         let (r, g, b) = actor.color.rgb();
         let acol = Color::Rgb(Rgb::new(
@@ -3288,26 +3781,62 @@ fn draw_floor_plan_vector(
             None,
         ));
         if let Some((mx, my)) = actor.move_to {
-            let mp = clamp_pt(to_mm(mx, my));
-            ops.push(Op::SetOutlineColor { col: acol.clone() });
-            ops.push(Op::SetOutlineThickness { pt: Pt(0.8) });
-            push_pdf_dashed_line(ops, ap, mp, 1.8, 1.4);
+            let mp = to_mm(mx, my);
+            let dir = (mp.0 - ap.0, mp.1 - ap.1);
+            let dist = dir.0.hypot(dir.1);
+            if dist > 2.5 {
+                let ux = dir.0 / dist;
+                let uy = dir.1 / dist;
+                let line_end = (mp.0 - ux * 1.6, mp.1 - uy * 1.6);
+                if let Some((ca, cb)) = clip_segment_to_rect(
+                    ap,
+                    line_end,
+                    inner_min_x,
+                    inner_min_y,
+                    inner_max_x,
+                    inner_max_y,
+                ) {
+                    ops.push(Op::SetOutlineColor { col: acol.clone() });
+                    ops.push(Op::SetOutlineThickness { pt: Pt(0.75) });
+                    push_pdf_dashed_line(ops, ca, cb, 1.7, 1.3);
+                }
+                if mp.0 >= inner_min_x
+                    && mp.0 <= inner_max_x
+                    && mp.1 >= inner_min_y
+                    && mp.1 <= inner_max_y
+                {
+                    ops.push(Op::SetFillColor { col: acol.clone() });
+                    push_pdf_arrow_head(ops, (mp.0 - ux * 1.1, mp.1 - uy * 1.1), dir, 1.8);
+                    let ring: Vec<(f32, f32)> = (0..16)
+                        .map(|k| {
+                            let a = std::f32::consts::TAU * (k as f32 / 16.0);
+                            (mp.0 + 1.4 * a.cos(), mp.1 + 1.4 * a.sin())
+                        })
+                        .collect();
+                    ops.push(Op::SetOutlineColor { col: acol.clone() });
+                    ops.push(Op::SetOutlineThickness { pt: Pt(0.65) });
+                    push_pdf_polyline(ops, &ring, true);
+                }
+            }
         }
         // Shoulders + head (true-to-scale ~0.60m overhead figure matching metric scale bar)
         let fwd = (rad.cos(), -rad.sin()); // PDF +Y is up
         let right = (-fwd.1, fwd.0);
-        let sh_half = (0.30 * scale).max(2.2);
-        let sh_thick = (0.14 * scale).max(1.0);
+        let sh_half = (0.30 * scale).clamp(2.2, 5.2);
+        let sh_thick = (0.14 * scale).clamp(1.1, 2.5);
+        let arad = sh_half.max(sh_thick * 1.5);
+        obstacles.push((ap.0 - arad, ap.1 - arad, ap.0 + arad, ap.1 + arad, 11.0));
+
         ops.push(Op::SetFillColor {
             col: Color::Rgb(Rgb::new(
-                0.80 + 0.20 * (r as f32 / 255.0),
-                0.80 + 0.20 * (g as f32 / 255.0),
-                0.80 + 0.20 * (b as f32 / 255.0),
+                0.82 + 0.18 * (r as f32 / 255.0),
+                0.82 + 0.18 * (g as f32 / 255.0),
+                0.82 + 0.18 * (b as f32 / 255.0),
                 None,
             )),
         });
         ops.push(Op::SetOutlineColor { col: acol.clone() });
-        ops.push(Op::SetOutlineThickness { pt: Pt(0.95) });
+        ops.push(Op::SetOutlineThickness { pt: Pt(0.85) });
         push_pdf_polygon(
             ops,
             &[
@@ -3331,63 +3860,66 @@ fn draw_floor_plan_vector(
             PaintMode::FillStroke,
         );
         // Gaze nose triangle
-        let nose_tip = (ap.0 + fwd.0 * sh_thick * 1.8, ap.1 + fwd.1 * sh_thick * 1.8);
-        let nose_base = (ap.0 + fwd.0 * sh_thick * 0.7, ap.1 + fwd.1 * sh_thick * 0.7);
+        let nose_tip = (ap.0 + fwd.0 * sh_thick * 1.75, ap.1 + fwd.1 * sh_thick * 1.75);
+        let nose_base = (ap.0 + fwd.0 * sh_thick * 0.68, ap.1 + fwd.1 * sh_thick * 0.68);
         ops.push(Op::SetFillColor { col: acol.clone() });
         push_pdf_polygon(
             ops,
             &[
                 nose_tip,
                 (
-                    nose_base.0 + right.0 * sh_thick * 0.65,
-                    nose_base.1 + right.1 * sh_thick * 0.65,
+                    nose_base.0 + right.0 * sh_thick * 0.62,
+                    nose_base.1 + right.1 * sh_thick * 0.62,
                 ),
                 (
-                    nose_base.0 - right.0 * sh_thick * 0.65,
-                    nose_base.1 - right.1 * sh_thick * 0.65,
+                    nose_base.0 - right.0 * sh_thick * 0.62,
+                    nose_base.1 - right.1 * sh_thick * 0.62,
                 ),
             ],
             PaintMode::Fill,
         );
-        // Head circle (true-to-scale overhead silhouette)
-        let hr = (0.125 * scale).max(1.2);
-        let head_pts: Vec<(f32, f32)> = (0..12)
+        // Smooth 24-segment circular head with crisp white halo outline
+        let hr = (0.125 * scale).clamp(1.2, 2.4);
+        let head_pts: Vec<(f32, f32)> = (0..24)
             .map(|k| {
-                let a = std::f32::consts::TAU * (k as f32 / 12.0);
+                let a = std::f32::consts::TAU * (k as f32 / 24.0);
                 (ap.0 + hr * a.cos(), ap.1 + hr * a.sin())
             })
             .collect();
         ops.push(Op::SetFillColor {
-            col: Color::Greyscale(Greyscale::new(0.22, None)),
+            col: Color::Greyscale(Greyscale::new(0.20, None)),
         });
-        push_pdf_polygon(ops, &head_pts, PaintMode::Fill);
+        ops.push(Op::SetOutlineColor {
+            col: Color::Greyscale(Greyscale::new(1.0, None)),
+        });
+        ops.push(Op::SetOutlineThickness { pt: Pt(0.65) });
+        push_pdf_polygon(ops, &head_pts, PaintMode::FillStroke);
 
-        // Name label below actor
         let name = actor.name.trim();
         if !name.is_empty() {
-            let pt_sz = 6.5_f32;
-            let lw = name.chars().count() as f32 * CHAR_MM * (pt_sz / FONT_PT);
-            ops.push(Op::SetFillColor {
-                col: Color::Greyscale(Greyscale::new(0.10, None)),
-            });
-            draw_summary_text(
-                ops,
-                bold,
-                fallback_bold,
-                pt_sz,
-                (ap.0 - lw * 0.5).clamp(box_x + 1.5, box_x + box_w - lw - 1.5),
-                (ap.1 - sh_half - 2.6).clamp(box_y + 1.5, box_y + box_h - 3.0),
+            actor_labels.push(ActorLabelSpec {
+                ap,
+                fwd,
+                sh_half,
+                sh_thick,
                 name,
-            );
+            });
         }
     }
 
-    // Layer 3: Camera bodies, dolly tracks, and crisp labels (on top of props/actors)
-    for cam in &plan.cameras {
+    // Layer 3: Proportional camera bodies, twin dolly rails, and centered
+    // shot index badges (matched to the Camera Key panel beside/below)
+    let bw = (0.135 * scale).clamp(1.65, 2.45);
+    let bh = (0.105 * scale).clamp(1.25, 1.85);
+    let hood_len = (0.075 * scale).clamp(0.95, 1.45);
+    let hood_base = bw * 0.48;
+    let hood_tip = bw * 0.82;
+
+    for (ci, cam) in plan.cameras.iter().enumerate() {
         let Some(shot) = p.shots.get(cam.shot_id) else {
             continue;
         };
-        let cp = clamp_pt(to_mm(cam.x, cam.y));
+        let cp = to_mm(cam.x, cam.y);
         let rad = cam.angle_deg.to_radians();
         let (r, g, b) = shot.color.rgb();
         let col = Color::Rgb(Rgb::new(
@@ -3396,19 +3928,58 @@ fn draw_floor_plan_vector(
             b as f32 / 255.0,
             None,
         ));
+        let cam_r = (bw.max(bh + hood_len)) + 0.6;
+        obstacles.push((cp.0 - cam_r, cp.1 - cam_r, cp.0 + cam_r, cp.1 + cam_r, 14.0));
 
+        // Twin dashed dolly rails + destination ring
         if let Some((tx, ty)) = cam.track_to {
-            let tp = clamp_pt(to_mm(tx, ty));
-            ops.push(Op::SetOutlineColor { col: col.clone() });
-            ops.push(Op::SetOutlineThickness { pt: Pt(0.7) });
-            push_pdf_dashed_line(ops, cp, tp, 2.0, 1.5);
+            let tp = to_mm(tx, ty);
+            let dir = (tp.0 - cp.0, tp.1 - cp.1);
+            let dist = dir.0.hypot(dir.1);
+            if dist > 2.5 {
+                let ux = dir.0 / dist;
+                let uy = dir.1 / dist;
+                let px = -uy * 0.85;
+                let py = ux * 0.85;
+                ops.push(Op::SetOutlineColor { col: col.clone() });
+                ops.push(Op::SetOutlineThickness { pt: Pt(0.55) });
+                for sign in [-1.0_f32, 1.0_f32] {
+                    let s0 = (cp.0 + px * sign, cp.1 + py * sign);
+                    let s1 = (tp.0 + px * sign, tp.1 + py * sign);
+                    if let Some((ca, cb)) = clip_segment_to_rect(
+                        s0,
+                        s1,
+                        inner_min_x,
+                        inner_min_y,
+                        inner_max_x,
+                        inner_max_y,
+                    ) {
+                        push_pdf_dashed_line(ops, ca, cb, 1.7, 1.3);
+                    }
+                }
+                if tp.0 >= inner_min_x
+                    && tp.0 <= inner_max_x
+                    && tp.1 >= inner_min_y
+                    && tp.1 <= inner_max_y
+                {
+                    ops.push(Op::SetFillColor { col: col.clone() });
+                    push_pdf_arrow_head(ops, tp, dir, 1.9);
+                    let ring: Vec<(f32, f32)> = (0..16)
+                        .map(|k| {
+                            let a = std::f32::consts::TAU * (k as f32 / 16.0);
+                            (tp.0 + 1.45 * a.cos(), tp.1 + 1.45 * a.sin())
+                        })
+                        .collect();
+                    ops.push(Op::SetOutlineColor { col: col.clone() });
+                    ops.push(Op::SetOutlineThickness { pt: Pt(0.6) });
+                    push_pdf_polyline(ops, &ring, true);
+                }
+            }
         }
 
         // Camera body + matte box
         let fwd = (rad.cos(), -rad.sin());
         let right = (-fwd.1, fwd.0);
-        let bw = 2.6_f32;
-        let bh = 1.9_f32;
         ops.push(Op::SetFillColor { col: col.clone() });
         ops.push(Op::SetOutlineColor {
             col: Color::Greyscale(Greyscale::new(1.0, None)),
@@ -3418,20 +3989,20 @@ fn draw_floor_plan_vector(
             ops,
             &[
                 (
-                    cp.0 + fwd.0 * bh - right.0 * 1.2,
-                    cp.1 + fwd.1 * bh - right.1 * 1.2,
+                    cp.0 + fwd.0 * bh - right.0 * hood_base,
+                    cp.1 + fwd.1 * bh - right.1 * hood_base,
                 ),
                 (
-                    cp.0 + fwd.0 * (bh + 1.8) - right.0 * 2.1,
-                    cp.1 + fwd.1 * (bh + 1.8) - right.1 * 2.1,
+                    cp.0 + fwd.0 * (bh + hood_len) - right.0 * hood_tip,
+                    cp.1 + fwd.1 * (bh + hood_len) - right.1 * hood_tip,
                 ),
                 (
-                    cp.0 + fwd.0 * (bh + 1.8) + right.0 * 2.1,
-                    cp.1 + fwd.1 * (bh + 1.8) + right.1 * 2.1,
+                    cp.0 + fwd.0 * (bh + hood_len) + right.0 * hood_tip,
+                    cp.1 + fwd.1 * (bh + hood_len) + right.1 * hood_tip,
                 ),
                 (
-                    cp.0 + fwd.0 * bh + right.0 * 1.2,
-                    cp.1 + fwd.1 * bh + right.1 * 1.2,
+                    cp.0 + fwd.0 * bh + right.0 * hood_base,
+                    cp.1 + fwd.1 * bh + right.1 * hood_base,
                 ),
             ],
             PaintMode::FillStroke,
@@ -3459,75 +4030,363 @@ fn draw_floor_plan_vector(
             PaintMode::FillStroke,
         );
 
-        // Label below camera
-        let code_short: String = if shot.code.chars().count() > 12 {
-            let mut s: String = shot.code.chars().take(11).collect();
-            s.push('…');
-            s
-        } else {
-            shot.code.clone()
-        };
-        let label = if shot.lens.trim().is_empty() {
-            code_short
-        } else {
-            format!("{code_short} ({})", shot.lens.trim())
-        };
-        let pt_sz = 6.2_f32;
-        let lw = label.chars().count() as f32 * CHAR_MM * (pt_sz / FONT_PT);
+        // Crisp centered camera index number inside body
+        let num = shot_numbers
+            .get(&cam.shot_id)
+            .copied()
+            .unwrap_or(ci + 1);
+        let badge = num.to_string();
+        let pt_sz = if badge.len() >= 2 { 4.8_f32 } else { 5.6_f32 };
+        let bw_txt = badge.chars().count() as f32 * CHAR_MM * (pt_sz / FONT_PT);
+        let cap_h = 0.62 * pt_sz / MM_TO_PT;
         ops.push(Op::SetFillColor {
-            col: Color::Rgb(Rgb::new(
-                (r as f32 / 255.0) * 0.72,
-                (g as f32 / 255.0) * 0.72,
-                (b as f32 / 255.0) * 0.72,
-                None,
-            )),
+            col: ink_contrast_on_rgb(r, g, b),
         });
         draw_summary_text(
             ops,
             bold,
             fallback_bold,
             pt_sz,
-            (cp.0 - lw * 0.5).clamp(box_x + 1.5, box_x + box_w - lw - 1.5),
-            (cp.1 - bh - 3.0).clamp(box_y + 1.5, box_y + box_h - 3.0),
-            &label,
+            cp.0 - bw_txt * 0.5,
+            cp.1 - cap_h * 0.5,
+            &badge,
         );
     }
 
-    // True-to-scale metric architectural scale bar in bottom-left corner
-    let sx0 = box_x + 4.0;
-    let sy0 = box_y + 3.2;
+    // Reserve scale bar area so actor labels never overlap it
     let (scale_m, scale_lbl) = if scale >= 24.0 {
         (0.5_f32, "50 cm")
-    } else if scale >= 6.0 {
+    } else if scale >= 6.5 {
         (1.0_f32, "1 m")
     } else {
         (2.0_f32, "2 m")
     };
     let bar_w = scale_m * scale;
-    ops.push(Op::SetOutlineColor {
-        col: Color::Greyscale(Greyscale::new(0.42, None)),
+    let sx0 = box_x + 3.6;
+    let sy0 = box_y + 3.0;
+    obstacles.push((
+        sx0 - 1.5,
+        box_y + 0.8,
+        sx0 + bar_w.max(10.0) + 2.0,
+        sy0 + 4.5,
+        16.0,
+    ));
+
+    // Layer 4: Smart collision-free actor name pills (behind actor's back first,
+    // falling back to clearest open spot so names never cross tables or cameras)
+    let mut placed_pills: Vec<(f32, f32, f32, f32)> = Vec::with_capacity(actor_labels.len());
+    let name_pt = 5.8_f32;
+    let name_cap_h = 0.62 * name_pt / MM_TO_PT;
+    let pill_h = 3.2_f32;
+    let margin_in = 1.6_f32;
+
+    for spec in &actor_labels {
+        let lw = spec.name.chars().count() as f32 * CHAR_MM * (name_pt / FONT_PT);
+        let pw = (lw + 2.2).min(box_w - 4.0);
+        let back_dist = spec.sh_thick + pill_h * 0.5 + 1.7;
+        let side_dist_y = spec.sh_half.max(spec.sh_thick) + pill_h * 0.5 + 1.5;
+        let side_dist_x = spec.sh_half + pw * 0.5 + 1.5;
+
+        let candidates = [
+            // 0. Behind the actor's shoulders (away from gaze / table)
+            (
+                spec.ap.0 - spec.fwd.0 * back_dist,
+                spec.ap.1 - spec.fwd.1 * back_dist,
+            ),
+            // 1. Below actor
+            (spec.ap.0, spec.ap.1 - side_dist_y),
+            // 2. Above actor
+            (spec.ap.0, spec.ap.1 + side_dist_y),
+            // 3. Left of actor
+            (spec.ap.0 - side_dist_x, spec.ap.1),
+            // 4. Right of actor
+            (spec.ap.0 + side_dist_x, spec.ap.1),
+            // 5. Behind shoulders slightly further out
+            (
+                spec.ap.0 - spec.fwd.0 * (back_dist + 2.2),
+                spec.ap.1 - spec.fwd.1 * (back_dist + 2.2),
+            ),
+        ];
+
+        let mut best_rect = (0.0_f32, 0.0_f32, 0.0_f32, 0.0_f32);
+        let mut best_score = f32::INFINITY;
+        for (ci, &(cx, cy)) in candidates.iter().enumerate() {
+            let x0 = (cx - pw * 0.5).clamp(box_x + margin_in, box_x + box_w - margin_in - pw);
+            let y0 = (cy - pill_h * 0.5).clamp(box_y + margin_in, box_y + box_h - margin_in - pill_h);
+            let r = (x0, y0, x0 + pw, y0 + pill_h);
+            let mut score = (ci as f32) * 0.25;
+            // Small penalty if clamping pushed the pill far from intended candidate
+            let clamped_cx = (r.0 + r.2) * 0.5;
+            let clamped_cy = (r.1 + r.3) * 0.5;
+            score += (clamped_cx - cx).hypot(clamped_cy - cy) * 0.4;
+            for &pr in &placed_pills {
+                score += rect_overlap_area(r, pr) * 24.0;
+            }
+            for &(ox0, oy0, ox1, oy1, w) in &obstacles {
+                score += rect_overlap_area(r, (ox0, oy0, ox1, oy1)) * w;
+            }
+            if score < best_score {
+                best_score = score;
+                best_rect = r;
+            }
+        }
+        placed_pills.push(best_rect);
+
+        // Crisp white pill + subtle border + bold actor name
+        ops.push(Op::SetFillColor {
+            col: Color::Greyscale(Greyscale::new(0.995, None)),
+        });
+        ops.push(Op::SetOutlineColor {
+            col: Color::Greyscale(Greyscale::new(0.76, None)),
+        });
+        ops.push(Op::SetOutlineThickness { pt: Pt(0.38) });
+        push_pdf_rounded_rect(
+            ops,
+            best_rect.0,
+            best_rect.1,
+            best_rect.2 - best_rect.0,
+            best_rect.3 - best_rect.1,
+            0.85,
+            PaintMode::FillStroke,
+        );
+        ops.push(Op::SetFillColor {
+            col: Color::Greyscale(Greyscale::new(0.10, None)),
+        });
+        let pill_cx = (best_rect.0 + best_rect.2) * 0.5;
+        let pill_cy = (best_rect.1 + best_rect.3) * 0.5;
+        draw_summary_text(
+            ops,
+            bold,
+            fallback_bold,
+            name_pt,
+            pill_cx - lw * 0.5,
+            pill_cy - name_cap_h * 0.5,
+            spec.name,
+        );
+    }
+
+    // Layer 5: True-to-scale metric architectural scale bar in bottom-left corner
+    let lbl_w = scale_lbl.chars().count() as f32 * CHAR_MM * (6.0 / FONT_PT);
+    let badge_w = bar_w.max(lbl_w) + 3.0;
+    ops.push(Op::SetFillColor {
+        col: Color::Greyscale(Greyscale::new(0.988, None)),
     });
-    ops.push(Op::SetOutlineThickness { pt: Pt(0.6) });
+    push_pdf_rounded_rect(ops, sx0 - 1.5, sy0 - 1.3, badge_w, 5.1, 0.8, PaintMode::Fill);
+    ops.push(Op::SetOutlineColor {
+        col: Color::Greyscale(Greyscale::new(0.40, None)),
+    });
+    ops.push(Op::SetOutlineThickness { pt: Pt(0.55) });
     push_pdf_polyline(ops, &[(sx0, sy0), (sx0 + bar_w, sy0)], false);
-    push_pdf_polyline(ops, &[(sx0, sy0 - 0.8), (sx0, sy0 + 0.8)], false);
+    push_pdf_polyline(ops, &[(sx0, sy0 - 0.7), (sx0, sy0 + 0.7)], false);
     push_pdf_polyline(
         ops,
-        &[(sx0 + bar_w, sy0 - 0.8), (sx0 + bar_w, sy0 + 0.8)],
+        &[(sx0 + bar_w, sy0 - 0.7), (sx0 + bar_w, sy0 + 0.7)],
         false,
     );
     ops.push(Op::SetFillColor {
-        col: Color::Greyscale(Greyscale::new(0.42, None)),
+        col: Color::Greyscale(Greyscale::new(0.38, None)),
     });
-    let lbl_w = scale_lbl.chars().count() as f32 * CHAR_MM * (6.5 / FONT_PT);
     draw_summary_text(
         ops,
         regular,
         fallback_regular,
-        6.5,
+        6.0,
         (sx0 + (bar_w - lbl_w) * 0.5).max(box_x + 2.0),
-        sy0 + 1.2,
+        sy0 + 1.15,
         scale_lbl,
     );
+
+    // Outer crisp diagram frame border painted last over any clipped edges
+    ops.push(Op::SetOutlineColor {
+        col: Color::Greyscale(Greyscale::new(0.76, None)),
+    });
+    ops.push(Op::SetOutlineThickness { pt: Pt(0.6) });
+    push_pdf_polyline(
+        ops,
+        &[
+            (box_x, box_y),
+            (box_x + box_w, box_y),
+            (box_x + box_w, box_y + box_h),
+            (box_x, box_y + box_h),
+        ],
+        true,
+    );
+}
+
+/// Draw a clean numbered Camera Key legend panel beside (side panel) or below
+/// (multi-column strip) the vector floor plan.
+#[allow(clippy::too_many_arguments)]
+fn draw_camera_legend_panel(
+    ops: &mut Vec<Op>,
+    items: &[(usize, &scriptcraft_core::shots::Shot)],
+    box_x: f32,
+    box_y: f32,
+    box_w: f32,
+    box_h: f32,
+    cols: usize,
+    regular: &Face,
+    bold: &Face,
+    fallback_regular: &Face,
+    fallback_bold: &Face,
+) {
+    if items.is_empty() {
+        return;
+    }
+    let cols = cols.max(1);
+    // Subtle card frame
+    ops.push(Op::SetFillColor {
+        col: Color::Greyscale(Greyscale::new(0.975, None)),
+    });
+    ops.push(Op::SetOutlineColor {
+        col: Color::Greyscale(Greyscale::new(0.80, None)),
+    });
+    ops.push(Op::SetOutlineThickness { pt: Pt(0.5) });
+    push_pdf_polygon(
+        ops,
+        &[
+            (box_x, box_y),
+            (box_x + box_w, box_y),
+            (box_x + box_w, box_y + box_h),
+            (box_x, box_y + box_h),
+        ],
+        PaintMode::FillStroke,
+    );
+
+    let pad = 3.0_f32;
+    let header_y = box_y + box_h - 4.8;
+    ops.push(Op::SetFillColor {
+        col: Color::Greyscale(Greyscale::new(0.38, None)),
+    });
+    draw_summary_text(
+        ops,
+        bold,
+        fallback_bold,
+        6.8,
+        box_x + pad,
+        header_y,
+        "CAMERA KEY",
+    );
+    let div_y = header_y - 1.8;
+    ops.push(Op::SetOutlineColor {
+        col: Color::Greyscale(Greyscale::new(0.85, None)),
+    });
+    ops.push(Op::SetOutlineThickness { pt: Pt(0.35) });
+    push_pdf_polyline(
+        ops,
+        &[(box_x + pad, div_y), (box_x + box_w - pad, div_y)],
+        false,
+    );
+
+    let rows = items.len().div_ceil(cols).max(1);
+    let avail_h = (div_y - (box_y + 2.0)).max(8.0);
+    let row_step = (avail_h / rows as f32).min(if cols == 1 { 10.5 } else { 8.5 });
+    let compact = row_step < 7.8;
+    let col_w = (box_w - 2.0 * pad) / cols as f32;
+    let title_pt = if compact { 6.2_f32 } else { 6.8_f32 };
+    let meta_pt = 5.8_f32;
+    let title_char_w = CHAR_MM * (title_pt / FONT_PT);
+    let badge_w = 4.6_f32;
+    let badge_h = 3.6_f32;
+
+    for (idx, &(num, shot)) in items.iter().enumerate() {
+        let (col_i, row_i) = if cols == 1 {
+            (0usize, idx)
+        } else {
+            (idx % cols, idx / cols)
+        };
+        let rx = box_x + pad + (col_i as f32) * col_w;
+        let row_top = div_y - 2.2 - (row_i as f32) * row_step;
+        if row_top - badge_h < box_y + 1.0 {
+            break;
+        }
+        let (r, g, b) = shot.color.rgb();
+        let scol = Color::Rgb(Rgb::new(
+            r as f32 / 255.0,
+            g as f32 / 255.0,
+            b as f32 / 255.0,
+            None,
+        ));
+
+        // Color-coded numbered badge pill
+        let by = row_top - badge_h;
+        ops.push(Op::SetFillColor { col: scol });
+        push_pdf_rounded_rect(ops, rx, by, badge_w, badge_h, 0.8, PaintMode::Fill);
+        let num_str = num.to_string();
+        let n_pt = if num_str.len() >= 2 { 5.4_f32 } else { 6.0_f32 };
+        let nw = num_str.chars().count() as f32 * CHAR_MM * (n_pt / FONT_PT);
+        let n_cap = 0.62 * n_pt / MM_TO_PT;
+        ops.push(Op::SetFillColor {
+            col: ink_contrast_on_rgb(r, g, b),
+        });
+        draw_summary_text(
+            ops,
+            bold,
+            fallback_bold,
+            n_pt,
+            rx + (badge_w - nw) * 0.5,
+            by + (badge_h - n_cap) * 0.5,
+            &num_str,
+        );
+
+        // Shot title + lens/size meta
+        let tx = rx + badge_w + 1.8;
+        let text_avail = (col_w - badge_w - 3.2).max(12.0);
+        let max_chars = (text_avail / title_char_w).floor().max(8.0) as usize;
+        let code_clean = shot.code.trim();
+        let lens = shot.lens.trim();
+        let meta_str = if lens.is_empty() {
+            shot.size.short().to_string()
+        } else {
+            format!("{lens} · {}", shot.size.short())
+        };
+
+        if compact {
+            let combined = format!("{code_clean} ({meta_str})");
+            let line = if combined.chars().count() > max_chars {
+                let mut s: String = combined.chars().take(max_chars.saturating_sub(1)).collect();
+                s.push('…');
+                s
+            } else {
+                combined
+            };
+            ops.push(Op::SetFillColor {
+                col: Color::Greyscale(Greyscale::new(0.12, None)),
+            });
+            draw_summary_text(ops, bold, fallback_bold, title_pt, tx, by + 1.0, &line);
+        } else {
+            let title_line = if code_clean.chars().count() > max_chars {
+                let mut s: String = code_clean.chars().take(max_chars.saturating_sub(1)).collect();
+                s.push('…');
+                s
+            } else {
+                code_clean.to_string()
+            };
+            ops.push(Op::SetFillColor {
+                col: Color::Greyscale(Greyscale::new(0.12, None)),
+            });
+            draw_summary_text(
+                ops,
+                bold,
+                fallback_bold,
+                title_pt,
+                tx,
+                row_top - 2.4,
+                &title_line,
+            );
+            ops.push(Op::SetFillColor {
+                col: Color::Greyscale(Greyscale::new(0.45, None)),
+            });
+            draw_summary_text(
+                ops,
+                regular,
+                fallback_regular,
+                meta_pt,
+                tx,
+                row_top - 5.4,
+                &meta_str,
+            );
+        }
+    }
 }
 
 fn draw_shot_note_ops(
@@ -3673,20 +4532,32 @@ fn build_directors_breakdown_pages(
         }
         y -= 5.8;
 
+        let scene_cuts = p.shots.scene_cut_stats(scene, &p.blocks);
         let total_scene_s: f64 = shot_indices
             .iter()
             .filter_map(|&idx| p.shots.shots.get(idx))
             .map(|s| p.shots.shot_duration_secs(s, &p.blocks))
             .sum();
-        ops.push(Op::SetFillColor { col: muted.clone() });
-        draw_summary_text(
-            &mut ops,
-            regular,
-            fallback_regular,
-            8.5,
-            margin,
-            y,
-            &format!(
+        let scene_meta_line = if scene_cuts.cut_count > 0 {
+            format!(
+                "{} {}  |  {} {}  |  avg {:.1}s/cut  |  est. ~{}s",
+                shot_indices.len(),
+                if shot_indices.len() == 1 {
+                    "shot"
+                } else {
+                    "shots"
+                },
+                scene_cuts.cut_count,
+                if scene_cuts.cut_count == 1 {
+                    "cut"
+                } else {
+                    "cuts"
+                },
+                scene_cuts.avg_cut_secs,
+                total_scene_s.round() as usize
+            )
+        } else {
+            format!(
                 "{} {}  |  est. ~{}s",
                 shot_indices.len(),
                 if shot_indices.len() == 1 {
@@ -3695,28 +4566,151 @@ fn build_directors_breakdown_pages(
                     "shots"
                 },
                 total_scene_s.round() as usize
-            ),
+            )
+        };
+        ops.push(Op::SetFillColor { col: muted.clone() });
+        draw_summary_text(
+            &mut ops,
+            regular,
+            fallback_regular,
+            8.5,
+            margin,
+            y,
+            &scene_meta_line,
         );
         y -= 4.5;
 
-        // Vector 2D Overhead Floor Plan
+        // Assign consistent 1-based camera/shot numbers across floor plan,
+        // Camera Key legend, and Shot Breakdown Cards.
+        let mut shot_numbers: HashMap<uuid::Uuid, usize> = HashMap::new();
+        for &idx in &shot_indices {
+            if let Some(shot) = p.shots.shots.get(idx) {
+                let next = shot_numbers.len() + 1;
+                shot_numbers.entry(shot.id).or_insert(next);
+            }
+        }
+        let mut plan_has_cameras = false;
+
+        // Vector 2D Overhead Floor Plan + crisp numbered Camera Key
         if let Some(pl) = plan {
-            let plan_h = 88.0_f32;
-            let plan_y = y - plan_h;
-            draw_floor_plan_vector(
-                &mut ops,
-                p,
-                pl,
-                margin,
-                plan_y,
-                content_w,
-                plan_h,
-                regular,
-                bold,
-                fallback_regular,
-                fallback_bold,
-            );
-            y = plan_y - 6.5;
+            for cam in &pl.cameras {
+                if p.shots.get(cam.shot_id).is_some() {
+                    let next = shot_numbers.len() + 1;
+                    shot_numbers.entry(cam.shot_id).or_insert(next);
+                }
+            }
+            let mut cam_legend: Vec<(usize, &scriptcraft_core::shots::Shot)> = pl
+                .cameras
+                .iter()
+                .filter_map(|c| {
+                    let shot = p.shots.get(c.shot_id)?;
+                    let num = shot_numbers.get(&c.shot_id).copied()?;
+                    Some((num, shot))
+                })
+                .collect();
+            cam_legend.sort_by_key(|(num, _)| *num);
+            cam_legend.dedup_by_key(|(num, _)| *num);
+            plan_has_cameras = !cam_legend.is_empty();
+
+            let (min_x, max_x, min_y, max_y) = floor_plan_world_bounds(pl);
+            let world_aspect = (max_x - min_x).max(3.2) / (max_y - min_y).max(2.6);
+
+            if plan_has_cameras && world_aspect <= 1.38 {
+                // Square/vertical room: generous 122.5 × 114 mm floor plan on
+                // the left + dedicated Camera Key panel on the right.
+                let legend_w = 56.0_f32;
+                let gap = 3.5_f32;
+                let plan_w = (content_w - legend_w - gap).max(90.0);
+                let plan_h = 114.0_f32;
+                let plan_y = y - plan_h;
+                draw_floor_plan_vector(
+                    &mut ops,
+                    p,
+                    pl,
+                    &shot_numbers,
+                    margin,
+                    plan_y,
+                    plan_w,
+                    plan_h,
+                    regular,
+                    bold,
+                    fallback_regular,
+                    fallback_bold,
+                );
+                draw_camera_legend_panel(
+                    &mut ops,
+                    &cam_legend,
+                    margin + plan_w + gap,
+                    plan_y,
+                    legend_w,
+                    plan_h,
+                    1,
+                    regular,
+                    bold,
+                    fallback_regular,
+                    fallback_bold,
+                );
+                y = plan_y - 6.5;
+            } else if plan_has_cameras {
+                // Wide room / street: full-width floor plan + compact 3-column
+                // Camera Key strip directly underneath.
+                let plan_h = 92.0_f32;
+                let plan_y = y - plan_h;
+                draw_floor_plan_vector(
+                    &mut ops,
+                    p,
+                    pl,
+                    &shot_numbers,
+                    margin,
+                    plan_y,
+                    content_w,
+                    plan_h,
+                    regular,
+                    bold,
+                    fallback_regular,
+                    fallback_bold,
+                );
+                let cols = if cam_legend.len() <= 2 {
+                    cam_legend.len().max(1)
+                } else {
+                    3
+                };
+                let rows = cam_legend.len().div_ceil(cols).max(1);
+                let legend_h = (9.5 + (rows as f32) * 8.2).min(46.0);
+                let legend_y = plan_y - 2.5 - legend_h;
+                draw_camera_legend_panel(
+                    &mut ops,
+                    &cam_legend,
+                    margin,
+                    legend_y,
+                    content_w,
+                    legend_h,
+                    cols,
+                    regular,
+                    bold,
+                    fallback_regular,
+                    fallback_bold,
+                );
+                y = legend_y - 6.0;
+            } else {
+                let plan_h = 96.0_f32;
+                let plan_y = y - plan_h;
+                draw_floor_plan_vector(
+                    &mut ops,
+                    p,
+                    pl,
+                    &shot_numbers,
+                    margin,
+                    plan_y,
+                    content_w,
+                    plan_h,
+                    regular,
+                    bold,
+                    fallback_regular,
+                    fallback_bold,
+                );
+                y = plan_y - 6.5;
+            }
         }
 
         // Shot Breakdown Cards (with optional embedded storyboard frame thumbnails)
@@ -3743,8 +4737,16 @@ fn build_directors_breakdown_pages(
             } else {
                 shot.lens.trim()
             };
+            let title_prefix = if plan_has_cameras {
+                shot_numbers
+                    .get(&shot.id)
+                    .map(|n| format!("#{n} "))
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            };
             let header_line = format!(
-                "{}   |   {}  ·  {}  ·  {}  ·  ~{}s",
+                "{title_prefix}{}   |   {}  ·  {}  ·  {}  ·  ~{}s",
                 shot.code.trim(),
                 shot.size.short(),
                 lens_str,

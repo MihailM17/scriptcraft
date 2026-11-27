@@ -1235,7 +1235,7 @@ impl ThemeGroup {
 
     pub fn label(self) -> &'static str {
         match self {
-            ThemeGroup::ScriptCraft => "ScriptCraft",
+            ThemeGroup::ScriptCraft => "Kino Scenarist",
             ThemeGroup::Omarchy => "Omarchy",
         }
     }
