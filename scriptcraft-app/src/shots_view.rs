@@ -250,6 +250,7 @@ pub fn show(
     revision_marks: &[Option<RevisionColor>],
     state: &mut ShotsUiState,
     bold_character_cues: bool,
+    auto_contd: bool,
     paper_mono: bool,
 ) -> ShotsAction {
     let mut action = ShotsAction::None;
@@ -770,6 +771,7 @@ pub fn show(
                     &block_notes,
                     state,
                     bold_character_cues,
+                    auto_contd,
                     paper_mono,
                 );
                 if center_action != ShotsAction::None {
@@ -816,6 +818,7 @@ pub fn show(
                     &block_notes,
                     state,
                     bold_character_cues,
+                    auto_contd,
                     paper_mono,
                 );
                 if center_action != ShotsAction::None {
@@ -1876,6 +1879,7 @@ fn show_center_pane(
     block_notes: &[Vec<(usize, usize, usize, usize)>],
     state: &mut ShotsUiState,
     bold_character_cues: bool,
+    auto_contd: bool,
     paper_mono: bool,
 ) -> ShotsAction {
     let mut action = ShotsAction::None;
@@ -2626,6 +2630,7 @@ fn show_center_pane(
                                 rail_area_w,
                                 state,
                                 bold_character_cues,
+                                auto_contd,
                                 paper_mono,
                             );
                             prev_block_end_shots = block_end_shots;
@@ -2786,6 +2791,7 @@ fn render_script_block_row(
     rail_area_w: f32,
     state: &mut ShotsUiState,
     bold_character_cues: bool,
+    auto_contd: bool,
     paper_mono: bool,
 ) -> Vec<usize> {
     let (indent_frac, right_frac, uppercase, bold, align_right, top_pad, bot_pad) = match block
@@ -2804,11 +2810,18 @@ fn render_script_block_row(
     };
 
     let char_len = block.text.chars().count();
-    let display_text = if uppercase {
+    let mut display_text = if uppercase {
         block.text.to_uppercase()
     } else {
         block.text.clone()
     };
+    if auto_contd
+        && block.element_type == ElementType::Character
+        && scriptcraft_core::editing::needs_same_speaker_contd(&project.blocks, bi)
+        && !scriptcraft_core::editing::has_contd(&block.text)
+    {
+        display_text = format!("{} (CONT'D)", display_text.trim_end());
+    }
     let display_text = if display_text.trim().is_empty() {
         " ".to_string()
     } else {

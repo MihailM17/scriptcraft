@@ -617,6 +617,7 @@ pub fn script_view(
                     revision,
                     paper_mono,
                     bold_character_cues: style.options.bold_character_cues,
+                    auto_contd: style.options.auto_contd,
                 };
                 paint_line(painter, prect, blocks, line, paint);
                 if line.role == LineRole::Body {
@@ -974,7 +975,7 @@ fn handle_events(
                         }
                     }
                 }
-                if let Some(mut action) = key_action(
+                if let Some(action) = key_action(
                     ed.blocks(),
                     doc,
                     ed.sel,
@@ -983,50 +984,6 @@ fn handle_events(
                     hidden_blocks,
                     omitted_headings,
                 ) {
-                    // Optional auto-(CONT'D): when finishing a Character cue
-                    // with Enter after an action interruption of the same
-                    // speaker in the same scene, append " (CONT'D)" atomically.
-                    if *key == egui::Key::Enter && ed.options.auto_contd {
-                        if let Some(EditCommand::SplitBlock {
-                            at,
-                            new_type: ElementType::Dialogue,
-                            ..
-                        }) = action.commands.last()
-                        {
-                            let at = *at;
-                            if let Some(b) = ed.blocks().get(at.bi) {
-                                let para_len = b
-                                    .text
-                                    .split('\n')
-                                    .nth(at.para)
-                                    .map(|s| s.chars().count())
-                                    .unwrap_or(0);
-                                if b.element_type == ElementType::Character
-                                    && at.ch >= para_len
-                                    && scriptcraft_core::editing::needs_same_speaker_contd(
-                                        ed.blocks(),
-                                        at.bi,
-                                    )
-                                    && !scriptcraft_core::editing::has_contd(&b.text)
-                                {
-                                    const SUFFIX: &str = " (CONT'D)";
-                                    let insert_idx = action.commands.len() - 1;
-                                    action.commands.insert(
-                                        insert_idx,
-                                        EditCommand::InsertText {
-                                            at,
-                                            text: SUFFIX.to_string(),
-                                        },
-                                    );
-                                    if let Some(EditCommand::SplitBlock { at: split_at, .. }) =
-                                        action.commands.last_mut()
-                                    {
-                                        split_at.ch += SUFFIX.chars().count();
-                                    }
-                                }
-                            }
-                        }
-                    }
                     let edited = !action.commands.is_empty();
                     ed.sel = action.selection;
                     ed.press(action.commands);
@@ -2625,6 +2582,7 @@ struct LinePaint {
     revision: Option<RevisionColor>,
     paper_mono: bool,
     bold_character_cues: bool,
+    auto_contd: bool,
 }
 
 /// Resolve the per-block char ranges affected by toggling an inline style for
@@ -2755,7 +2713,18 @@ fn paint_line(
         revision,
         paper_mono,
         bold_character_cues,
+        auto_contd,
     } = paint;
+    let show_auto_contd = auto_contd
+        && line.role == LineRole::Body
+        && line.span.is_some_and(|sp| {
+            blocks.get(sp.bi).is_some_and(|b| {
+                b.element_type == ElementType::Character
+                    && sp.end >= b.text.chars().count()
+                    && scriptcraft_core::editing::needs_same_speaker_contd(blocks, sp.bi)
+                    && !scriptcraft_core::editing::has_contd(&b.text)
+            })
+        });
     let c = kit();
     let color = line_color(line, blocks, &c, paper_mono);
     let auto_bold = bold_character_cues
@@ -2845,6 +2814,17 @@ fn paint_line(
                     );
                 }
             }
+            if show_auto_contd {
+                let family = if line_bold { bold_mono() } else { MONO };
+                let suffix = line_galley(
+                    painter,
+                    " (CONT'D)",
+                    egui::FontId::new(body, family),
+                    color,
+                    cell,
+                );
+                painter.galley(egui::pos2(base_x + total_w, y), suffix, color);
+            }
             return;
         }
     }
@@ -2856,7 +2836,14 @@ fn paint_line(
         MONO
     };
     let font = egui::FontId::new(body, family);
-    let galley = line_galley(painter, &line.text, font, color, cell);
+    let painted_text;
+    let display = if show_auto_contd {
+        painted_text = format!("{} (CONT'D)", line.text.trim_end());
+        painted_text.as_str()
+    } else {
+        line.text.as_str()
+    };
+    let galley = line_galley(painter, display, font, color, cell);
     let size = galley.size();
     let pos = match line.role {
         // Hanging scene number: right-aligned in the margin, centered on

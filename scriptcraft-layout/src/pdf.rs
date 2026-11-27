@@ -120,6 +120,7 @@ pub struct ExportOptions {
     pub scene_numbers: bool,
     pub speaking_parts_count: bool,
     pub bold_character_cues: bool,
+    pub auto_contd: bool,
     pub color_by_shots: bool,
     pub include_shot_legend: bool,
     pub revision_marks: bool,
@@ -136,6 +137,7 @@ impl Default for ExportOptions {
             scene_numbers: true,
             speaking_parts_count: false,
             bold_character_cues: false,
+            auto_contd: false,
             color_by_shots: false,
             include_shot_legend: false,
             revision_marks: false,
@@ -765,6 +767,10 @@ fn layout_pages_inner(
                 .get(chunk.bi)
                 .map(Vec::as_slice)
                 .unwrap_or(&[]);
+            let auto_contd_here = opts.auto_contd
+                && b.element_type == ElementType::Character
+                && scriptcraft_core::editing::needs_same_speaker_contd(&renum, chunk.bi)
+                && !scriptcraft_core::editing::has_contd(&b.text);
             if b.styles.is_empty() && block_char_spans.is_empty() && block_note_spans.is_empty() {
                 let mut text = b
                     .text
@@ -773,6 +779,9 @@ fn layout_pages_inner(
                     .take(chunk.end - chunk.start)
                     .collect::<Vec<_>>()
                     .join("\n");
+                if auto_contd_here {
+                    text = format!("{} (CONT'D)", text.trim_end());
+                }
                 if b.element_type == ElementType::Character && !counts.is_empty() {
                     if let Some(n) = counts.get(b.text.trim()) {
                         text = format!("{} ({n})", text.trim_end());
@@ -802,20 +811,22 @@ fn layout_pages_inner(
                     .enumerate()
                 {
                     let is_last_para = chunk.start + pi_rel + 1 == chunk.end;
-                    let owned;
-                    let slice = if is_last_para
+                    let mut owned = para_text.to_string();
+                    let mut modified = false;
+                    if is_last_para && auto_contd_here {
+                        owned = format!("{} (CONT'D)", owned.trim_end());
+                        modified = true;
+                    }
+                    if is_last_para
                         && b.element_type == ElementType::Character
                         && !counts.is_empty()
                     {
                         if let Some(n) = counts.get(b.text.trim()) {
-                            owned = format!("{} ({n})", para_text.trim_end());
-                            owned.as_str()
-                        } else {
-                            para_text
+                            owned = format!("{} ({n})", owned.trim_end());
+                            modified = true;
                         }
-                    } else {
-                        para_text
-                    };
+                    }
+                    let slice = if modified { owned.as_str() } else { para_text };
                     for wl in crate::wrap::wrap_paragraph(slice, col_chars) {
                         let runs = if b.styles.is_empty() {
                             Vec::new()
@@ -5583,5 +5594,50 @@ mod tests {
         assert_eq!(line.shot_highlights[0].0, 19);
         assert_eq!(line.shot_highlights[0].1, 39);
         assert_eq!(line.shot_tag.as_ref().map(|(t, _)| t.as_str()), Some("1A"));
+    }
+
+    #[test]
+    fn auto_contd_renders_continued_same_speaker_cues_only() {
+        let p = Project {
+            title: "AutoContd".into(),
+            blocks: vec![
+                ScriptBlock::new(ElementType::SceneHeading, "INT. ROOM - DAY".into()),
+                ScriptBlock::new(ElementType::Character, "IVAN".into()),
+                ScriptBlock::new(ElementType::Dialogue, "First line.".into()),
+                ScriptBlock::new(ElementType::Action, "He sets the cup down.".into()),
+                ScriptBlock::new(ElementType::Character, "IVAN".into()),
+                ScriptBlock::new(ElementType::Dialogue, "Second line.".into()),
+                ScriptBlock::new(ElementType::Action, "He looks away.".into()),
+                ScriptBlock::new(ElementType::Character, "IVAN (CONT'D)".into()),
+                ScriptBlock::new(ElementType::Dialogue, "Already tagged.".into()),
+                ScriptBlock::new(ElementType::Character, "ELENA".into()),
+                ScriptBlock::new(ElementType::Dialogue, "Another speaker.".into()),
+            ],
+            ..Default::default()
+        };
+
+        let mut opts = default_opts();
+        assert!(!opts.auto_contd, "off by default");
+        let off_pages = layout_pages(&p, &Default::default(), &opts);
+        let off_ivan_cues: Vec<&str> = off_pages[0]
+            .iter()
+            .filter(|l| l.text.starts_with("IVAN"))
+            .map(|l| l.text.as_str())
+            .collect();
+        assert_eq!(off_ivan_cues, vec!["IVAN", "IVAN", "IVAN (CONT'D)"]);
+
+        opts.auto_contd = true;
+        let on_pages = layout_pages(&p, &Default::default(), &opts);
+        let on_ivan_cues: Vec<&str> = on_pages[0]
+            .iter()
+            .filter(|l| l.text.starts_with("IVAN"))
+            .map(|l| l.text.as_str())
+            .collect();
+        assert_eq!(on_ivan_cues, vec!["IVAN", "IVAN (CONT'D)", "IVAN (CONT'D)"]);
+        let elena = on_pages[0]
+            .iter()
+            .find(|l| l.text.starts_with("ELENA"))
+            .expect("Elena cue");
+        assert_eq!(elena.text, "ELENA");
     }
 }

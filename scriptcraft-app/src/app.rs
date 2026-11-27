@@ -213,6 +213,10 @@ fn handle_windows_frameless_resize(ctx: &egui::Context) {
     let Some(pos) = hover else {
         return;
     };
+    // Never intercept clicks on the top-right Windows caption buttons.
+    if pos.y <= rect.top() + 38.0 && pos.x >= rect.right() - 130.0 {
+        return;
+    }
     let edge = 6.0_f32;
     let left = pos.x <= rect.left() + edge;
     let right = pos.x >= rect.right() - edge;
@@ -242,12 +246,22 @@ fn handle_windows_frameless_resize(ctx: &egui::Context) {
 /// clicked so the caller can route it through the unsaved-changes guard.
 fn draw_windows_caption_buttons(ui: &mut egui::Ui) -> bool {
     let c = kit();
-    let maximized = ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
+    let (maximized, fullscreen) = ui.ctx().input(|i| {
+        (
+            i.viewport().maximized.unwrap_or(false),
+            i.viewport().fullscreen.unwrap_or(false),
+        )
+    });
+    let restored_icon = maximized || fullscreen;
     let btn_size = egui::vec2(36.0, 26.0);
     let mut close_clicked = false;
 
     // 1. Close (far right, Windows red hover)
     let (close_rect, close_resp) = ui.allocate_exact_size(btn_size, egui::Sense::click());
+    let close_resp = close_resp
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .on_hover_text("Close");
+    close_resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Close"));
     let close_hot = close_resp.hovered();
     if close_hot {
         ui.painter()
@@ -274,18 +288,23 @@ fn draw_windows_caption_buttons(ui: &mut egui::Ui) -> bool {
         ],
         egui::Stroke::new(1.15_f32, close_fg),
     );
-    if close_resp.on_hover_text("Close").clicked() {
+    if close_resp.clicked() {
         close_clicked = true;
     }
 
     // 2. Maximize / Restore
+    let max_label = if restored_icon { "Restore" } else { "Maximize" };
     let (max_rect, max_resp) = ui.allocate_exact_size(btn_size, egui::Sense::click());
+    let max_resp = max_resp
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .on_hover_text(max_label);
+    max_resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, max_label));
     if max_resp.hovered() {
         ui.painter().rect_filled(max_rect, 4.0, c.button_hover);
     }
     let mc = max_rect.center();
     let stroke = egui::Stroke::new(1.1_f32, c.text);
-    if maximized {
+    if restored_icon {
         // Overlapping restore squares
         let front =
             egui::Rect::from_center_size(egui::pos2(mc.x - 1.0, mc.y + 1.0), egui::vec2(7.0, 7.0));
@@ -301,16 +320,22 @@ fn draw_windows_caption_buttons(ui: &mut egui::Ui) -> bool {
         ui.painter()
             .rect_stroke(sq, 0.5, stroke, egui::StrokeKind::Inside);
     }
-    if max_resp
-        .on_hover_text(if maximized { "Restore" } else { "Maximize" })
-        .clicked()
-    {
-        ui.ctx()
-            .send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
+    if max_resp.clicked() {
+        if fullscreen {
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+        } else {
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::Maximized(!maximized));
+        }
     }
 
     // 3. Minimize
     let (min_rect, min_resp) = ui.allocate_exact_size(btn_size, egui::Sense::click());
+    let min_resp = min_resp
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .on_hover_text("Minimize");
+    min_resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Minimize"));
     if min_resp.hovered() {
         ui.painter().rect_filled(min_rect, 4.0, c.button_hover);
     }
@@ -319,12 +344,31 @@ fn draw_windows_caption_buttons(ui: &mut egui::Ui) -> bool {
         [egui::pos2(nc.x - 4.5, nc.y), egui::pos2(nc.x + 4.5, nc.y)],
         stroke,
     );
-    if min_resp.on_hover_text("Minimize").clicked() {
+    if min_resp.clicked() {
         ui.ctx()
             .send_viewport_cmd(egui::ViewportCommand::Minimized(true));
     }
 
     close_clicked
+}
+
+/// Fill the remaining empty horizontal gap in the Windows custom toolbar with a
+/// non-overlapping drag / double-click-to-maximize strip so buttons always keep
+/// exclusive click hit-testing.
+fn draw_windows_drag_spacer(ui: &mut egui::Ui) {
+    let w = ui.available_width();
+    if w <= 4.0 {
+        return;
+    }
+    let (_, resp) = ui.allocate_exact_size(egui::vec2(w, 26.0), egui::Sense::click_and_drag());
+    if resp.drag_started() {
+        ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
+    }
+    if resp.double_clicked() {
+        let max = ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
+        ui.ctx()
+            .send_viewport_cmd(egui::ViewportCommand::Maximized(!max));
+    }
 }
 
 pub fn install_fonts(ctx: &egui::Context) {
@@ -1529,6 +1573,7 @@ impl ScriptCraftApp {
         self.settings = AppSettings::load();
         self.export_options.page_size = self.settings.page_size;
         self.export_options.bold_character_cues = self.settings.bold_character_cues;
+        self.export_options.auto_contd = self.settings.auto_contd;
         self.recent = load_recent();
         self.persist = true;
         self.recovery = Self::scan_recovery_files();
@@ -3753,6 +3798,7 @@ impl ScriptCraftApp {
         let Some(p) = &self.project else { return None };
         let mut opts = self.export_options.clone();
         opts.bold_character_cues = self.settings.bold_character_cues;
+        opts.auto_contd = self.settings.auto_contd;
         if self.revisions.is_empty() {
             opts.revision_marks = false;
             opts.revision_pages_only = false;
@@ -4296,32 +4342,6 @@ impl ScriptCraftApp {
         } else {
             "Added (CONT'D) to character cue.".to_string()
         };
-    }
-
-    /// Scan the script and add `(CONT'D)` to every character cue that continues
-    /// the previous speaker after action in the same scene (single undo step).
-    fn sync_contd_across_script(&mut self) {
-        let Some(p) = self.project.as_ref() else {
-            return;
-        };
-        let updates = scriptcraft_core::editing::sync_contd_edits(&p.blocks);
-        if updates.is_empty() {
-            self.status = "All continued speeches already have (CONT'D).".to_string();
-            return;
-        }
-        let count = updates.len();
-        let commands: Vec<edit::EditCommand> = updates
-            .into_iter()
-            .map(|(bi, text)| edit::EditCommand::SetText { bi, text })
-            .collect();
-        self.apply_editor2_output(crate::script_view::ScriptViewOutput {
-            commands,
-            ..Default::default()
-        });
-        self.status = format!(
-            "Added (CONT'D) to {count} character {}.",
-            if count == 1 { "cue" } else { "cues" }
-        );
     }
 
     /// Set the element type of every selected block (Format bar, toolbar
@@ -6119,10 +6139,11 @@ impl ScriptCraftApp {
         // frameless window): the single top toolbar doubles as window chrome
         // (drag to move, double-click to maximize; traffic lights on the left
         // on macOS, caption buttons on the right on Windows).
-        let custom =
-            self.custom_titlebar && !ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
-        let mac_custom = custom && cfg!(target_os = "macos");
-        let win_custom = custom && cfg!(target_os = "windows");
+        let mac_custom = self.custom_titlebar
+            && cfg!(target_os = "macos")
+            && !ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
+        let win_custom = self.custom_titlebar && cfg!(target_os = "windows");
+        let custom = mac_custom || win_custom;
         let mut win_close_clicked = false;
         egui::TopBottomPanel::top("toolbar")
             .frame(
@@ -6156,7 +6177,6 @@ impl ScriptCraftApp {
                             .send_viewport_cmd(egui::ViewportCommand::Maximized(!max));
                     }
                 }
-                let row_rect = ui.available_rect_before_wrap();
                 ui.horizontal(|ui| {
                     if mac_custom {
                         // Clear the native traffic lights (macOS owns them).
@@ -6405,6 +6425,9 @@ impl ScriptCraftApp {
                             }
                             self.zoom = z.clamp(0.25, 4.0);
                             ui.label(egui::RichText::new("Zoom").small().weak());
+                            if win_custom {
+                                draw_windows_drag_spacer(ui);
+                            }
                         });
                     } else {
                         // Calm contextual header for non-editing modules: keep chrome
@@ -6481,28 +6504,14 @@ impl ScriptCraftApp {
                                                 .color(kit().disabled_text),
                                         );
                                     }
+                                    if win_custom {
+                                        draw_windows_drag_spacer(ui);
+                                    }
                                 },
                             );
                         }
                     }
                 });
-                // On Windows frameless mode, dragging or double-clicking any
-                // empty background spot of the toolbar moves / maximizes the window.
-                if win_custom {
-                    let bg_resp = ui.interact(
-                        row_rect,
-                        ui.id().with("win_titlebar_drag"),
-                        egui::Sense::click_and_drag(),
-                    );
-                    if bg_resp.drag_started() {
-                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
-                    }
-                    if bg_resp.double_clicked() {
-                        let max = ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
-                        ui.ctx()
-                            .send_viewport_cmd(egui::ViewportCommand::Maximized(!max));
-                    }
-                }
             });
         if win_close_clicked {
             self.request_quit(ctx);
@@ -8425,81 +8434,6 @@ impl ScriptCraftApp {
                     }
                 }
                 ui.add_space(10.0);
-                let (rule0, _) = ui.allocate_exact_size(
-                    egui::vec2(ui.available_width(), 1.0),
-                    egui::Sense::hover(),
-                );
-                ui.painter().rect_filled(rule0, 0.0, kit().sep);
-                ui.add_space(10.0);
-                ui.horizontal(|ui| {
-                    ui.add_space(6.0);
-                    overline(ui, "Dialogue");
-                });
-                ui.add_space(6.0);
-                let contd_info = self.contd_target();
-                let contd_active = contd_info.is_some_and(|(_, has, _)| has);
-                let contd_suggested = contd_info.is_some_and(|(_, has, sug)| !has && sug);
-                let contd_label = if contd_suggested {
-                    "(CONT'D) *"
-                } else {
-                    "(CONT'D)"
-                };
-                let contd_tip = format!(
-                    "Toggle (CONT'D) on the active character cue ({})",
-                    shift_shortcut("C")
-                );
-                let mut toggle_contd_clicked = false;
-                ui.add_enabled_ui(contd_info.is_some(), |ui| {
-                    let btn = egui::Button::new(
-                        egui::RichText::new(contd_label).size(12.5).color(if contd_active {
-                            kit().accent_text
-                        } else {
-                            kit().text
-                        }),
-                    )
-                    .fill(if contd_active {
-                        kit().accent_soft
-                    } else {
-                        kit().button
-                    })
-                    .stroke(egui::Stroke::new(
-                        1.0_f32,
-                        if contd_active {
-                            kit().accent
-                        } else {
-                            kit().stroke
-                        },
-                    ))
-                    .corner_radius(egui::CornerRadius::same(5))
-                    .min_size(egui::vec2(ui.available_width(), 26.0));
-                    if ui.add(btn).on_hover_text(contd_tip).clicked() {
-                        toggle_contd_clicked = true;
-                    }
-                });
-                if toggle_contd_clicked {
-                    self.toggle_contd_on_selection();
-                }
-                ui.add_space(4.0);
-                let sync_btn = egui::Button::new(
-                    egui::RichText::new("Auto (CONT'D) All")
-                        .size(11.5)
-                        .color(kit().disabled_text),
-                )
-                .fill(kit().base)
-                .stroke(egui::Stroke::new(1.0_f32, kit().stroke))
-                .corner_radius(egui::CornerRadius::same(5))
-                .min_size(egui::vec2(ui.available_width(), 24.0));
-                if ui
-                    .add(sync_btn)
-                    .on_hover_text(
-                        "Add (CONT'D) to every same-speaker cue after action in this script (undoable)",
-                    )
-                    .clicked()
-                {
-                    self.sync_contd_across_script();
-                }
-
-                ui.add_space(10.0);
                 let (rule, _) = ui.allocate_exact_size(
                     egui::vec2(ui.available_width(), 1.0),
                     egui::Sense::hover(),
@@ -8616,6 +8550,7 @@ impl ScriptCraftApp {
         let mut opts = self.export_options.clone();
         opts.page_size = self.settings.page_size;
         opts.bold_character_cues = self.settings.bold_character_cues;
+        opts.auto_contd = self.settings.auto_contd;
         opts.color_by_shots = true;
         opts.include_shot_legend = true;
         if self.revisions.is_empty() {
@@ -8669,6 +8604,7 @@ impl ScriptCraftApp {
         let mut opts = self.export_options.clone();
         opts.page_size = self.settings.page_size;
         opts.bold_character_cues = self.settings.bold_character_cues;
+        opts.auto_contd = self.settings.auto_contd;
         opts.color_by_shots = true;
         opts.include_shot_legend = false;
         if self.revisions.is_empty() {
@@ -8815,6 +8751,7 @@ impl ScriptCraftApp {
         self.ensure_revision_marks();
         let labels = self.shots_scene_labels();
         let bold_cues = self.settings.bold_character_cues;
+        let auto_contd = self.settings.auto_contd;
         let paper_mono = self.settings.paper_mono;
         let action = {
             let Some(p) = self.project.as_mut() else {
@@ -8827,6 +8764,7 @@ impl ScriptCraftApp {
                 &self.revision_marks.colors,
                 &mut self.shots_ui,
                 bold_cues,
+                auto_contd,
                 paper_mono,
             )
         };
@@ -9650,6 +9588,7 @@ impl ScriptCraftApp {
             self.refresh_derived();
         }
         self.export_options.bold_character_cues = self.settings.bold_character_cues;
+        self.export_options.auto_contd = self.settings.auto_contd;
         if outcome.check_updates {
             self.update.start();
             ctx.request_repaint();
@@ -10056,4 +9995,125 @@ fn push_report_section(out: &mut String, title: &str, rows: &[RepRow]) {
         out.push_str("\r\n");
     }
     out.push_str("\r\n");
+}
+
+#[cfg(test)]
+mod windows_caption_tests {
+    use super::*;
+
+    fn draw_toolbar(ctx: &egui::Context) -> (bool, egui::Rect) {
+        let mut close_clicked = false;
+        let mut toolbar_rect = egui::Rect::NOTHING;
+        egui::TopBottomPanel::top("test_win_toolbar")
+            .frame(egui::Frame::new().inner_margin(egui::Margin {
+                left: 12,
+                right: 4,
+                top: 4,
+                bottom: 4,
+            }))
+            .show(ctx, |ui| {
+                let row = ui.horizontal(|ui| {
+                    let _ = ui.button("File");
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if draw_windows_caption_buttons(ui) {
+                            close_clicked = true;
+                        }
+                        draw_windows_drag_spacer(ui);
+                    });
+                });
+                toolbar_rect = row.response.rect;
+            });
+        (close_clicked, toolbar_rect)
+    }
+
+    fn click_at(ctx: &egui::Context, pos: egui::Pos2) -> (bool, Vec<egui::ViewportCommand>) {
+        let mut raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(800.0, 60.0),
+            )),
+            ..Default::default()
+        };
+        raw.events.push(egui::Event::PointerMoved(pos));
+        let _ = ctx.run(raw.clone(), |ctx| {
+            let _ = draw_toolbar(ctx);
+        });
+
+        raw.events.clear();
+        raw.events.push(egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        });
+        let _ = ctx.run(raw.clone(), |ctx| {
+            let _ = draw_toolbar(ctx);
+        });
+
+        raw.events.clear();
+        raw.events.push(egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        let mut close_clicked = false;
+        let out = ctx.run(raw, |ctx| {
+            close_clicked = draw_toolbar(ctx).0;
+        });
+        let cmds = out
+            .viewport_output
+            .get(&egui::ViewportId::ROOT)
+            .map(|v| v.commands.clone())
+            .unwrap_or_default();
+        (close_clicked, cmds)
+    }
+
+    #[test]
+    fn windows_caption_buttons_receive_clicks_without_drag_spacer_stealing_them() {
+        let ctx = egui::Context::default();
+        let mut toolbar_rect = egui::Rect::NOTHING;
+
+        // Prime layout to discover button coordinates.
+        let _ = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(800.0, 60.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                toolbar_rect = draw_toolbar(ctx).1;
+            },
+        );
+
+        let y = toolbar_rect.center().y;
+        // Buttons are right-to-left from x = 796 (36px wide, default 8px spacing):
+        // Close ~ [760..796], Maximize ~ [716..752], Minimize ~ [672..708].
+        let close_pos = egui::pos2(778.0, y);
+        let max_pos = egui::pos2(734.0, y);
+        let min_pos = egui::pos2(690.0, y);
+
+        let (close_clicked, _) = click_at(&ctx, close_pos);
+        assert!(close_clicked, "Close button must receive click");
+
+        let (close_on_max, max_cmds) = click_at(&ctx, max_pos);
+        assert!(!close_on_max);
+        assert!(
+            max_cmds
+                .iter()
+                .any(|c| matches!(c, egui::ViewportCommand::Maximized(true))),
+            "Maximize button must send ViewportCommand::Maximized(true), got {max_cmds:?}"
+        );
+
+        let (close_on_min, min_cmds) = click_at(&ctx, min_pos);
+        assert!(!close_on_min);
+        assert!(
+            min_cmds
+                .iter()
+                .any(|c| matches!(c, egui::ViewportCommand::Minimized(true))),
+            "Minimize button must send ViewportCommand::Minimized(true), got {min_cmds:?}"
+        );
+    }
 }

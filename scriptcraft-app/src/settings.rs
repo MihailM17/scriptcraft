@@ -105,6 +105,11 @@ const SETTINGS_INDEX: &[SettingEntry] = &[
     },
     SettingEntry {
         page: SettingsPage::Writing,
+        title: "Automatic (CONT'D) for continued dialogue",
+        keywords: "contd cont'd continued dialogue character cue speaker",
+    },
+    SettingEntry {
+        page: SettingsPage::Writing,
         title: "Number scenes in the list",
         keywords: "navigator scene list numbering",
     },
@@ -294,8 +299,8 @@ pub struct AppSettings {
     /// Automatically bold speaking character cues (`ElementType::Character`)
     /// without affecting character names mentioned in Action.
     pub bold_character_cues: bool,
-    /// Automatically append `(CONT'D)` on Enter when the same character speaks
-    /// again after an action line in the same scene.
+    /// Automatically display `(CONT'D)` when the same character speaks again
+    /// after an action line in the same scene (Editor, Shots view, and PDF).
     pub auto_contd: bool,
     pub capitalize_first_word: bool,
     pub correct_double_capitals: bool,
@@ -961,10 +966,10 @@ fn settings_writing(ui: &mut Ui, settings: &mut AppSettings) -> (bool, bool, boo
         changed |= ui
             .checkbox(
                 &mut settings.auto_contd,
-                "Auto-add (CONT'D) when same character speaks after action",
+                "Automatic (CONT'D) for continued dialogue",
             )
             .on_hover_text(
-                "Appends (CONT'D) when pressing Enter on a character cue that continues the previous speaker after action in the same scene.",
+                "Automatically shows (CONT'D) in the editor, Shots view, and PDF when the same character speaks again after action in the same scene.",
             )
             .changed();
     });
