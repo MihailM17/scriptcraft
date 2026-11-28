@@ -557,11 +557,24 @@ target: {}
     })
 }
 
+/// Prevent Windows from allocating and flashing a console window when this GUI
+/// app spawns console helpers (`curl`, `powershell`, `cmd`).
+#[cfg(windows)]
+pub(crate) fn hide_windows_console(cmd: &mut std::process::Command) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    cmd.creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(windows))]
+pub(crate) fn hide_windows_console(_cmd: &mut std::process::Command) {}
+
 fn curl(url: &str, output: Option<&Path>) -> Result<std::process::Output, String> {
     if !is_https(url) {
         return Err("refusing to download a non-https update".to_string());
     }
     let mut cmd = std::process::Command::new("curl");
+    hide_windows_console(&mut cmd);
     cmd.args([
         "--fail",
         "--silent",
@@ -613,6 +626,7 @@ fn launch_helper(staged: &Staged) -> Result<(), String> {
     #[cfg(windows)]
     let mut cmd = {
         let mut c = std::process::Command::new("powershell");
+        hide_windows_console(&mut c);
         c.args([
             "-NoProfile",
             "-ExecutionPolicy",
@@ -794,7 +808,9 @@ pub fn is_newer(latest: &str, current: &str) -> bool {
 /// The request, run on a worker thread. `Ok(UpToDate)` when this build is at
 /// least as new as the published one.
 fn fetch_latest() -> Result<Check, String> {
-    let output = std::process::Command::new("curl")
+    let mut cmd = std::process::Command::new("curl");
+    hide_windows_console(&mut cmd);
+    let output = cmd
         .args([
             "--silent",
             "--show-error",
@@ -842,9 +858,11 @@ pub fn open_release(url: &str) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     let child = std::process::Command::new("open").arg(url).spawn();
     #[cfg(target_os = "windows")]
-    let child = std::process::Command::new("cmd")
-        .args(["/C", "start", "", url])
-        .spawn();
+    let child = {
+        let mut cmd = std::process::Command::new("cmd");
+        hide_windows_console(&mut cmd);
+        cmd.args(["/C", "start", "", url]).spawn()
+    };
     #[cfg(all(unix, not(target_os = "macos")))]
     let child = std::process::Command::new("xdg-open").arg(url).spawn();
 

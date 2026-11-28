@@ -3993,9 +3993,13 @@ impl ScriptCraftApp {
                     #[cfg(target_os = "macos")]
                     let _ = std::process::Command::new("open").arg(&path).spawn();
                     #[cfg(target_os = "windows")]
-                    let _ = std::process::Command::new("cmd")
-                        .args(["/C", "start", "", &path.to_string_lossy().to_string()])
-                        .spawn();
+                    {
+                        let mut cmd = std::process::Command::new("cmd");
+                        crate::update::hide_windows_console(&mut cmd);
+                        let _ = cmd
+                            .args(["/C", "start", "", &path.to_string_lossy().to_string()])
+                            .spawn();
+                    }
                     #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
                     let _ = std::process::Command::new("xdg-open").arg(&path).spawn();
                 }
@@ -7473,9 +7477,13 @@ impl ScriptCraftApp {
                 #[cfg(target_os = "macos")]
                 let _ = std::process::Command::new("open").arg(&path).spawn();
                 #[cfg(target_os = "windows")]
-                let _ = std::process::Command::new("cmd")
-                    .args(["/C", "start", "", &path.to_string_lossy().to_string()])
-                    .spawn();
+                {
+                    let mut cmd = std::process::Command::new("cmd");
+                    crate::update::hide_windows_console(&mut cmd);
+                    let _ = cmd
+                        .args(["/C", "start", "", &path.to_string_lossy().to_string()])
+                        .spawn();
+                }
                 #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
                 let _ = std::process::Command::new("xdg-open").arg(&path).spawn();
             }
